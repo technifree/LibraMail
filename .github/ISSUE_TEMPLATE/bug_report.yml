@@ -1,0 +1,56 @@
+name: Bug report / Rapport de bug
+description: Report a reproducible LibraMail problem / Signaler un problème reproductible
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never attach `data/`, account files, messages or backups.
+        N'ajoutez jamais `data/`, des comptes, messages ou sauvegardes.
+  - type: input
+    id: version
+    attributes:
+      label: LibraMail version
+      placeholder: "0.2.18"
+    validations:
+      required: true
+  - type: dropdown
+    id: system
+    attributes:
+      label: Operating system / Système
+      options:
+        - Linux
+        - Windows
+        - macOS
+        - Other / Autre
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Problème
+      description: Describe the visible behaviour without personal mail content.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps / Étapes de reproduction
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result / Résultat attendu
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitised logs / Journaux anonymisés
+      description: Remove addresses, subjects, credentials, tokens and paths revealing personal information.

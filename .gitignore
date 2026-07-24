@@ -1,0 +1,60 @@
+# ---------------------------------------------------------------------------
+# LibraMail — fichiers à ne jamais publier
+# ---------------------------------------------------------------------------
+
+# Données personnelles et secrets
+/data/*
+!/data/.gitkeep
+/backups/
+/*.libramail-backup.zip
+*.eml
+*.mbox
+*.pst
+
+# Bases et journaux SQLite
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Secrets et certificats
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+*.p12
+*.crt
+*.cer
+
+# Dépendances et caches
+/node_modules/
+/engine/node_modules/
+/.cache/
+/.npm/
+/.yarn/
+/.pnpm-store/
+
+# Construction
+/build/
+/dist/
+/bin/
+/.build-linux-work/
+/.build-windows-work/
+*.zip
+*.tar.gz
+*.sha256
+
+# Journaux
+*.log
+engine.log
+
+# Éditeurs et systèmes
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*~

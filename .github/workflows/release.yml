@@ -1,0 +1,125 @@
+name: Publish release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Match tag and application version
+        shell: bash
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          FILE_VERSION="$(tr -d '\r\n' < VERSION)"
+          CONFIG_VERSION="$(python3 -c "import json; print(json.load(open('neutralino.config.json'))['version'])")"
+          test "$TAG_VERSION" = "$FILE_VERSION"
+          test "$TAG_VERSION" = "$CONFIG_VERSION"
+          chmod +x security_check.sh
+          ./security_check.sh
+          python3 tools/check_version.py
+
+  linux:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zip xz-utils
+
+      - name: Build portable Linux package
+        run: |
+          chmod +x build_linux.sh
+          ./build_linux.sh --fresh-npm
+
+      - name: Collect Linux files
+        run: |
+          mkdir -p release-linux
+          cp build/linux/*.zip release-linux/ 2>/dev/null || true
+          cp build/linux/*.tar.gz release-linux/ 2>/dev/null || true
+          cp build/linux/*.sha256 release-linux/ 2>/dev/null || true
+          test -n "$(find release-linux -maxdepth 1 -type f -print -quit)"
+
+      - name: Upload Linux package
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: release-linux/*
+          if-no-files-found: error
+
+  windows:
+    needs: verify
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build portable Windows package
+        shell: pwsh
+        run: |
+          Set-ExecutionPolicy -Scope Process Bypass
+          .\build_windows.ps1 --fresh-npm
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Collect Windows files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path release-windows -Force | Out-Null
+          Copy-Item build\windows\*.zip release-windows\ -ErrorAction SilentlyContinue
+          Copy-Item build\windows\*.sha256 release-windows\ -ErrorAction SilentlyContinue
+          if (-not (Get-ChildItem release-windows -File)) { throw "No Windows package generated." }
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: release-windows/*
+          if-no-files-found: error
+
+  publish:
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout release notes
+        uses: actions/checkout@v4
+
+      - name: Download all packages
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: List release assets
+        run: find release-assets -maxdepth 2 -type f -printf '%P\n' | sort
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            release-assets/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "LibraMail ${GITHUB_REF_NAME#v}" \
+            --notes-file .github/release-notes.md \
+            --verify-tag

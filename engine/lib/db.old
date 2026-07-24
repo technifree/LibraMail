@@ -1,0 +1,363 @@
+/**
+ * LibraMail — Index SQLite (better-sqlite3, WAL, FTS5)
+ * La liste et les statistiques travaillent uniquement sur l'index local.
+ */
+'use strict';
+const path = require('path');
+const fs = require('fs');
+const Database = require('better-sqlite3');
+
+let db;
+
+function normalizeSubject(subject) {
+  return String(subject || '(sans objet)')
+    .replace(/^\s*((re|fw|fwd|tr|aw|sv)\s*:\s*)+/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLocaleLowerCase('fr');
+}
+
+function fallbackThreadKey(subject, id = '', fromAddr = '', toAddr = '', accountId = '') {
+  const normalized = normalizeSubject(subject);
+  const participants = [fromAddr, ...String(toAddr || '').split(',')]
+    .map(value => String(value || '').trim().toLowerCase())
+    .filter(Boolean);
+  const participantKey = [...new Set(participants)].sort().join('|') || accountId;
+  return normalized ? `subject:${normalized}|${participantKey}` : `message:${id}`;
+}
+
+function ensureColumn(table, name, sqlType) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (!columns.some(col => col.name === name)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${sqlType}`);
+  }
+}
+
+function migrateConversationData() {
+  ensureColumn('messages', 'thread_key', "TEXT DEFAULT ''");
+  ensureColumn('messages', 'in_reply_to', 'TEXT');
+  ensureColumn('messages', 'references_json', "TEXT DEFAULT '[]'");
+  db.exec('CREATE INDEX IF NOT EXISTS idx_msg_thread ON messages(thread_key, date DESC)');
+
+  const missing = db.prepare(`
+    SELECT id, subject, from_addr, to_addr, account_id FROM messages
+    WHERE thread_key IS NULL OR thread_key = ''
+  `).all();
+  if (!missing.length) return;
+
+  const update = db.prepare('UPDATE messages SET thread_key=? WHERE id=?');
+  db.transaction(rows => {
+    for (const row of rows) update.run(fallbackThreadKey(row.subject, row.id, row.from_addr, row.to_addr, row.account_id), row.id);
+  })(missing);
+}
+
+function init(dataDir) {
+  fs.mkdirSync(dataDir, { recursive: true });
+  db = new Database(path.join(dataDir, 'index.db'));
+  db.pragma('journal_mode = WAL');
+  db.pragma('synchronous = NORMAL');
+  db.pragma('cache_size = -64000');
+  db.pragma('foreign_keys = ON');
+
+  db.exec(`
+  CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY,
+    account_id TEXT NOT NULL,
+    folder TEXT NOT NULL,
+    uid INTEGER NOT NULL,
+    message_id TEXT,
+    subject TEXT,
+    from_name TEXT, from_addr TEXT,
+    to_addr TEXT,
+    date INTEGER,
+    snippet TEXT,
+    seen INTEGER DEFAULT 0,
+    flagged INTEGER DEFAULT 0,
+    answered INTEGER DEFAULT 0,
+    has_attach INTEGER DEFAULT 0,
+    is_spam INTEGER DEFAULT 0,
+    size INTEGER DEFAULT 0,
+    eml_path TEXT,
+    thread_key TEXT DEFAULT '',
+    in_reply_to TEXT,
+    references_json TEXT DEFAULT '[]',
+    UNIQUE(account_id, folder, uid)
+  );
+  CREATE INDEX IF NOT EXISTS idx_msg_list ON messages(account_id, folder, date DESC);
+  CREATE INDEX IF NOT EXISTS idx_msg_unified ON messages(folder, is_spam, date DESC);
+  CREATE INDEX IF NOT EXISTS idx_msg_thread ON messages(thread_key, date DESC);
+
+  CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+    subject, from_addr, to_addr, body,
+    content=''
+  );
+
+  CREATE TABLE IF NOT EXISTS labels (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    color TEXT NOT NULL DEFAULT '#8b7dd8'
+  );
+  CREATE TABLE IF NOT EXISTS message_labels (
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    label_id INTEGER NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
+    PRIMARY KEY (message_id, label_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS spam_tokens (
+    token TEXT PRIMARY KEY,
+    ham INTEGER DEFAULT 0,
+    spam INTEGER DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS spam_stats (
+    k TEXT PRIMARY KEY, v INTEGER
+  );
+  INSERT OR IGNORE INTO spam_stats VALUES ('ham_msgs', 0), ('spam_msgs', 0);
+
+  CREATE TABLE IF NOT EXISTS sync_state (
+    account_id TEXT, folder TEXT,
+    uidvalidity INTEGER, last_uid INTEGER DEFAULT 0,
+    PRIMARY KEY (account_id, folder)
+  );
+  `);
+
+  migrateConversationData();
+  return db;
+}
+
+// ---------- Messages ----------
+const upsertMessage = (m) => db.prepare(`
+  INSERT INTO messages (account_id, folder, uid, message_id, subject, from_name,
+    from_addr, to_addr, date, snippet, seen, flagged, answered, has_attach, size,
+    eml_path, is_spam, thread_key, in_reply_to, references_json)
+  VALUES (@account_id,@folder,@uid,@message_id,@subject,@from_name,@from_addr,
+    @to_addr,@date,@snippet,@seen,@flagged,@answered,@has_attach,@size,@eml_path,
+    @is_spam,@thread_key,@in_reply_to,@references_json)
+  ON CONFLICT(account_id, folder, uid) DO UPDATE SET
+    seen=excluded.seen,
+    flagged=excluded.flagged,
+    answered=excluded.answered,
+    thread_key=CASE WHEN excluded.thread_key <> '' THEN excluded.thread_key ELSE messages.thread_key END,
+    in_reply_to=COALESCE(excluded.in_reply_to, messages.in_reply_to),
+    references_json=CASE WHEN excluded.references_json <> '[]' THEN excluded.references_json ELSE messages.references_json END
+  RETURNING id
+`).get(m);
+
+function deleteFtsRow(rowId) {
+  const exists = db.prepare('SELECT rowid FROM messages_fts WHERE rowid=?').get(rowId);
+  if (exists) {
+    db.prepare("INSERT INTO messages_fts(messages_fts, rowid) VALUES('delete', ?)").run(rowId);
+  }
+}
+
+function indexBody(rowId, m, body) {
+  deleteFtsRow(rowId);
+  db.prepare(`INSERT INTO messages_fts(rowid, subject, from_addr, to_addr, body)
+              VALUES (?,?,?,?,?)`)
+    .run(rowId, m.subject || '', m.from_addr || '', m.to_addr || '', (body || '').slice(0, 200000));
+}
+
+function buildFilter({ accountId = null, folder = 'INBOX', spam = 0, labelId = null }) {
+  const join = labelId
+    ? 'JOIN message_labels mlf ON mlf.message_id = m.id AND mlf.label_id = @labelId'
+    : '';
+  const where = ['m.folder = @folder', 'm.is_spam = @spam'];
+  const params = { folder, spam };
+  if (accountId) { where.push('m.account_id = @accountId'); params.accountId = accountId; }
+  if (labelId) params.labelId = labelId;
+  return { join, where: where.join(' AND '), params };
+}
+
+function listMessages({ accountId = null, folder = 'INBOX', limit = 200, offset = 0, spam = 0, labelId = null }) {
+  const filter = buildFilter({ accountId, folder, spam, labelId });
+  return db.prepare(`SELECT m.id, m.account_id, m.folder, m.uid, m.thread_key,
+      m.subject, m.from_name, m.from_addr, m.to_addr, m.date, m.snippet,
+      m.seen, m.flagged, m.answered, m.has_attach, m.is_spam,
+      (SELECT json_group_array(json_object('name', l.name, 'color', l.color))
+         FROM message_labels ml JOIN labels l ON l.id = ml.label_id
+        WHERE ml.message_id = m.id) AS labels
+    FROM messages m ${filter.join}
+    WHERE ${filter.where}
+    ORDER BY m.date DESC LIMIT @limit OFFSET @offset`)
+    .all({ ...filter.params, limit, offset });
+}
+
+function countMessages({ accountId = null, folder = 'INBOX', spam = 0, labelId = null }) {
+  const filter = buildFilter({ accountId, folder, spam, labelId });
+  return db.prepare(`SELECT COUNT(*) AS n,
+      COALESCE(SUM(CASE WHEN m.seen=0 THEN 1 ELSE 0 END), 0) AS unread
+    FROM messages m ${filter.join}
+    WHERE ${filter.where}`).get(filter.params);
+}
+
+function listConversations({ accountId = null, folder = 'INBOX', limit = 200, offset = 0, spam = 0, labelId = null }) {
+  const filter = buildFilter({ accountId, folder, spam, labelId });
+  return db.prepare(`
+    WITH filtered AS (
+      SELECT m.*,
+             COALESCE(NULLIF(m.thread_key, ''), 'message:' || m.id) AS conversation_key
+      FROM messages m ${filter.join}
+      WHERE ${filter.where}
+    ), ranked AS (
+      SELECT filtered.*,
+             COUNT(*) OVER (PARTITION BY conversation_key) AS thread_count,
+             SUM(CASE WHEN seen=0 THEN 1 ELSE 0 END)
+               OVER (PARTITION BY conversation_key) AS thread_unread,
+             MAX(flagged) OVER (PARTITION BY conversation_key) AS thread_flagged,
+             MAX(has_attach) OVER (PARTITION BY conversation_key) AS thread_has_attach,
+             ROW_NUMBER() OVER (PARTITION BY conversation_key ORDER BY date DESC, id DESC) AS rn
+      FROM filtered
+    )
+    SELECT r.id, r.account_id, r.folder, r.uid,
+           r.conversation_key AS thread_key,
+           r.subject, r.from_name, r.from_addr, r.to_addr, r.date, r.snippet,
+           CASE WHEN r.thread_unread > 0 THEN 0 ELSE 1 END AS seen,
+           r.thread_flagged AS flagged,
+           r.answered, r.thread_has_attach AS has_attach, r.is_spam,
+           r.thread_count, r.thread_unread, 1 AS is_thread,
+           (SELECT group_concat(DISTINCT COALESCE(NULLIF(m2.from_name, ''), m2.from_addr))
+              FROM messages m2
+             WHERE COALESCE(NULLIF(m2.thread_key, ''), 'message:' || m2.id) = r.conversation_key
+           ) AS participants,
+           (SELECT json_group_array(json_object('name', l.name, 'color', l.color))
+              FROM message_labels ml JOIN labels l ON l.id = ml.label_id
+             WHERE ml.message_id IN (
+               SELECT m3.id FROM messages m3
+                WHERE COALESCE(NULLIF(m3.thread_key, ''), 'message:' || m3.id) = r.conversation_key
+             )) AS labels
+    FROM ranked r
+    WHERE r.rn = 1
+    ORDER BY r.date DESC
+    LIMIT @limit OFFSET @offset
+  `).all({ ...filter.params, limit, offset });
+}
+
+function countConversations({ accountId = null, folder = 'INBOX', spam = 0, labelId = null }) {
+  const filter = buildFilter({ accountId, folder, spam, labelId });
+  return db.prepare(`
+    SELECT COUNT(DISTINCT COALESCE(NULLIF(m.thread_key, ''), 'message:' || m.id)) AS n,
+           COUNT(*) AS messages,
+           COALESCE(SUM(CASE WHEN m.seen=0 THEN 1 ELSE 0 END), 0) AS unread
+      FROM messages m ${filter.join}
+     WHERE ${filter.where}
+  `).get(filter.params);
+}
+
+function getConversation(threadKey) {
+  return db.prepare(`
+    SELECT m.id, m.account_id, m.folder, m.uid, m.thread_key, m.subject,
+           m.from_name, m.from_addr, m.to_addr, m.date, m.snippet, m.seen,
+           m.flagged, m.answered, m.has_attach, m.is_spam
+      FROM messages m
+     WHERE COALESCE(NULLIF(m.thread_key, ''), 'message:' || m.id) = ?
+     ORDER BY m.date ASC, m.id ASC
+  `).all(threadKey);
+}
+
+function findThreadKeyByMessageIds(messageIds) {
+  const ids = [...new Set((messageIds || []).map(value => String(value || '').trim().toLowerCase()).filter(Boolean))];
+  if (!ids.length) return null;
+  const placeholders = ids.map(() => '?').join(',');
+  const row = db.prepare(`
+    SELECT thread_key FROM messages
+     WHERE lower(message_id) IN (${placeholders})
+       AND thread_key IS NOT NULL AND thread_key <> ''
+     ORDER BY date ASC LIMIT 1
+  `).get(...ids);
+  return row?.thread_key || null;
+}
+
+function search(query, { limit = 200 } = {}) {
+  return db.prepare(`
+    SELECT m.id, m.account_id, m.folder, m.uid, m.thread_key, m.subject,
+           m.from_name, m.from_addr, m.to_addr, m.date, m.snippet, m.seen,
+           m.flagged, m.answered, m.has_attach, m.is_spam
+    FROM messages_fts f JOIN messages m ON m.id = f.rowid
+    WHERE messages_fts MATCH ? ORDER BY m.date DESC LIMIT ?
+  `).all(query, limit);
+}
+
+const getMessage = (id) => db.prepare('SELECT * FROM messages WHERE id=?').get(id);
+const setFlag = (id, col, val) => {
+  if (!['seen', 'flagged', 'answered'].includes(col)) throw new Error('Drapeau invalide');
+  return db.prepare(`UPDATE messages SET ${col}=? WHERE id=?`).run(val ? 1 : 0, id);
+};
+function deleteMessage(id) {
+  deleteFtsRow(id);
+  return db.prepare('DELETE FROM messages WHERE id=? RETURNING eml_path, account_id, folder, uid').get(id);
+}
+
+// ---------- Statistiques ----------
+function getStatistics() {
+  const summary = db.prepare(`
+    SELECT COUNT(*) AS total,
+           COALESCE(SUM(CASE WHEN seen=0 THEN 1 ELSE 0 END), 0) AS unread,
+           COALESCE(SUM(CASE WHEN flagged=1 THEN 1 ELSE 0 END), 0) AS flagged,
+           COALESCE(SUM(CASE WHEN is_spam=1 THEN 1 ELSE 0 END), 0) AS spam,
+           COALESCE(SUM(CASE WHEN has_attach=1 THEN 1 ELSE 0 END), 0) AS attachments,
+           COALESCE(SUM(size), 0) AS totalSize,
+           MIN(date) AS oldestDate,
+           MAX(date) AS newestDate
+      FROM messages
+  `).get();
+
+  const byAccount = db.prepare(`
+    SELECT account_id,
+           COUNT(*) AS total,
+           COALESCE(SUM(CASE WHEN seen=0 THEN 1 ELSE 0 END), 0) AS unread,
+           COALESCE(SUM(CASE WHEN is_spam=1 THEN 1 ELSE 0 END), 0) AS spam,
+           COALESCE(SUM(size), 0) AS totalSize
+      FROM messages
+     GROUP BY account_id
+     ORDER BY total DESC
+  `).all();
+
+  const daily = db.prepare(`
+    SELECT date(date / 1000, 'unixepoch', 'localtime') AS day, COUNT(*) AS total
+      FROM messages
+     WHERE date >= (strftime('%s','now','-29 days') * 1000)
+     GROUP BY day
+     ORDER BY day
+  `).all();
+
+  const topSenders = db.prepare(`
+    SELECT COALESCE(NULLIF(from_name, ''), from_addr, '(inconnu)') AS sender,
+           from_addr AS address,
+           COUNT(*) AS total
+      FROM messages
+     GROUP BY lower(COALESCE(from_addr, from_name, ''))
+     ORDER BY total DESC
+     LIMIT 10
+  `).all();
+
+  const conversations = db.prepare(`
+    SELECT COUNT(DISTINCT COALESCE(NULLIF(thread_key, ''), 'message:' || id)) AS total
+      FROM messages
+  `).get().total;
+
+  return { summary: { ...summary, conversations }, byAccount, daily, topSenders };
+}
+
+// ---------- Étiquettes ----------
+const listLabels = () => db.prepare('SELECT * FROM labels ORDER BY name').all();
+const addLabel = (name, color) => db.prepare('INSERT INTO labels(name,color) VALUES(?,?)').run(name, color);
+const updateLabel = (id, name, color) => db.prepare('UPDATE labels SET name=?, color=? WHERE id=?').run(name, color, id);
+const removeLabel = (id) => db.prepare('DELETE FROM labels WHERE id=?').run(id);
+const tagMessage = (msgId, labelId) => db.prepare('INSERT OR IGNORE INTO message_labels VALUES(?,?)').run(msgId, labelId);
+const untagMessage = (msgId, labelId) => db.prepare('DELETE FROM message_labels WHERE message_id=? AND label_id=?').run(msgId, labelId);
+
+// ---------- Synchro ----------
+const getSyncState = (a, f) => db.prepare('SELECT * FROM sync_state WHERE account_id=? AND folder=?').get(a, f);
+const setSyncState = (a, f, uv, lu) => db.prepare(`
+  INSERT INTO sync_state VALUES (?,?,?,?)
+  ON CONFLICT(account_id, folder) DO UPDATE SET uidvalidity=?, last_uid=?
+`).run(a, f, uv, lu, uv, lu);
+
+module.exports = {
+  init, get db() { return db; },
+  normalizeSubject, fallbackThreadKey,
+  upsertMessage, indexBody, listMessages, countMessages,
+  listConversations, countConversations, getConversation, findThreadKeyByMessageIds,
+  search, getMessage, setFlag, deleteMessage, getStatistics,
+  listLabels, addLabel, updateLabel, removeLabel, tagMessage, untagMessage,
+  getSyncState, setSyncState,
+};

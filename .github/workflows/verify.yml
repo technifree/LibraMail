@@ -1,0 +1,67 @@
+name: Verify sources
+
+on:
+  push:
+    branches: ["master", "main"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: engine/package-lock.json
+
+      - name: Check repository safety
+        run: |
+          chmod +x security_check.sh
+          ./security_check.sh
+
+      - name: Check application version
+        run: python3 tools/check_version.py
+
+      - name: Validate JSON
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          files = [Path("neutralino.config.json")]
+          files += sorted(Path("resources/locales").glob("*.json"))
+          for path in files:
+              json.loads(path.read_text(encoding="utf-8"))
+          print(f"Validated {len(files)} JSON files")
+          PY
+
+      - name: Validate JavaScript syntax
+        run: |
+          find engine resources/js -type f -name '*.js' -print0 |
+          while IFS= read -r -d '' file; do
+            node --check "$file"
+          done
+
+      - name: Install engine dependencies
+        working-directory: engine
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --omit=dev --no-audit --no-fund
+          else
+            npm install --omit=dev --no-audit --no-fund
+          fi
+
+      - name: Test embedded SQLite dependency
+        working-directory: engine
+        run: |
+          node -e "const Database=require('better-sqlite3'); const db=new Database(':memory:'); const r=db.prepare('SELECT 1 AS ok').get(); if(r.ok!==1) process.exit(1); db.close(); console.log('better-sqlite3: OK');"

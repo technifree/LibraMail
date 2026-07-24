@@ -1,0 +1,35 @@
+/* LibraMail — Thème clair */
+:root[data-theme="light"] {
+  --bg-app: #eef0f4;
+  --bg-panel: #f8f9fb;
+  --bg-panel-2: #ffffff;
+  --bg-hover: #e8ebf1;
+  --bg-active: #dde2ea;
+  --bg-input: #ffffff;
+
+  --fg: #33384a;
+  --fg-strong: #171b28;
+  --fg-muted: #6b7180;
+  --fg-faint: #9aa0ad;
+
+  --accent: #a8801f;
+  --accent-soft: rgba(168, 128, 31, .12);
+  --accent-fg: #ffffff;
+
+  --danger: #c8323c;
+  --danger-soft: rgba(200, 50, 60, .10);
+  --ok: #2c8a4e;
+  --warn: #a8741a;
+  --warn-soft: rgba(168, 116, 26, .12);
+
+  --border: #d7dbe3;
+  --border-soft: #e4e7ee;
+  --shadow: 0 8px 28px rgba(30, 35, 50, .14);
+  --radius: 8px;
+  --radius-lg: 12px;
+
+  --row-unread-fg: var(--fg-strong);
+  --row-height: 68px;
+
+  color-scheme: light;
+}

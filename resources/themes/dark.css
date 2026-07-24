@@ -1,0 +1,44 @@
+/* LibraMail — Thème sombre (défaut)
+ * Pour créer un thème personnalisé : copiez ce fichier dans themes/,
+ * renommez [data-theme="..."], ajustez les variables, déclarez-le
+ * dans Paramètres. Aucune autre modification nécessaire. */
+:root[data-theme="dark"] {
+  /* Fonds */
+  --bg-app: #14161c;
+  --bg-panel: #1a1d25;
+  --bg-panel-2: #1f232d;
+  --bg-hover: #262b37;
+  --bg-active: #2d3342;
+  --bg-input: #101218;
+
+  /* Texte */
+  --fg: #d9dce3;
+  --fg-strong: #f4f5f8;
+  --fg-muted: #8b91a0;
+  --fg-faint: #5c6270;
+
+  /* Accent — le liseré doré des projets Libra */
+  --accent: #d4a94f;
+  --accent-soft: rgba(212, 169, 79, .14);
+  --accent-fg: #1a1408;
+
+  /* Sémantique */
+  --danger: #e5636b;
+  --danger-soft: rgba(229, 99, 107, .12);
+  --ok: #5fb37a;
+  --warn: #d9a03f;
+  --warn-soft: rgba(217, 160, 63, .12);
+
+  /* Structure */
+  --border: #2a2f3b;
+  --border-soft: #232833;
+  --shadow: 0 8px 28px rgba(0, 0, 0, .45);
+  --radius: 8px;
+  --radius-lg: 12px;
+
+  /* Liste des messages */
+  --row-unread-fg: var(--fg-strong);
+  --row-height: 68px;
+
+  color-scheme: dark;
+}

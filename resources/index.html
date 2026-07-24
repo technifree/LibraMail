@@ -1,0 +1,798 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LibraMail 0.2.18</title>
+  <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
+  <link rel="stylesheet" href="themes/dark.css">
+  <link rel="stylesheet" href="themes/light.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div id="app" data-layout="vertical">
+
+  <div id="topbar">
+    <span id="brand" title="LibraMail 0.2.18">
+      <i class="fa-solid fa-envelope"></i>
+      <span class="brand-name">LibraMail</span>
+      <span class="version-badge" id="app-version">v0.2.18</span>
+    </span>
+    <button class="btn primary" id="btn-compose">
+      <i class="fa-solid fa-pen"></i><span data-i18n="compose"></span>
+    </button>
+    <button class="btn" id="btn-sync" data-i18n-title="sync">
+      <i class="fa-solid fa-rotate"></i><span data-i18n="sync"></span>
+    </button>
+    <div id="searchbox">
+      <i class="fa-solid fa-magnifying-glass"></i>
+      <input id="search-input" data-i18n-ph="search.placeholder" autocomplete="off">
+      <button class="search-clear hidden" id="btn-clear-search" type="button"
+              data-i18n-title="search.clear" aria-hidden="true">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+    <button class="iconbtn" id="btn-contacts" data-i18n-title="contacts.title">
+      <i class="fa-solid fa-address-book"></i>
+      <span class="topbar-count hidden" id="contacts-count">0</span>
+    </button>
+    <button class="iconbtn" id="btn-stats" data-i18n-title="stats.title">
+      <i class="fa-solid fa-chart-column"></i>
+    </button>
+    <button class="iconbtn" id="btn-theme" data-i18n-title="settings.theme">
+      <i class="fa-solid fa-circle-half-stroke"></i>
+    </button>
+    <button class="iconbtn" id="btn-settings" data-i18n-title="settings">
+      <i class="fa-solid fa-gear"></i>
+    </button>
+    <button class="iconbtn exit-btn" id="btn-exit" data-i18n-title="app.quit">
+      <i class="fa-solid fa-power-off"></i>
+    </button>
+  </div>
+
+  <nav id="sidebar">
+    <button class="side-item unified active" data-view="unified">
+      <i class="fa-solid fa-inbox"></i><span data-i18n="unified.inbox"></span>
+      <span class="count" id="count-unified"></span>
+    </button>
+    <button class="side-item" data-view="sent">
+      <i class="fa-solid fa-paper-plane"></i><span data-i18n="sent.folder"></span>
+      <span class="count" id="count-sent"></span>
+    </button>
+    <button class="side-item" data-view="spam">
+      <i class="fa-solid fa-ban"></i><span data-i18n="spam.folder"></span>
+      <span class="count" id="count-spam"></span>
+    </button>
+    <button class="side-item" data-view="trash">
+      <i class="fa-solid fa-trash-can"></i><span data-i18n="trash.folder"></span>
+      <span class="count" id="count-trash"></span>
+    </button>
+
+    <div class="side-section collapsible-side-section" id="accounts-section-header">
+      <button class="side-section-toggle" id="btn-toggle-accounts" type="button" aria-expanded="true">
+        <i class="fa-solid fa-chevron-down side-section-chevron"></i>
+        <span data-i18n="accounts"></span>
+      </button>
+      <button class="iconbtn" id="btn-add-account" data-i18n-title="account.add"><i class="fa-solid fa-plus"></i></button>
+    </div>
+    <div id="account-list" class="side-section-content"></div>
+
+    <div class="side-section collapsible-side-section" id="labels-section-header">
+      <button class="side-section-toggle" id="btn-toggle-labels" type="button" aria-expanded="true">
+        <i class="fa-solid fa-chevron-down side-section-chevron"></i>
+        <span data-i18n="labels"></span>
+      </button>
+      <button class="iconbtn" id="btn-add-label" data-i18n-title="label.manage"><i class="fa-solid fa-plus"></i></button>
+    </div>
+    <div id="label-list" class="side-section-content"></div>
+  </nav>
+
+  <div id="resize-sidebar" class="pane-resizer pane-resizer-sidebar" role="separator" tabindex="0"
+       aria-orientation="vertical" data-i18n-title="layout.resizeSidebar"></div>
+
+  <section id="list-pane">
+    <div id="list-header">
+      <div class="list-heading">
+        <span id="list-title" data-i18n="unified.inbox"></span>
+        <span class="sub" id="list-sub"></span>
+      </div>
+      <div class="list-controls">
+        <button class="iconbtn list-select-all" id="btn-select-all" type="button"
+                data-i18n-title="selection.selectAll" aria-pressed="false">
+          <i class="fa-regular fa-square"></i>
+        </button>
+        <button class="btn compact danger-soft hidden" id="btn-empty-folder" type="button">
+          <i class="fa-solid fa-broom"></i><span></span>
+        </button>
+        <select id="list-sort" data-i18n-title="sort.title">
+          <option value="date" data-i18n="sort.date"></option>
+          <option value="sender" data-i18n="sort.sender"></option>
+          <option value="subject" data-i18n="sort.subject"></option>
+          <option value="unread" data-i18n="sort.unread"></option>
+        </select>
+        <button class="iconbtn" id="list-sort-direction"><i class="fa-solid fa-arrow-down-wide-short"></i></button>
+        <button class="iconbtn" id="btn-date-groups"><i class="fa-solid fa-calendar-week"></i></button>
+      </div>
+    </div>
+    <div id="bulk-actions" class="bulk-actions hidden" role="toolbar" aria-label="Actions sur la sélection">
+      <span class="bulk-selection-count"><i class="fa-solid fa-square-check"></i><span id="bulk-count">0</span></span>
+      <span class="bulk-separator"></span>
+      <button class="iconbtn" id="btn-bulk-read" type="button" data-i18n-title="action.markRead">
+        <i class="fa-regular fa-envelope-open"></i>
+      </button>
+      <button class="iconbtn" id="btn-bulk-unread" type="button" data-i18n-title="action.markUnread">
+        <i class="fa-solid fa-envelope"></i>
+      </button>
+      <button class="iconbtn" id="btn-bulk-flag" type="button" data-i18n-title="action.flag">
+        <i class="fa-regular fa-star"></i>
+      </button>
+      <div class="bulk-label-anchor">
+        <button class="iconbtn" id="btn-bulk-label" type="button" data-i18n-title="selection.label">
+          <i class="fa-solid fa-tag"></i>
+        </button>
+        <div id="bulk-label-menu" class="popover bulk-label-menu hidden"></div>
+      </div>
+      <button class="iconbtn" id="btn-bulk-spam" type="button" data-i18n-title="action.spam">
+        <i class="fa-solid fa-ban"></i>
+      </button>
+      <button class="iconbtn danger-hover" id="btn-bulk-delete" type="button" data-i18n-title="action.delete">
+        <i class="fa-solid fa-trash"></i>
+      </button>
+      <span class="bulk-spacer"></span>
+      <button class="iconbtn" id="btn-clear-selection" type="button" data-i18n-title="selection.clear">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+    <div id="mail-list"></div>
+    <div id="quick-label-menu" class="popover quick-label-menu hidden" role="menu"></div>
+  </section>
+
+  <div id="resize-list" class="pane-resizer pane-resizer-list" role="separator" tabindex="0"
+       aria-orientation="vertical" data-i18n-title="layout.resizeList"></div>
+
+  <section id="reader">
+    <div id="reader-tabs" class="reader-tabs" role="tablist" aria-label="Onglets de lecture">
+      <button class="reader-tab reader-tab-preview active" id="reader-tab-preview" type="button" role="tab" aria-selected="true">
+        <i class="fa-regular fa-envelope-open"></i>
+        <span data-i18n="tabs.preview"></span>
+      </button>
+      <div id="reader-tab-list" class="reader-tab-list"></div>
+      <span class="reader-tabs-spacer"></span>
+      <button class="iconbtn reader-tabs-close-all hidden" id="btn-close-reader-tabs" type="button" data-i18n-title="tabs.closeAll">
+        <i class="fa-solid fa-window-restore"></i>
+      </button>
+    </div>
+    <div class="empty" id="reader-empty">
+      <i class="fa-regular fa-envelope-open"></i>
+      <span data-i18n="reader.empty"></span>
+    </div>
+    <div id="reader-content" class="hidden" style="display:flex;flex-direction:column;flex:1;min-height:0">
+      <div id="reader-head">
+        <h2 id="r-subject"></h2>
+        <div class="line reader-correspondent-line"><span id="r-contact-avatar" class="reader-contact-avatar hidden"></span><b id="r-from"></b> <span id="r-contact-badge" class="contact-badge hidden"></span> <span id="r-date"></span></div>
+        <div class="line" id="r-to"></div>
+        <div id="reader-toolbar">
+          <button class="btn" id="btn-reply"><i class="fa-solid fa-reply"></i><span data-i18n="action.reply"></span></button>
+          <button class="btn" id="btn-reply-all" data-i18n-title="action.replyAll"><i class="fa-solid fa-reply-all"></i><span data-i18n="action.replyAll"></span></button>
+          <button class="btn" id="btn-forward"><i class="fa-solid fa-share"></i><span data-i18n="action.forward"></span></button>
+          <button class="btn" id="btn-mode"><i class="fa-solid fa-code"></i><span data-i18n="action.viewtext"></span></button>
+          <span class="sep"></span>
+          <button class="iconbtn" id="btn-r-contact" data-i18n-title="contacts.addSender"><i class="fa-solid fa-user-plus"></i></button>
+          <button class="iconbtn" id="btn-r-seen" data-i18n-title="action.markUnread"><i class="fa-solid fa-envelope"></i></button>
+          <button class="iconbtn" id="btn-r-flag" data-i18n-title="action.flag"><i class="fa-regular fa-star"></i></button>
+          <div style="position:relative">
+            <button class="iconbtn" id="btn-r-label" data-i18n-title="labels"><i class="fa-solid fa-tag"></i></button>
+            <div id="label-menu" class="popover hidden"></div>
+          </div>
+          <button class="iconbtn" id="btn-r-spam" data-i18n-title="action.spam"><i class="fa-solid fa-ban"></i></button>
+          <button class="iconbtn" id="btn-r-delete" data-i18n-title="action.delete"><i class="fa-solid fa-trash"></i></button>
+        </div>
+      </div>
+
+      <div id="conversation-panel" class="hidden"></div>
+
+      <div id="remote-banner">
+        <i class="fa-solid fa-shield-halved"></i>
+        <span><span data-i18n="remote.blocked"></span> (<span id="remote-count">0</span>)</span>
+        <button id="btn-allow-remote" data-i18n="remote.inspect"></button>
+      </div>
+      <div id="reader-body"><iframe id="mail-frame" sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe></div>
+      <div id="attachments"></div>
+    </div>
+  </section>
+
+  <div id="statusbar">
+    <span class="dot" id="engine-dot"></span>
+    <span class="status-message" id="status-message">
+      <i id="status-icon" class="fa-solid fa-circle-info"></i>
+      <span id="status-text" data-i18n="status.disconnected"></span>
+    </span>
+    <span id="link-target-status" class="link-target-status hidden" aria-live="polite">
+      <i class="fa-solid fa-link"></i>
+      <span id="link-target-text"></span>
+    </span>
+    <button id="btn-activity" class="status-activity-button" type="button"
+            data-i18n-title="activity.open">
+      <i class="fa-solid fa-list-check"></i>
+      <span data-i18n="activity.title"></span>
+      <span id="activity-count" class="activity-count hidden">0</span>
+      <i class="fa-solid fa-chevron-up activity-chevron"></i>
+    </button>
+    <span id="spam-stats"></span>
+
+    <section id="activity-panel" class="activity-panel hidden" aria-live="polite">
+      <header>
+        <div>
+          <strong data-i18n="activity.title"></strong>
+          <small data-i18n="activity.subtitle"></small>
+        </div>
+        <div class="activity-header-actions">
+          <button id="btn-stop-sync" class="btn compact danger hidden" type="button"
+                  data-i18n-title="activity.stopAll">
+            <i class="fa-solid fa-stop"></i>
+            <span data-i18n="activity.stop"></span>
+          </button>
+          <button id="btn-clear-activity" class="iconbtn" type="button" data-i18n-title="activity.clear">
+            <i class="fa-solid fa-eraser"></i>
+          </button>
+        </div>
+      </header>
+      <div id="activity-list" class="activity-list"></div>
+      <div id="activity-empty" class="activity-empty">
+        <i class="fa-regular fa-clock"></i>
+        <span data-i18n="activity.empty"></span>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div class="modal-veil" id="compose-modal">
+  <div class="modal compose-modal-box">
+    <header><span id="compose-modal-title" data-i18n="compose.title"></span>
+      <button class="iconbtn" data-close><i class="fa-solid fa-xmark"></i></button></header>
+    <div class="body compose-modal-body">
+      <div class="field"><label data-i18n="compose.from"></label><select id="compose-from"></select></div>
+      <div class="field compose-address-field"><label data-i18n="compose.to"></label>
+        <div class="compose-address-wrap">
+          <input id="compose-to" type="text" autocomplete="off">
+          <div id="compose-to-suggestions" class="contact-suggestions hidden"></div>
+        </div>
+      </div>
+      <div class="field compose-address-field"><label data-i18n="compose.cc"></label>
+        <div class="compose-address-wrap">
+          <input id="compose-cc" type="text" autocomplete="off">
+          <div id="compose-cc-suggestions" class="contact-suggestions hidden"></div>
+        </div>
+      </div>
+      <div class="field compose-address-field"><label data-i18n="compose.bcc"></label>
+        <div class="compose-address-wrap">
+          <input id="compose-bcc" type="text" autocomplete="off">
+          <div id="compose-bcc-suggestions" class="contact-suggestions hidden"></div>
+        </div>
+      </div>
+      <div class="field"><label data-i18n="compose.subject"></label><input id="compose-subject" type="text"></div>
+      <div class="compose-options-row">
+        <div class="compose-option-switches">
+          <label class="compose-signature-switch">
+            <input id="compose-use-signature" type="checkbox">
+            <span data-i18n="compose.includeSignature"></span>
+          </label>
+          <label class="compose-signature-switch" data-i18n-title="compose.readReceiptHint">
+            <input id="compose-read-receipt" type="checkbox">
+            <span data-i18n="compose.readReceipt"></span>
+          </label>
+          <label class="compose-signature-switch" data-i18n-title="compose.deliveryReceiptHint">
+            <input id="compose-delivery-receipt" type="checkbox">
+            <span data-i18n="compose.deliveryReceipt"></span>
+          </label>
+        </div>
+        <span id="compose-signature-account-hint" class="compose-signature-account-hint"></span>
+      </div>
+      <div class="field compose-editor-field"><textarea id="compose-body" data-i18n-ph="compose.bodyPlaceholder"></textarea></div>
+      <div id="compose-render-stack" class="compose-render-stack">
+        <section id="compose-signature-block" class="compose-preview-block signature hidden">
+          <header><i class="fa-solid fa-signature"></i><span data-i18n="signature.previewInMessage"></span></header>
+          <div id="compose-signature-preview" class="compose-signature-preview"></div>
+        </section>
+        <section id="compose-quote-block" class="compose-preview-block quote hidden">
+          <header><i class="fa-solid fa-quote-left"></i><span id="compose-quote-title" data-i18n="compose.quotedMessage"></span></header>
+          <pre id="compose-quote-content"></pre>
+        </section>
+      </div>
+      <div class="field">
+        <button class="btn" id="btn-attach" style="align-self:flex-start">
+          <i class="fa-solid fa-paperclip"></i><span data-i18n="compose.attach"></span></button>
+        <div id="compose-attachments" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+      </div>
+    </div>
+    <footer>
+      <button class="btn" data-close data-i18n="cancel"></button>
+      <button class="btn primary" id="btn-send"><i class="fa-solid fa-paper-plane"></i> <span data-i18n="compose.send"></span></button>
+    </footer>
+  </div>
+</div>
+
+<div class="modal-veil" id="account-modal">
+  <div class="modal account-modal-box">
+    <header><span id="account-modal-title" data-i18n="account.add"></span>
+      <button class="iconbtn" data-close><i class="fa-solid fa-xmark"></i></button></header>
+    <div class="body">
+      <input id="acc-id" type="hidden">
+      <div class="grid2">
+        <div class="field"><label data-i18n="account.name"></label><input id="acc-name" autocomplete="name"></div>
+        <div class="field"><label data-i18n="account.email"></label><input id="acc-email" type="email" autocomplete="email"></div>
+      </div>
+      <div class="side-section account-server-title" data-i18n="account.imap"></div>
+      <div class="grid2 account-server-grid">
+        <div class="field"><label data-i18n="account.host"></label><input id="acc-imap-host" placeholder="imap.exemple.fr"></div>
+        <div class="field"><label data-i18n="account.port"></label><input id="acc-imap-port" type="number" min="1" max="65535" value="993"></div>
+        <div class="field"><label data-i18n="account.security"></label>
+          <select id="acc-imap-secure"><option value="1" data-i18n="account.security.ssl"></option><option value="0" data-i18n="account.security.starttls"></option></select></div>
+        <div class="field"><label data-i18n="account.user"></label><input id="acc-imap-user" autocomplete="username"></div>
+        <div class="field field-span-2"><label data-i18n="account.pass"></label><input id="acc-imap-pass" type="password" autocomplete="new-password" data-i18n-ph="account.passwordKeep"></div>
+      </div>
+      <div class="side-section account-server-title" data-i18n="account.smtp"></div>
+      <div class="grid2 account-server-grid">
+        <div class="field"><label data-i18n="account.host"></label><input id="acc-smtp-host" placeholder="smtp.exemple.fr"></div>
+        <div class="field"><label data-i18n="account.port"></label><input id="acc-smtp-port" type="number" min="1" max="65535" value="465"></div>
+        <div class="field"><label data-i18n="account.security"></label>
+          <select id="acc-smtp-secure"><option value="1" data-i18n="account.security.ssl"></option><option value="0" data-i18n="account.security.starttls"></option></select></div>
+        <div class="field"><label data-i18n="account.user"></label><input id="acc-smtp-user" autocomplete="username"></div>
+        <div class="field field-span-2"><label data-i18n="account.pass"></label><input id="acc-smtp-pass" type="password" autocomplete="new-password" data-i18n-ph="account.passwordKeep"></div>
+      </div>
+      <div class="grid2 account-options-grid">
+        <div class="field"><label data-i18n="account.color"></label><input id="acc-color" type="color" value="#8b7dd8"></div>
+        <div class="field"><label data-i18n="settings.syncInterval"></label>
+          <div class="input-suffix"><input id="acc-sync-interval" type="number" min="0" max="1440" value="5"><span data-i18n="settings.minutes"></span></div>
+        </div>
+        <div class="field"><label data-i18n="settings.spamRetention"></label>
+          <div class="input-suffix"><input id="acc-spam-retention" type="number" min="0" max="3650" value="30"><span data-i18n="settings.days"></span></div>
+        </div>
+      </div>
+      <div class="field-hint" id="account-password-hint" data-i18n="account.passwordHint"></div>
+      <div class="field-hint" data-i18n="settings.syncDisabledHint"></div>
+      <div class="field-hint" data-i18n="settings.retentionDisabledHint"></div>
+      <div id="acc-status" class="account-status"></div>
+    </div>
+    <footer class="account-modal-footer">
+      <button class="btn danger hidden" id="btn-delete-account"><i class="fa-solid fa-trash"></i><span data-i18n="account.remove"></span></button>
+      <span class="footer-spacer"></span>
+      <button class="btn" data-close data-i18n="cancel"></button>
+      <button class="btn primary" id="btn-save-account"><i class="fa-solid fa-floppy-disk"></i><span data-i18n="save"></span></button>
+    </footer>
+  </div>
+</div>
+
+<div class="modal-veil" id="settings-modal">
+  <div class="modal settings-modal-box">
+    <header><span data-i18n="settings"></span>
+      <button class="iconbtn" data-close><i class="fa-solid fa-xmark"></i></button></header>
+    <div class="body">
+      <div class="grid2">
+        <div class="field"><label data-i18n="settings.theme"></label>
+          <select id="set-theme">
+            <option value="dark" data-i18n="settings.theme.dark"></option>
+            <option value="light" data-i18n="settings.theme.light"></option>
+          </select></div>
+        <div class="field"><label data-i18n="settings.language"></label>
+          <select id="set-locale">
+            <option value="fr">Français</option>
+            <option value="en">English</option>
+          </select></div>
+        <div class="field field-span-2"><label data-i18n="settings.accent"></label>
+          <div class="accent-settings-card">
+            <div class="accent-settings-row">
+              <select id="set-accent-preset">
+                <option value="libra" data-i18n="settings.accent.libra"></option>
+                <option value="blue" data-i18n="settings.accent.blue"></option>
+                <option value="green" data-i18n="settings.accent.green"></option>
+                <option value="purple" data-i18n="settings.accent.purple"></option>
+                <option value="rose" data-i18n="settings.accent.rose"></option>
+                <option value="red" data-i18n="settings.accent.red"></option>
+                <option value="custom" data-i18n="settings.accent.custom"></option>
+              </select>
+              <div class="accent-color-fields">
+                <input id="set-accent-color" type="color" value="#D4A94F" aria-label="Couleur dominante">
+                <input id="set-accent-hex" type="text" value="#D4A94F" maxlength="7" spellcheck="false" data-i18n-title="settings.accentHex">
+                <span class="accent-preview-chip" id="accent-preview-chip" data-i18n="settings.preview"></span>
+              </div>
+            </div>
+            <div class="accent-swatches" id="accent-swatches">
+              <button type="button" class="accent-swatch" data-color="#D4A94F" data-preset="libra" data-i18n-title="settings.accent.libra"><span style="background:#D4A94F"></span></button>
+              <button type="button" class="accent-swatch" data-color="#4F8BD6" data-preset="blue" data-i18n-title="settings.accent.blue"><span style="background:#4F8BD6"></span></button>
+              <button type="button" class="accent-swatch" data-color="#49A86B" data-preset="green" data-i18n-title="settings.accent.green"><span style="background:#49A86B"></span></button>
+              <button type="button" class="accent-swatch" data-color="#8B7DD8" data-preset="purple" data-i18n-title="settings.accent.purple"><span style="background:#8B7DD8"></span></button>
+              <button type="button" class="accent-swatch" data-color="#CF5B78" data-preset="rose" data-i18n-title="settings.accent.rose"><span style="background:#CF5B78"></span></button>
+              <button type="button" class="accent-swatch" data-color="#D66F4F" data-preset="red" data-i18n-title="settings.accent.red"><span style="background:#D66F4F"></span></button>
+            </div>
+            <div class="field-hint" data-i18n="settings.accentHint"></div>
+          </div></div>
+        <div class="field"><label data-i18n="settings.layout"></label>
+          <select id="set-layout">
+            <option value="vertical" data-i18n="settings.layout.vertical"></option>
+            <option value="horizontal" data-i18n="settings.layout.horizontal"></option>
+          </select></div>
+        <div class="field"><label data-i18n="settings.blockremote"></label>
+          <select id="set-blockremote"><option value="1">✓</option><option value="0">✗</option></select></div>
+        <div class="field"><label data-i18n="settings.conversations"></label>
+          <select id="set-conversations">
+            <option value="1" data-i18n="settings.conversations.on"></option>
+            <option value="0" data-i18n="settings.conversations.off"></option>
+          </select></div>
+        <div class="field"><label data-i18n="settings.groupByDate"></label>
+          <select id="set-group-date">
+            <option value="1" data-i18n="settings.enabled"></option>
+            <option value="0" data-i18n="settings.disabled"></option>
+          </select></div>
+        <div class="field"><label data-i18n="account.default"></label><select id="set-default-account"></select></div>
+      </div>
+
+
+      <div class="settings-section-title">
+        <i class="fa-regular fa-envelope-open"></i>
+        <span data-i18n="settings.reading"></span>
+      </div>
+      <div class="grid2">
+        <div class="field"><label data-i18n="settings.autoMarkRead"></label>
+          <select id="set-auto-read">
+            <option value="1" data-i18n="settings.enabled"></option>
+            <option value="0" data-i18n="settings.disabled"></option>
+          </select></div>
+        <div class="field"><label data-i18n="settings.readDelay"></label>
+          <div class="input-suffix"><input id="set-read-delay" type="number" min="0" max="3600" step="1" value="2"><span data-i18n="settings.seconds"></span></div>
+        </div>
+      </div>
+      <div class="field-hint" data-i18n="settings.readDelayHint"></div>
+
+      <div class="settings-section-title">
+        <i class="fa-solid fa-signature"></i>
+        <span data-i18n="signature.sectionTitle"></span>
+      </div>
+      <div class="signature-settings-card">
+        <div class="field">
+          <label for="set-signature-account" data-i18n="signature.account"></label>
+          <select id="set-signature-account"></select>
+        </div>
+        <div id="signature-editor" class="signature-editor">
+          <div class="grid2">
+            <div class="field"><label data-i18n="signature.enabled"></label>
+              <select id="set-signature-enabled">
+                <option value="1" data-i18n="settings.enabled"></option>
+                <option value="0" data-i18n="settings.disabled"></option>
+              </select></div>
+            <div class="field"><label data-i18n="signature.format"></label>
+              <select id="set-signature-format">
+                <option value="text" data-i18n="signature.formatText"></option>
+                <option value="html" data-i18n="signature.formatHtml"></option>
+              </select></div>
+            <div class="field"><label data-i18n="signature.newMessages"></label>
+              <select id="set-signature-new">
+                <option value="1" data-i18n="settings.enabled"></option>
+                <option value="0" data-i18n="settings.disabled"></option>
+              </select></div>
+            <div class="field"><label data-i18n="signature.replies"></label>
+              <select id="set-signature-replies">
+                <option value="1" data-i18n="settings.enabled"></option>
+                <option value="0" data-i18n="settings.disabled"></option>
+              </select></div>
+            <div class="field"><label data-i18n="signature.forwards"></label>
+              <select id="set-signature-forwards">
+                <option value="1" data-i18n="settings.enabled"></option>
+                <option value="0" data-i18n="settings.disabled"></option>
+              </select></div>
+            <div class="field"><label data-i18n="signature.separator"></label>
+              <select id="set-signature-separator">
+                <option value="1" data-i18n="settings.enabled"></option>
+                <option value="0" data-i18n="settings.disabled"></option>
+              </select></div>
+            <div class="field"><label data-i18n="signature.replyPosition"></label>
+              <select id="set-signature-reply-position">
+                <option value="above" data-i18n="signature.aboveQuote"></option>
+                <option value="below" data-i18n="signature.belowQuote"></option>
+              </select></div>
+            <div class="field"><label data-i18n="signature.forwardPosition"></label>
+              <select id="set-signature-forward-position">
+                <option value="above" data-i18n="signature.aboveQuote"></option>
+                <option value="below" data-i18n="signature.belowQuote"></option>
+              </select></div>
+          </div>
+          <div class="field signature-content-field">
+            <label for="set-signature-content" data-i18n="signature.content"></label>
+            <textarea id="set-signature-content" rows="7" data-i18n-ph="signature.placeholder"></textarea>
+          </div>
+          <div class="signature-preview-card">
+            <div class="signature-preview-heading"><i class="fa-regular fa-eye"></i><span data-i18n="signature.preview"></span></div>
+            <div id="settings-signature-preview" class="settings-signature-preview"></div>
+          </div>
+          <div id="signature-settings-status" class="field-hint"></div>
+          <div class="signature-settings-actions">
+            <button class="btn primary" id="btn-save-signature" type="button"><i class="fa-solid fa-floppy-disk"></i><span data-i18n="signature.save"></span></button>
+          </div>
+        </div>
+      </div>
+      <div class="field-hint" data-i18n="signature.hint"></div>
+
+      <div class="settings-section-title">
+        <i class="fa-solid fa-clock-rotate-left"></i>
+        <span data-i18n="settings.accountSync"></span>
+      </div>
+      <div id="sync-account-list"></div>
+      <div class="field-hint" data-i18n="settings.syncDisabledHint"></div>
+
+      <div class="settings-section-title">
+        <i class="fa-solid fa-shield-virus"></i>
+        <span data-i18n="settings.spamAndTrash"></span>
+      </div>
+      <div id="spam-retention-account-list"></div>
+      <div class="field-hint" data-i18n="settings.retentionDisabledHint"></div>
+      <div class="field-hint" data-i18n="settings.retentionMoveHint"></div>
+
+      <div class="settings-section-title">
+        <i class="fa-solid fa-box-archive"></i>
+        <span data-i18n="backup.sectionTitle"></span>
+      </div>
+      <div class="backup-settings-card">
+        <div class="backup-settings-copy">
+          <strong data-i18n="backup.completeTitle"></strong>
+          <p data-i18n="backup.description"></p>
+          <p class="backup-security-warning"><i class="fa-solid fa-key"></i><span data-i18n="backup.credentialsWarning"></span></p>
+        </div>
+        <div class="backup-settings-actions">
+          <button class="btn primary" id="btn-export-backup" type="button">
+            <i class="fa-solid fa-file-export"></i><span data-i18n="backup.export"></span>
+          </button>
+          <button class="btn" id="btn-import-backup" type="button">
+            <i class="fa-solid fa-file-import"></i><span data-i18n="backup.import"></span>
+          </button>
+        </div>
+        <div id="backup-progress" class="backup-progress hidden" role="progressbar"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div class="backup-progress-heading">
+            <span id="backup-progress-label" data-i18n="backup.progress.waiting"></span>
+            <strong id="backup-progress-percent">0 %</strong>
+          </div>
+          <div class="backup-progress-track" aria-hidden="true">
+            <div id="backup-progress-bar" class="backup-progress-bar"></div>
+          </div>
+          <div id="backup-progress-detail" class="backup-progress-detail"></div>
+        </div>
+        <div id="backup-operation-status" class="backup-operation-status" aria-live="polite"></div>
+      </div>
+    </div>
+    <footer><button class="btn primary" data-close data-i18n="close"></button></footer>
+  </div>
+</div>
+
+<div class="modal-veil" id="contacts-modal">
+  <div class="modal contacts-modal-box">
+    <header>
+      <span><i class="fa-solid fa-address-book"></i> <span data-i18n="contacts.title"></span></span>
+      <span class="contacts-header-actions">
+        <button class="btn compact" id="btn-new-contact" type="button"><i class="fa-solid fa-user-plus"></i><span data-i18n="contacts.new"></span></button>
+        <button class="iconbtn" data-close><i class="fa-solid fa-xmark"></i></button>
+      </span>
+    </header>
+    <div class="body contacts-manager-body">
+      <aside class="contacts-browser">
+        <div class="contacts-search-box">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input id="contacts-search" type="search" autocomplete="off" data-i18n-ph="contacts.search">
+        </div>
+        <select id="contacts-group-filter" data-i18n-title="contacts.filterGroup"></select>
+        <div id="contacts-summary" class="contacts-summary"></div>
+        <div id="contacts-list" class="contacts-list"></div>
+        <div id="contacts-empty" class="contacts-empty hidden">
+          <i class="fa-regular fa-address-book"></i>
+          <span data-i18n="contacts.empty"></span>
+        </div>
+      </aside>
+      <section class="contact-editor-panel">
+        <div id="contact-editor-empty" class="contact-editor-empty">
+          <i class="fa-solid fa-user-pen"></i>
+          <strong data-i18n="contacts.selectOrCreate"></strong>
+          <span data-i18n="contacts.selectOrCreateHint"></span>
+        </div>
+        <div id="contact-editor" class="contact-editor hidden">
+          <input id="contact-id" type="hidden">
+          <div class="contact-editor-title">
+            <div class="contact-avatar-control">
+              <button id="btn-contact-avatar" class="contact-avatar-button" type="button" data-i18n-title="contacts.avatarChoose">
+                <span id="contact-editor-avatar" class="contact-editor-avatar">?</span>
+                <span class="contact-avatar-overlay"><i class="fa-solid fa-camera"></i></span>
+              </button>
+              <input id="contact-avatar-file" class="hidden" type="file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp">
+              <button id="btn-remove-contact-avatar" class="contact-avatar-remove hidden" type="button" data-i18n-title="contacts.avatarRemove"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div><strong id="contact-editor-heading" data-i18n="contacts.new"></strong><small id="contact-editor-subtitle"></small></div>
+          </div>
+          <div class="grid2">
+            <div class="field"><label data-i18n="contacts.firstName"></label><input id="contact-first-name" autocomplete="given-name"></div>
+            <div class="field"><label data-i18n="contacts.lastName"></label><input id="contact-last-name" autocomplete="family-name"></div>
+            <div class="field field-span-2"><label data-i18n="contacts.displayName"></label><input id="contact-display-name" autocomplete="name"></div>
+            <div class="field"><label data-i18n="contacts.company"></label><input id="contact-company" autocomplete="organization"></div>
+            <div class="field"><label data-i18n="contacts.jobTitle"></label><input id="contact-job-title" autocomplete="organization-title"></div>
+            <div class="field field-span-2"><label data-i18n="contacts.emails"></label><textarea id="contact-emails" rows="3" spellcheck="false" data-i18n-ph="contacts.emailsHint"></textarea></div>
+            <div class="field"><label data-i18n="contacts.phone"></label><input id="contact-phone" autocomplete="tel"></div>
+            <div class="field"><label data-i18n="contacts.mobile"></label><input id="contact-mobile" autocomplete="tel"></div>
+            <div class="field"><label data-i18n="contacts.birthday"></label><input id="contact-birthday" type="date"></div>
+            <div class="field"><label data-i18n="contacts.preferredAccount"></label><select id="contact-preferred-account"></select></div>
+            <div class="field field-span-2 contact-groups-field">
+              <label data-i18n="contacts.groups"></label>
+              <div id="contact-groups-existing" class="contact-groups-existing"></div>
+              <div id="contact-new-group-chips" class="contact-new-group-chips hidden"></div>
+              <div class="contact-new-group-row">
+                <input id="contact-new-group" type="text" maxlength="80" autocomplete="off" data-i18n-ph="contacts.newGroupPlaceholder">
+                <button id="btn-add-contact-group" class="btn compact" type="button"><i class="fa-solid fa-plus"></i><span data-i18n="contacts.addGroup"></span></button>
+              </div>
+              <div class="field-hint" data-i18n="contacts.groupsHint"></div>
+            </div>
+            <div class="field field-span-2"><label data-i18n="contacts.address"></label><textarea id="contact-address" rows="2"></textarea></div>
+            <div class="field field-span-2"><label data-i18n="contacts.notes"></label><textarea id="contact-notes" rows="4"></textarea></div>
+          </div>
+          <div class="contact-options">
+            <label class="contact-option"><input id="contact-trusted" type="checkbox" checked><span><b data-i18n="contacts.trusted"></b><small data-i18n="contacts.trustedHint"></small></span></label>
+            <label class="contact-option"><input id="contact-favorite" type="checkbox"><span><b data-i18n="contacts.favorite"></b><small data-i18n="contacts.favoriteHint"></small></span></label>
+          </div>
+          <div id="contact-form-error" class="contact-form-error" role="alert"></div>
+          <div class="contact-editor-actions">
+            <button class="btn danger hidden" id="btn-delete-contact" type="button"><i class="fa-solid fa-trash"></i><span data-i18n="contacts.delete"></span></button>
+            <span></span>
+            <button class="btn" id="btn-cancel-contact-edit" type="button" data-i18n="cancel"></button>
+            <button class="btn primary" id="btn-save-contact" type="button"><i class="fa-solid fa-floppy-disk"></i><span data-i18n="save"></span></button>
+          </div>
+        </div>
+      </section>
+    </div>
+    <footer><button class="btn primary" data-close data-i18n="close"></button></footer>
+  </div>
+</div>
+
+<div class="modal-veil" id="labels-modal">
+  <div class="modal labels-modal-box">
+    <header>
+      <span><i class="fa-solid fa-tags"></i> <span data-i18n="label.manage"></span></span>
+      <button class="iconbtn" data-close><i class="fa-solid fa-xmark"></i></button>
+    </header>
+    <div class="body labels-manager-body">
+      <section class="label-editor-card">
+        <div class="label-editor-heading">
+          <i class="fa-solid fa-tag"></i>
+          <strong id="label-editor-title" data-i18n="label.new"></strong>
+        </div>
+        <div class="label-editor-grid">
+          <div class="field label-name-field">
+            <label for="label-name" data-i18n="label.name"></label>
+            <input id="label-name" type="text" maxlength="80" autocomplete="off" data-i18n-ph="label.namePlaceholder">
+          </div>
+          <div class="field label-color-field">
+            <label for="label-color-hex" data-i18n="label.color"></label>
+            <div class="label-color-inputs">
+              <input id="label-color-picker" type="color" value="#8b7dd8" aria-label="Couleur">
+              <input id="label-color-hex" type="text" value="#8B7DD8" maxlength="7" spellcheck="false" aria-label="Couleur hexadécimale">
+            </div>
+          </div>
+        </div>
+        <div class="label-presets-line">
+          <span data-i18n="label.presets"></span>
+          <div id="label-color-presets" class="label-color-presets"></div>
+        </div>
+        <div id="label-form-error" class="label-form-error" role="alert"></div>
+        <div class="label-editor-actions">
+          <button class="btn hidden" id="btn-cancel-label-edit" type="button" data-i18n="label.cancelEdit"></button>
+          <button class="btn primary" id="btn-save-label" type="button">
+            <i class="fa-solid fa-plus"></i><span data-i18n="label.create"></span>
+          </button>
+        </div>
+      </section>
+
+      <div class="label-list-heading">
+        <span><i class="fa-solid fa-list"></i> <span data-i18n="label.existing"></span></span>
+      </div>
+      <div id="label-manager-list" class="label-manager-list"></div>
+    </div>
+    <footer><button class="btn primary" data-close data-i18n="close"></button></footer>
+  </div>
+</div>
+
+
+<div class="modal-veil" id="remote-content-modal">
+  <div class="modal remote-content-modal-box">
+    <header>
+      <span><i class="fa-solid fa-shield-halved"></i> <span data-i18n="remote.title"></span></span>
+      <button class="iconbtn" data-close><i class="fa-solid fa-xmark"></i></button>
+    </header>
+    <div class="body remote-content-body">
+      <div class="remote-warning-card">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        <div>
+          <strong data-i18n="remote.warningTitle"></strong>
+          <p data-i18n="remote.warningDetail"></p>
+        </div>
+      </div>
+      <div id="remote-summary" class="remote-summary"></div>
+      <div class="remote-selection-toolbar">
+        <span data-i18n="remote.selectHint"></span>
+        <span class="remote-selection-actions">
+          <button class="btn" id="btn-select-all-remote" type="button" data-i18n="remote.selectAll"></button>
+          <button class="btn" id="btn-select-none-remote" type="button" data-i18n="remote.selectNone"></button>
+        </span>
+      </div>
+      <div id="remote-resource-list" class="remote-resource-list"></div>
+      <p class="remote-privacy-note"><i class="fa-solid fa-lock"></i> <span data-i18n="remote.privacyNote"></span></p>
+    </div>
+    <footer>
+      <button class="btn" data-close data-i18n="cancel"></button>
+      <button class="btn" id="btn-display-all-remote" type="button" data-i18n="remote.displayAll"></button>
+      <button class="btn primary" id="btn-display-selected-remote" type="button">
+        <i class="fa-regular fa-image"></i><span data-i18n="remote.displaySelectedInitial"></span>
+      </button>
+    </footer>
+  </div>
+</div>
+
+<div class="modal-veil" id="confirm-action-modal">
+  <div class="modal confirm-action-modal-box">
+    <header>
+      <span><i id="confirm-action-icon" class="fa-solid fa-triangle-exclamation"></i> <span id="confirm-action-title"></span></span>
+      <button class="iconbtn" id="btn-close-confirm-action" type="button"><i class="fa-solid fa-xmark"></i></button>
+    </header>
+    <div class="body confirm-action-body">
+      <p id="confirm-action-message"></p>
+      <div class="confirm-action-details hidden" id="confirm-action-details" aria-live="polite"></div>
+      <div class="confirm-action-note" id="confirm-action-note">
+        <i class="fa-solid fa-circle-info"></i>
+        <span id="confirm-action-note-text" data-i18n="trash.serverNote"></span>
+      </div>
+    </div>
+    <footer>
+      <button class="btn" id="btn-cancel-confirm-action" type="button" data-i18n="cancel"></button>
+      <button class="btn danger" id="btn-confirm-action" type="button">
+        <i class="fa-solid fa-check"></i><span data-i18n="confirm"></span>
+      </button>
+    </footer>
+  </div>
+</div>
+
+<div class="modal-veil" id="quit-modal">
+  <div class="modal quit-modal-box">
+    <header>
+      <span><i class="fa-solid fa-power-off"></i> <span data-i18n="quit.title"></span></span>
+      <button class="iconbtn" data-close><i class="fa-solid fa-xmark"></i></button>
+    </header>
+    <div class="body">
+      <p class="quit-description" data-i18n="quit.description"></p>
+      <div class="quit-info-card">
+        <i class="fa-solid fa-shield-halved"></i>
+        <span data-i18n="quit.safe"></span>
+      </div>
+      <div id="quit-sync-warning" class="quit-sync-warning hidden">
+        <i class="fa-solid fa-rotate fa-spin"></i>
+        <span id="quit-sync-warning-text"></span>
+      </div>
+    </div>
+    <footer>
+      <button class="btn" data-close data-i18n="cancel"></button>
+      <button class="btn danger" id="btn-confirm-exit" type="button">
+        <i class="fa-solid fa-power-off"></i><span data-i18n="quit.confirm"></span>
+      </button>
+    </footer>
+  </div>
+</div>
+
+<div class="modal-veil" id="stats-modal">
+  <div class="modal stats-modal-box">
+    <header><span><i class="fa-solid fa-chart-column"></i> <span data-i18n="stats.title"></span></span>
+      <button class="iconbtn" data-close><i class="fa-solid fa-xmark"></i></button></header>
+    <div class="body" id="stats-body"></div>
+    <footer><button class="btn primary" data-close data-i18n="close"></button></footer>
+  </div>
+</div>
+
+<script src="js/neutralino.js"></script>
+<script src="vendor/purify.min.js"></script>
+<script src="js/i18n.js"></script>
+<script src="js/maillist.js"></script>
+<script src="js/viewer.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "name": "libramail-engine",
+  "version": "0.1.0",
+  "description": "Moteur mail de LibraMail : IMAP, SMTP, index SQLite, anti-spam bayésien",
+  "main": "backend.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node backend.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "imapflow": "^1.0.164",
+    "mailparser": "^3.7.1",
+    "nodemailer": "^6.9.14",
+    "ws": "^8.18.0"
+  }
+}

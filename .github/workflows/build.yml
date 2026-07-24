@@ -1,0 +1,85 @@
+name: Build portable packages
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux x86_64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zip xz-utils
+
+      - name: Verify sources
+        run: |
+          chmod +x security_check.sh build_linux.sh
+          ./security_check.sh
+          python3 tools/check_version.py
+
+      - name: Build portable Linux package
+        run: ./build_linux.sh --fresh-npm
+
+      - name: Collect Linux files
+        run: |
+          mkdir -p release-linux
+          cp build/linux/*.zip release-linux/ 2>/dev/null || true
+          cp build/linux/*.tar.gz release-linux/ 2>/dev/null || true
+          cp build/linux/*.sha256 release-linux/ 2>/dev/null || true
+          test -n "$(find release-linux -maxdepth 1 -type f -print -quit)"
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libramail-linux-x86_64
+          path: release-linux/*
+          if-no-files-found: error
+          retention-days: 14
+
+  windows:
+    name: Windows x86_64
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify sources
+        shell: pwsh
+        run: |
+          python tools/check_version.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build portable Windows package
+        shell: pwsh
+        run: |
+          Set-ExecutionPolicy -Scope Process Bypass
+          .\build_windows.ps1 --fresh-npm
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Collect Windows files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path release-windows -Force | Out-Null
+          Copy-Item build\windows\*.zip release-windows\ -ErrorAction SilentlyContinue
+          Copy-Item build\windows\*.sha256 release-windows\ -ErrorAction SilentlyContinue
+          if (-not (Get-ChildItem release-windows -File)) { throw "No Windows package generated." }
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libramail-windows-x86_64
+          path: release-windows/*
+          if-no-files-found: error
+          retention-days: 14
