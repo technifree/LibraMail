@@ -26,26 +26,8 @@ $NodeVersion = if ($env:LIBRAMAIL_NODE_VERSION) { $env:LIBRAMAIL_NODE_VERSION } 
 $NodeMirror = if ($env:LIBRAMAIL_NODE_MIRROR) { $env:LIBRAMAIL_NODE_MIRROR.TrimEnd('/') } else { 'https://nodejs.org/dist' }
 
 function Show-Usage {
-@'
-LibraMail — construction Windows autonome
-
-Options :
-  --with-data             Inclut data\ dans le paquet final.
-                          Attention : comptes, mots de passe et messages seront
-                          présents dans l'archive privée.
-  --fresh-npm             Réinstalle les dépendances de production avec le
-                          Node.js Windows embarqué.
-  --embed-resources       Intègre resources.neu dans l'exécutable Neutralino.
-  --node-version VERSION  Version officielle de Node.js à embarquer.
-                          Valeur par défaut : 24.18.0
-  --offline               Interdit les téléchargements. Le cache doit être prêt.
-  --keep-work             Conserve .build-windows-work pour diagnostic.
-  -h, --help              Affiche cette aide.
-
-Variables facultatives :
-  LIBRAMAIL_NODE_VERSION
-  LIBRAMAIL_NODE_MIRROR
-'@
+    $UsageBytes = [Convert]::FromBase64String('TGlicmFNYWlsIOKAlCBjb25zdHJ1Y3Rpb24gV2luZG93cyBhdXRvbm9tZQoKT3B0aW9ucyA6CiAgLS13aXRoLWRhdGEgICAgICAgICAgICAgSW5jbHV0IGRhdGFcIGRhbnMgbGUgcGFxdWV0IGZpbmFsLgogICAgICAgICAgICAgICAgICAgICAgICAgIEF0dGVudGlvbiA6IGNvbXB0ZXMsIG1vdHMgZGUgcGFzc2UgZXQgbWVzc2FnZXMgc2Vyb250CiAgICAgICAgICAgICAgICAgICAgICAgICAgcHLDqXNlbnRzIGRhbnMgbCdhcmNoaXZlIHByaXbDqWUuCiAgLS1mcmVzaC1ucG0gICAgICAgICAgICAgUsOpaW5zdGFsbGUgbGVzIGTDqXBlbmRhbmNlcyBkZSBwcm9kdWN0aW9uIGF2ZWMgbGUKICAgICAgICAgICAgICAgICAgICAgICAgICBOb2RlLmpzIFdpbmRvd3MgZW1iYXJxdcOpLgogIC0tZW1iZWQtcmVzb3VyY2VzICAgICAgIEludMOoZ3JlIHJlc291cmNlcy5uZXUgZGFucyBsJ2V4w6ljdXRhYmxlIE5ldXRyYWxpbm8uCiAgLS1ub2RlLXZlcnNpb24gVkVSU0lPTiAgVmVyc2lvbiBvZmZpY2llbGxlIGRlIE5vZGUuanMgw6AgZW1iYXJxdWVyLgogICAgICAgICAgICAgICAgICAgICAgICAgIFZhbGV1ciBwYXIgZMOpZmF1dCA6IDI0LjE4LjAKICAtLW9mZmxpbmUgICAgICAgICAgICAgICBJbnRlcmRpdCBsZXMgdMOpbMOpY2hhcmdlbWVudHMuIExlIGNhY2hlIGRvaXQgw6p0cmUgcHLDqnQuCiAgLS1rZWVwLXdvcmsgICAgICAgICAgICAgQ29uc2VydmUgLmJ1aWxkLXdpbmRvd3Mtd29yayBwb3VyIGRpYWdub3N0aWMuCiAgLWgsIC0taGVscCAgICAgICAgICAgICAgQWZmaWNoZSBjZXR0ZSBhaWRlLgoKVmFyaWFibGVzIGZhY3VsdGF0aXZlcyA6CiAgTElCUkFNQUlMX05PREVfVkVSU0lPTgogIExJQlJBTUFJTF9OT0RFX01JUlJPUgo=')
+    Write-Output ([Text.Encoding]::UTF8.GetString($UsageBytes))
 }
 
 for ($i = 0; $i -lt $args.Count; $i++) {
@@ -119,6 +101,14 @@ Require-File 'resources\index.html'
 Require-File 'engine\backend.js'
 Require-Directory 'resources'
 Require-Directory 'engine'
+Require-Directory 'packaging\windows'
+Require-File 'packaging\windows\snapshot-db.js'
+Require-File 'packaging\windows\libramail.ps1'
+Require-File 'packaging\windows\libramail.cmd'
+Require-File 'packaging\windows\LibraMail.vbs'
+Require-File 'packaging\windows\check_portable.ps1'
+Require-File 'packaging\windows\check_portable.cmd'
+Require-File 'packaging\windows\README_WINDOWS.txt.in'
 
 $ConfigPath = Join-Path $ProjectDir 'neutralino.config.json'
 $Config = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -351,47 +341,7 @@ try {
         if (Test-Path -LiteralPath $SourceDatabase) {
             Write-Build 'Création d’un instantané cohérent de SQLite...'
             $SnapshotScript = Join-Path $WorkDir 'snapshot-db.js'
-            $GeneratedFileContent1 = @'
-const fs = require('fs');
-const path = require('path');
-const engineDir = process.argv[2];
-const source = process.argv[3];
-const target = process.argv[4];
-const Database = require(path.join(engineDir, 'node_modules', 'better-sqlite3'));
-
-(async () => {
-  if (fs.existsSync(target)) fs.unlinkSync(target);
-  const src = new Database(source, { readonly: true, fileMustExist: true });
-  await src.backup(target);
-  src.close();
-
-  const dst = new Database(target);
-  try {
-    const tables = new Set(dst.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(r => r.name));
-    if (tables.has('messages')) {
-      const columns = new Set(dst.prepare('PRAGMA table_info(messages)').all().map(r => r.name));
-      if (['id', 'account_id', 'folder', 'uid', 'eml_path'].every(name => columns.has(name))) {
-        const rows = dst.prepare("SELECT id, account_id, folder, uid FROM messages WHERE eml_path IS NOT NULL AND eml_path <> ''").all();
-        const update = dst.prepare('UPDATE messages SET eml_path=? WHERE id=?');
-        const transaction = dst.transaction(items => {
-          for (const row of items) {
-            const safeFolder = String(row.folder || 'INBOX').replace(/[^A-Za-z0-9_.-]/g, '_');
-            const relative = ['mail', String(row.account_id || ''), safeFolder, `${row.uid}.eml`].join('/');
-            update.run(relative, row.id);
-          }
-        });
-        transaction(rows);
-      }
-    }
-  } finally {
-    dst.close();
-  }
-})().catch(error => {
-  console.error(error && error.stack ? error.stack : error);
-  process.exit(1);
-});
-'@
-            Set-Content -LiteralPath $SnapshotScript -Value $GeneratedFileContent1 -Encoding UTF8
+            $SnapshotScript = Join-Path $ProjectDir 'packaging\windows\snapshot-db.js'
             Invoke-Checked $NodeExe @($SnapshotScript, $PackageEngine, $SourceDatabase, (Join-Path $PackageData 'index.db'))
         }
         else { Write-Warn 'Aucune base data\index.db à inclure.' }
@@ -401,142 +351,29 @@ const Database = require(path.join(engineDir, 'node_modules', 'better-sqlite3'))
         Write-Ok "Messages locaux copiés : $EmlCount fichier(s) .eml."
     }
 
-    $GeneratedFileContent2 = @'
-$ErrorActionPreference = 'Stop'
-Set-StrictMode -Version Latest
-
-$AppDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$NodeExe = Join-Path $AppDir 'runtime\node\node.exe'
-$EngineFile = Join-Path $AppDir 'engine\backend.js'
-$AppExe = Join-Path $AppDir 'libramail-app.exe'
-$DataDir = Join-Path $AppDir 'data'
-$OutLog = Join-Path $DataDir 'engine-console.log'
-$ErrLog = Join-Path $DataDir 'engine-error.log'
-
-function Test-LocalPort([int]$Port) {
-    $client = New-Object System.Net.Sockets.TcpClient
-    try {
-        $result = $client.BeginConnect('127.0.0.1', $Port, $null, $null)
-        if (-not $result.AsyncWaitHandle.WaitOne(120)) { return $false }
-        $client.EndConnect($result)
-        return $true
+    Write-Build 'Installation des lanceurs Windows...'
+    $WindowsPackagingDir = Join-Path $ProjectDir 'packaging\windows'
+    foreach ($LauncherName in @(
+        'libramail.ps1',
+        'libramail.cmd',
+        'LibraMail.vbs',
+        'check_portable.ps1',
+        'check_portable.cmd'
+    )) {
+        Copy-Item -LiteralPath (Join-Path $WindowsPackagingDir $LauncherName) `
+            -Destination (Join-Path $PackageDir $LauncherName) -Force
     }
-    catch { return $false }
-    finally { $client.Close() }
-}
 
-if (-not (Test-Path -LiteralPath $NodeExe)) { throw "Runtime Node.js introuvable : $NodeExe" }
-if (-not (Test-Path -LiteralPath $EngineFile)) { throw "Moteur LibraMail introuvable : $EngineFile" }
-if (-not (Test-Path -LiteralPath $AppExe)) { throw "Application Neutralino introuvable : $AppExe" }
-if (Test-LocalPort 47800) { throw 'Le port 47800 est déjà utilisé. Une autre instance de LibraMail est probablement ouverte.' }
-
-New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
-$EngineProcess = $null
-try {
-    $EngineProcess = Start-Process -FilePath $NodeExe `
-        -ArgumentList ('"{0}"' -f $EngineFile) `
-        -WorkingDirectory $AppDir `
-        -WindowStyle Hidden `
-        -RedirectStandardOutput $OutLog `
-        -RedirectStandardError $ErrLog `
-        -PassThru
-
-    $Ready = $false
-    for ($i = 0; $i -lt 150; $i++) {
-        if (Test-LocalPort 47800) { $Ready = $true; break }
-        if ($EngineProcess.HasExited) {
-            $details = if (Test-Path -LiteralPath $ErrLog) { Get-Content -LiteralPath $ErrLog -Tail 40 | Out-String } else { '' }
-            throw "Le moteur LibraMail ne démarre pas.`r`n$details"
-        }
-        Start-Sleep -Milliseconds 100
-    }
-    if (-not $Ready) { throw "Délai dépassé pendant le démarrage du moteur. Consultez $ErrLog" }
-
-    $AppProcess = Start-Process -FilePath $AppExe -WorkingDirectory $AppDir -PassThru
-    $AppProcess.WaitForExit()
-    exit $AppProcess.ExitCode
-}
-finally {
-    if ($EngineProcess -and -not $EngineProcess.HasExited) {
-        & taskkill.exe /PID $EngineProcess.Id /T /F 2>$null | Out-Null
-    }
-}
-'@
-    Set-Content -LiteralPath (Join-Path $PackageDir 'libramail.ps1') -Value $GeneratedFileContent2 -Encoding UTF8
-
-    $GeneratedFileContent3 = @'
-@echo off
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0libramail.ps1" %*
-if errorlevel 1 pause
-'@
-    Set-Content -LiteralPath (Join-Path $PackageDir 'libramail.cmd') -Value $GeneratedFileContent3 -Encoding ASCII
-
-    $GeneratedFileContent4 = @'
-Option Explicit
-Dim shell, fso, appDir, command
-Set shell = CreateObject("WScript.Shell")
-Set fso = CreateObject("Scripting.FileSystemObject")
-appDir = fso.GetParentFolderName(WScript.ScriptFullName)
-command = "powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & appDir & "\libramail.ps1"""
-shell.Run command, 0, False
-'@
-    Set-Content -LiteralPath (Join-Path $PackageDir 'LibraMail.vbs') -Value $GeneratedFileContent4 -Encoding ASCII
-
-    $GeneratedFileContent5 = @'
-$ErrorActionPreference = 'Stop'
-$AppDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$NodeExe = Join-Path $AppDir 'runtime\node\node.exe'
-Write-Host -NoNewline 'Runtime embarqué : '
-& $NodeExe --version
-if ($LASTEXITCODE -ne 0) { throw 'node.exe ne fonctionne pas.' }
-& $NodeExe --check (Join-Path $AppDir 'engine\backend.js')
-if ($LASTEXITCODE -ne 0) { throw 'La syntaxe du moteur est invalide.' }
-Push-Location (Join-Path $AppDir 'engine')
-try {
-    & $NodeExe -e "const Database=require('better-sqlite3');const db=new Database(':memory:');db.prepare('SELECT 1').get();db.close();console.log('better-sqlite3 : OK');"
-    if ($LASTEXITCODE -ne 0) { throw 'better-sqlite3 ne fonctionne pas.' }
-}
-finally { Pop-Location }
-Write-Host 'Lanceur autonome : OK'
-'@
-    Set-Content -LiteralPath (Join-Path $PackageDir 'check_portable.ps1') -Value $GeneratedFileContent5 -Encoding UTF8
-
-    $GeneratedFileContent6 = @'
-@echo off
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0check_portable.ps1"
-if errorlevel 1 pause
-'@
-    Set-Content -LiteralPath (Join-Path $PackageDir 'check_portable.cmd') -Value $GeneratedFileContent6 -Encoding ASCII
-
-    @"
-LibraMail $Version — paquet autonome Windows x86_64
-
-Lancement sans console :
-  double-cliquer sur LibraMail.vbs
-
-Lancement avec diagnostic :
-  double-cliquer sur libramail.cmd
-
-Contrôle du paquet :
-  double-cliquer sur check_portable.cmd
-
-Node.js :
-  - version embarquée : $NodeVersion
-  - exécutable utilisé : .\runtime\node\node.exe
-  - aucune installation de Node.js ou npm n'est requise sur le poste cible.
-
-Prérequis système :
-  - Windows 10 ou Windows 11 x64 ;
-  - Microsoft Edge WebView2 Runtime ;
-  - éventuellement Microsoft Visual C++ 2015-2022 x64 si un module natif le réclame.
-
-Le dossier entier est portable. Ne déplacez pas seulement LibraMail.vbs ou
-libramail-app.exe : runtime, engine, resources.neu et data sont nécessaires.
-
-Avec --with-data, le paquet contient les comptes, mots de passe et messages.
-Il doit être traité comme une sauvegarde confidentielle.
-"@ | Set-Content -LiteralPath (Join-Path $PackageDir 'README_WINDOWS.txt') -Encoding UTF8
-
+    $ReadmeTemplatePath = Join-Path $WindowsPackagingDir 'README_WINDOWS.txt.in'
+    $ReadmeText = Get-Content -LiteralPath $ReadmeTemplatePath -Raw -Encoding UTF8
+    $ReadmeText = $ReadmeText.Replace('__LIBRAMAIL_VERSION__', $Version)
+    $ReadmeText = $ReadmeText.Replace('__NODE_VERSION__', $NodeVersion)
+    $ReadmeEncoding = New-Object Text.UTF8Encoding($true)
+    [IO.File]::WriteAllText(
+        (Join-Path $PackageDir 'README_WINDOWS.txt'),
+        $ReadmeText,
+        $ReadmeEncoding
+    )
     $ArchivePath = Join-Path $OutputDir "$PackageName.zip"
     Remove-Item -LiteralPath $ArchivePath -Force -ErrorAction SilentlyContinue
     Write-Build 'Création de l’archive ZIP...'

@@ -1,0 +1,26 @@
+LibraMail __LIBRAMAIL_VERSION__ — paquet autonome Windows x86_64
+
+Lancement sans console :
+  double-cliquer sur LibraMail.vbs
+
+Lancement avec diagnostic :
+  double-cliquer sur libramail.cmd
+
+Contrôle du paquet :
+  double-cliquer sur check_portable.cmd
+
+Node.js :
+  - version embarquée : __NODE_VERSION__
+  - exécutable utilisé : .\runtime\node\node.exe
+  - aucune installation de Node.js ou npm n'est requise sur le poste cible.
+
+Prérequis système :
+  - Windows 10 ou Windows 11 x64 ;
+  - Microsoft Edge WebView2 Runtime ;
+  - éventuellement Microsoft Visual C++ 2015-2022 x64 si un module natif le réclame.
+
+Le dossier entier est portable. Ne déplacez pas seulement LibraMail.vbs ou
+libramail-app.exe : runtime, engine, resources.neu et data sont nécessaires.
+
+Avec --with-data, le paquet contient les comptes, mots de passe et messages.
+Il doit être traité comme une sauvegarde confidentielle.
