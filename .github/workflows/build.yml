@@ -19,7 +19,7 @@ jobs:
       - name: Install packaging tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y zip xz-utils build-essential python3 build-essential python3
+          sudo apt-get install -y zip xz-utils build-essential python3
 
       - name: Verify sources
         run: |
@@ -58,27 +58,36 @@ jobs:
       - name: Verify sources
         shell: pwsh
         run: |
-          $tokens = $null
-          $parseErrors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path .\build_windows.ps1),
-            [ref]$tokens,
-            [ref]$parseErrors
-          ) | Out-Null
-          if ($parseErrors.Count -gt 0) {
-            $parseErrors | ForEach-Object { Write-Error $_.Message }
-            throw "build_windows.ps1 contient $($parseErrors.Count) erreur(s) de syntaxe."
-          }
-          Write-Host '[POWERSHELL] build_windows.ps1 : syntaxe OK'
           python tools/check_version.py
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+          $required = @(
+            'build_windows.ps1',
+            'packaging/windows/snapshot-db.js',
+            'packaging/windows/libramail.ps1',
+            'packaging/windows/libramail.cmd',
+            'packaging/windows/LibraMail.vbs',
+            'packaging/windows/check_portable.ps1',
+            'packaging/windows/check_portable.cmd',
+            'packaging/windows/README_WINDOWS.txt.in'
+          )
+
+          foreach ($file in $required) {
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+              throw "Required Windows packaging file is missing: $file"
+            }
+          }
 
       - name: Build portable Windows package
         shell: pwsh
         run: |
           Set-ExecutionPolicy -Scope Process Bypass
-          .\build_windows.ps1 --fresh-npm
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\build_windows.ps1 --fresh-npm
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
 
       - name: Collect Windows files
         shell: pwsh
@@ -86,7 +95,9 @@ jobs:
           New-Item -ItemType Directory -Path release-windows -Force | Out-Null
           Copy-Item build\windows\*.zip release-windows\ -ErrorAction SilentlyContinue
           Copy-Item build\windows\*.sha256 release-windows\ -ErrorAction SilentlyContinue
-          if (-not (Get-ChildItem release-windows -File)) { throw "No Windows package generated." }
+          if (-not (Get-ChildItem release-windows -File)) {
+            throw "No Windows package generated."
+          }
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
@@ -95,5 +106,3 @@ jobs:
           path: release-windows/*
           if-no-files-found: error
           retention-days: 14
-
-# Actualisation de l’enregistrement GitHub Actions
