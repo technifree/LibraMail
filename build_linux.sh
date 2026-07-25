@@ -267,6 +267,14 @@ else
   NEU=("$NODE_BIN" "$NPX_CLI" --yes @neutralinojs/neu)
 fi
 
+NEU_SOURCE_BINARY="$PROJECT_DIR/bin/neutralino-linux_${NEU_ARCH}"
+if [[ ! -f "$NEU_SOURCE_BINARY" ]]; then
+  log "Binaires Neutralino absents. Téléchargement de la version déclarée dans neutralino.config.json..."
+  "${NEU[@]}" update
+fi
+[[ -f "$NEU_SOURCE_BINARY" ]] \
+  || die "Le binaire Neutralino attendu n'a pas été téléchargé : $NEU_SOURCE_BINARY"
+
 log "Construction Neutralino ${VERSION} pour Linux ${PACKAGE_ARCH}..."
 BUILD_ARGS=(build)
 [[ "$EMBED_RESOURCES" -eq 1 ]] && BUILD_ARGS+=(--embed-resources)

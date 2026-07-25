@@ -209,21 +209,36 @@ try {
 
     $BuildArguments = @('build')
     if ($EmbedResources) { $BuildArguments += '--embed-resources' }
+
     $LocalNeu = Join-Path $ProjectDir 'node_modules\.bin\neu.cmd'
     $GlobalNeu = Get-Command 'neu.cmd' -ErrorAction SilentlyContinue
     if (-not $GlobalNeu) { $GlobalNeu = Get-Command 'neu' -ErrorAction SilentlyContinue }
 
-    Write-Build "Construction Neutralino $Version pour Windows x64..."
+    $NeuCommand = $null
+    $NeuPrefixArguments = @()
     if (Test-Path -LiteralPath $LocalNeu) {
-        Invoke-Checked $LocalNeu $BuildArguments
+        $NeuCommand = $LocalNeu
     }
     elseif ($GlobalNeu) {
-        Invoke-Checked $GlobalNeu.Source $BuildArguments
+        $NeuCommand = $GlobalNeu.Source
     }
     else {
         Write-Warn 'neu CLI absent. Utilisation de npx avec le Node.js embarqué.'
-        Invoke-Checked $NodeExe (@($NpxCli, '--yes', '@neutralinojs/neu') + $BuildArguments)
+        $NeuCommand = $NodeExe
+        $NeuPrefixArguments = @($NpxCli, '--yes', '@neutralinojs/neu')
     }
+
+    $RequiredNeuBinary = Join-Path $ProjectDir 'bin\neutralino-win_x64.exe'
+    if (-not (Test-Path -LiteralPath $RequiredNeuBinary -PathType Leaf)) {
+        Write-Build 'Binaires Neutralino absents. Téléchargement de la version déclarée dans neutralino.config.json...'
+        Invoke-Checked $NeuCommand ($NeuPrefixArguments + @('update'))
+    }
+    if (-not (Test-Path -LiteralPath $RequiredNeuBinary -PathType Leaf)) {
+        throw "Le binaire Neutralino attendu n'a pas été téléchargé : $RequiredNeuBinary"
+    }
+
+    Write-Build "Construction Neutralino $Version pour Windows x64..."
+    Invoke-Checked $NeuCommand ($NeuPrefixArguments + $BuildArguments)
     Restore-ProjectConfig
 
     $ExpectedNeuBinary = Join-Path $NeuDist "$BinaryName-win_x64.exe"
@@ -336,7 +351,7 @@ try {
         if (Test-Path -LiteralPath $SourceDatabase) {
             Write-Build 'Création d’un instantané cohérent de SQLite...'
             $SnapshotScript = Join-Path $WorkDir 'snapshot-db.js'
-            @'
+            $GeneratedFileContent1 = @'
 const fs = require('fs');
 const path = require('path');
 const engineDir = process.argv[2];
@@ -375,7 +390,8 @@ const Database = require(path.join(engineDir, 'node_modules', 'better-sqlite3'))
   console.error(error && error.stack ? error.stack : error);
   process.exit(1);
 });
-'@ | Set-Content -LiteralPath $SnapshotScript -Encoding UTF8
+'@
+            Set-Content -LiteralPath $SnapshotScript -Value $GeneratedFileContent1 -Encoding UTF8
             Invoke-Checked $NodeExe @($SnapshotScript, $PackageEngine, $SourceDatabase, (Join-Path $PackageData 'index.db'))
         }
         else { Write-Warn 'Aucune base data\index.db à inclure.' }
@@ -385,7 +401,7 @@ const Database = require(path.join(engineDir, 'node_modules', 'better-sqlite3'))
         Write-Ok "Messages locaux copiés : $EmlCount fichier(s) .eml."
     }
 
-    @'
+    $GeneratedFileContent2 = @'
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -445,15 +461,17 @@ finally {
         & taskkill.exe /PID $EngineProcess.Id /T /F 2>$null | Out-Null
     }
 }
-'@ | Set-Content -LiteralPath (Join-Path $PackageDir 'libramail.ps1') -Encoding UTF8
+'@
+    Set-Content -LiteralPath (Join-Path $PackageDir 'libramail.ps1') -Value $GeneratedFileContent2 -Encoding UTF8
 
-    @'
+    $GeneratedFileContent3 = @'
 @echo off
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0libramail.ps1" %*
 if errorlevel 1 pause
-'@ | Set-Content -LiteralPath (Join-Path $PackageDir 'libramail.cmd') -Encoding ASCII
+'@
+    Set-Content -LiteralPath (Join-Path $PackageDir 'libramail.cmd') -Value $GeneratedFileContent3 -Encoding ASCII
 
-    @'
+    $GeneratedFileContent4 = @'
 Option Explicit
 Dim shell, fso, appDir, command
 Set shell = CreateObject("WScript.Shell")
@@ -461,9 +479,10 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 appDir = fso.GetParentFolderName(WScript.ScriptFullName)
 command = "powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & appDir & "\libramail.ps1"""
 shell.Run command, 0, False
-'@ | Set-Content -LiteralPath (Join-Path $PackageDir 'LibraMail.vbs') -Encoding ASCII
+'@
+    Set-Content -LiteralPath (Join-Path $PackageDir 'LibraMail.vbs') -Value $GeneratedFileContent4 -Encoding ASCII
 
-    @'
+    $GeneratedFileContent5 = @'
 $ErrorActionPreference = 'Stop'
 $AppDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $NodeExe = Join-Path $AppDir 'runtime\node\node.exe'
@@ -479,13 +498,15 @@ try {
 }
 finally { Pop-Location }
 Write-Host 'Lanceur autonome : OK'
-'@ | Set-Content -LiteralPath (Join-Path $PackageDir 'check_portable.ps1') -Encoding UTF8
+'@
+    Set-Content -LiteralPath (Join-Path $PackageDir 'check_portable.ps1') -Value $GeneratedFileContent5 -Encoding UTF8
 
-    @'
+    $GeneratedFileContent6 = @'
 @echo off
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0check_portable.ps1"
 if errorlevel 1 pause
-'@ | Set-Content -LiteralPath (Join-Path $PackageDir 'check_portable.cmd') -Encoding ASCII
+'@
+    Set-Content -LiteralPath (Join-Path $PackageDir 'check_portable.cmd') -Value $GeneratedFileContent6 -Encoding ASCII
 
     @"
 LibraMail $Version — paquet autonome Windows x86_64
