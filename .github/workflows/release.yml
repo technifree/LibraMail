@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Match tag and application version
         shell: bash
@@ -36,12 +36,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install packaging tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y zip xz-utils
+          sudo apt-get install -y zip xz-utils build-essential python3
 
       - name: Build portable Linux package
         run: |
@@ -70,14 +70,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Build portable Windows package
         shell: pwsh
         run: |
-          Set-ExecutionPolicy -Scope Process Bypass
-          .\build_windows.ps1 --fresh-npm
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\build_windows.ps1 -FreshNpm
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
 
       - name: Collect Windows files
         shell: pwsh
@@ -85,7 +86,10 @@ jobs:
           New-Item -ItemType Directory -Path release-windows -Force | Out-Null
           Copy-Item build\windows\*.zip release-windows\ -ErrorAction SilentlyContinue
           Copy-Item build\windows\*.sha256 release-windows\ -ErrorAction SilentlyContinue
-          if (-not (Get-ChildItem release-windows -File)) { throw "No Windows package generated." }
+
+          if (-not (Get-ChildItem release-windows -File)) {
+            throw 'No Windows package generated.'
+          }
 
       - name: Upload Windows package
         uses: actions/upload-artifact@v4
@@ -95,14 +99,16 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: [linux, windows]
+    needs:
+      - linux
+      - windows
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
       - name: Checkout release notes
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download all packages
         uses: actions/download-artifact@v4
@@ -123,5 +129,3 @@ jobs:
             --title "LibraMail ${GITHUB_REF_NAME#v}" \
             --notes-file .github/release-notes.md \
             --verify-tag
-
-# Actualisation de l’enregistrement GitHub Actions

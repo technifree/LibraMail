@@ -83,8 +83,7 @@ jobs:
       - name: Build portable Windows package
         shell: pwsh
         run: |
-          Set-ExecutionPolicy -Scope Process Bypass
-          & .\build_windows.ps1 --fresh-npm
+          & .\build_windows.ps1 -FreshNpm
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }
@@ -95,8 +94,9 @@ jobs:
           New-Item -ItemType Directory -Path release-windows -Force | Out-Null
           Copy-Item build\windows\*.zip release-windows\ -ErrorAction SilentlyContinue
           Copy-Item build\windows\*.sha256 release-windows\ -ErrorAction SilentlyContinue
+
           if (-not (Get-ChildItem release-windows -File)) {
-            throw "No Windows package generated."
+            throw 'No Windows package generated.'
           }
 
       - name: Upload Windows artifact
