@@ -58,3 +58,6 @@ Thumbs.db
 .idea/
 *.swp
 *~
+
+# Sauvegardes temporaires de correction
+.github-build-fix-backup-*/
