@@ -83,3 +83,5 @@ jobs:
           path: release-windows/*
           if-no-files-found: error
           retention-days: 14
+
+# Actualisation de l’enregistrement GitHub Actions

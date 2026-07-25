@@ -123,3 +123,5 @@ jobs:
             --title "LibraMail ${GITHUB_REF_NAME#v}" \
             --notes-file .github/release-notes.md \
             --verify-tag
+
+# Actualisation de l’enregistrement GitHub Actions
