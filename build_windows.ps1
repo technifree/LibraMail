@@ -1,4 +1,4 @@
-#requires -version 5.1
+﻿#requires -version 5.1
 <#
 LibraMail - construction d'un paquet Windows x64 autonome.
 
@@ -601,7 +601,7 @@ try {
     $archivePath = Join-Path $OutputDir "$PackageName.zip"
     Remove-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue
 
-    Write-Build -Message 'Création de l’archive ZIP.'
+    Write-Build -Message "Création de l'archive ZIP."
     Compress-Archive `
         -LiteralPath $PackageDir `
         -DestinationPath $archivePath `
