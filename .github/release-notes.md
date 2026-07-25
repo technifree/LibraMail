@@ -2,11 +2,17 @@
 
 ## Français
 
-Première publication automatisée des paquets portables Linux et Windows.
+Améliorations et corrections de LibraMail.
 
 ## English
 
-First automated release of the portable Linux and Windows packages.
+LibraMail improvements and fixes.
+
+### Downloads / Téléchargements
+
+- Linux x86_64 portable package
+- Windows x86_64 portable package
+- SHA-256 checksums
 
 Public packages contain no account, password or message data.
 Les paquets publics ne contiennent aucun compte, mot de passe ou message.

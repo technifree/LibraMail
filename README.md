@@ -204,4 +204,4 @@ Le mode d'emploi détaillé se trouve dans
 
 LibraMail est distribué sous [licence MIT](LICENSE).
 
-_Last documentation update / Dernière mise à jour : 24 July 2026 / 24 juillet 2026._
+_Last documentation update / Dernière mise à jour : 25 July 2026 / 25 juillet 2026._
