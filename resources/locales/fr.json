@@ -575,5 +575,7 @@
   "about.websiteValue": "technifree.com",
   "about.storageLabel": "Données",
   "about.storageValue": "Stockage local dans le dossier data/",
-  "about.engineLabel": "Moteur"
+  "about.engineLabel": "Moteur",
+  "group.week": "Cette semaine",
+  "group.month": "Ce mois-ci"
 }

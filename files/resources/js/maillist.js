@@ -231,12 +231,14 @@ class VirtualMailList {
     const day = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     const diff = Math.round((today - day) / 86400000);
-    let id = date.toISOString().slice(0, 10);
-    let label = date.toLocaleDateString(window.I18N?.locale || 'fr', { weekday: 'long', day: 'numeric', month: 'long' });
-    if (diff === 0) { id = 'today'; label = window.t?.('group.today') || 'Aujourd’hui'; }
-    else if (diff > 0 && diff < 7) { id = 'week'; label = window.t?.('group.week') || 'Cette semaine'; }
-    else if (date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth()) { id = 'month'; label = window.t?.('group.month') || 'Ce mois'; }
-    return { id, label };
+
+    if (diff === 0) return { id: 'today', label: window.t?.('group.today') || 'Aujourd’hui' };
+    if (diff === 1) return { id: 'yesterday', label: window.t?.('group.yesterday') || 'Hier' };
+    if (diff > 1 && diff < 7) return { id: 'week', label: window.t?.('group.thisWeek') || 'Cette semaine' };
+    if (date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth()) {
+      return { id: 'month', label: window.t?.('group.thisMonth') || 'Ce mois-ci' };
+    }
+    return { id: 'older', label: window.t?.('group.older') || 'Plus ancien' };
   }
 
   initials(value) {
