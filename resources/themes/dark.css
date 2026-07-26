@@ -1,38 +1,38 @@
-/* LibraMail — Thème sombre (défaut)
+/* LibraMail — Thème sombre (défaut, accordé au logo fuchsia)
  * Pour créer un thème personnalisé : copiez ce fichier dans themes/,
  * renommez [data-theme="..."], ajustez les variables, déclarez-le
  * dans Paramètres. Aucune autre modification nécessaire. */
 :root[data-theme="dark"] {
-  /* Fonds */
-  --bg-app: #14161c;
-  --bg-panel: #1a1d25;
-  --bg-panel-2: #1f232d;
-  --bg-hover: #262b37;
-  --bg-active: #2d3342;
-  --bg-input: #101218;
+  /* Fonds bleu nuit / violet, sans dominante brune */
+  --bg-app: #0f1220;
+  --bg-panel: #15192a;
+  --bg-panel-2: #1a2035;
+  --bg-hover: #242b43;
+  --bg-active: #2d3655;
+  --bg-input: #0d1020;
 
   /* Texte */
-  --fg: #d9dce3;
-  --fg-strong: #f4f5f8;
-  --fg-muted: #8b91a0;
-  --fg-faint: #5c6270;
+  --fg: #e0e6f2;
+  --fg-strong: #f7f9ff;
+  --fg-muted: #a1adc4;
+  --fg-faint: #69758f;
 
-  /* Accent — le liseré doré des projets Libra */
-  --accent: #d4a94f;
-  --accent-soft: rgba(212, 169, 79, .14);
-  --accent-fg: #1a1408;
+  /* Accent tiré du logo violet / fuchsia */
+  --accent: #a879da;
+  --accent-soft: rgba(168, 121, 218, .18);
+  --accent-fg: #160d20;
 
   /* Sémantique */
-  --danger: #e5636b;
-  --danger-soft: rgba(229, 99, 107, .12);
-  --ok: #5fb37a;
-  --warn: #d9a03f;
-  --warn-soft: rgba(217, 160, 63, .12);
+  --danger: #f06f98;
+  --danger-soft: rgba(240, 111, 152, .14);
+  --ok: #58c9d8;
+  --warn: #c38cff;
+  --warn-soft: rgba(195, 140, 255, .15);
 
   /* Structure */
-  --border: #2a2f3b;
-  --border-soft: #232833;
-  --shadow: 0 8px 28px rgba(0, 0, 0, .45);
+  --border: #29324b;
+  --border-soft: #202840;
+  --shadow: 0 8px 28px rgba(0, 0, 0, .48);
   --radius: 8px;
   --radius-lg: 12px;
 

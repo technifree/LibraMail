@@ -1,30 +1,30 @@
-/* LibraMail — Thème clair */
+/* LibraMail — Thème clair (accordé au logo blanc / bleu) */
 :root[data-theme="light"] {
-  --bg-app: #eef0f4;
-  --bg-panel: #f8f9fb;
+  --bg-app: #edf4fd;
+  --bg-panel: #f7faff;
   --bg-panel-2: #ffffff;
-  --bg-hover: #e8ebf1;
-  --bg-active: #dde2ea;
+  --bg-hover: #e6eef9;
+  --bg-active: #d8e5f7;
   --bg-input: #ffffff;
 
-  --fg: #33384a;
-  --fg-strong: #171b28;
-  --fg-muted: #6b7180;
-  --fg-faint: #9aa0ad;
+  --fg: #2c3b53;
+  --fg-strong: #162238;
+  --fg-muted: #63738a;
+  --fg-faint: #92a1b5;
 
-  --accent: #a8801f;
-  --accent-soft: rgba(168, 128, 31, .12);
+  --accent: #4782d6;
+  --accent-soft: rgba(71, 130, 214, .14);
   --accent-fg: #ffffff;
 
-  --danger: #c8323c;
-  --danger-soft: rgba(200, 50, 60, .10);
-  --ok: #2c8a4e;
-  --warn: #a8741a;
-  --warn-soft: rgba(168, 116, 26, .12);
+  --danger: #cf4966;
+  --danger-soft: rgba(207, 73, 102, .10);
+  --ok: #36a9bf;
+  --warn: #7d6ee8;
+  --warn-soft: rgba(125, 110, 232, .12);
 
-  --border: #d7dbe3;
-  --border-soft: #e4e7ee;
-  --shadow: 0 8px 28px rgba(30, 35, 50, .14);
+  --border: #d5e0ef;
+  --border-soft: #e7eef8;
+  --shadow: 0 8px 28px rgba(48, 86, 145, .14);
   --radius: 8px;
   --radius-lg: 12px;
 

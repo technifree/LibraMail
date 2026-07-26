@@ -49,9 +49,9 @@ const App = (() => {
     '#8b7dd8', '#4f8bd6', '#36a3a0', '#49a86b', '#a8a33a',
     '#d39a3f', '#d66f4f', '#cf5b78', '#9a6cc2', '#687386',
   ];
-  const DEFAULT_ACCENTS = { dark: '#D4A94F', light: '#A8801F' };
+  const DEFAULT_ACCENTS = { dark: '#A879DA', light: '#4782D6' };
   const ACCENT_PRESETS = [
-    { id: 'libra', color: '#D4A94F' },
+    { id: 'libra', color: '#A879DA' },
     { id: 'blue', color: '#4F8BD6' },
     { id: 'green', color: '#49A86B' },
     { id: 'purple', color: '#8B7DD8' },

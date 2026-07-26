@@ -14,7 +14,10 @@
 
   <div id="topbar">
     <span id="brand" title="LibraMail 0.2.18">
-      <i class="fa-solid fa-envelope"></i>
+      <span class="brand-logo-box" aria-hidden="true">
+        <img class="brand-logo brand-logo-light" src="assets/logo-light.png" alt="">
+        <img class="brand-logo brand-logo-dark" src="assets/logo-dark.png" alt="">
+      </span>
       <span class="brand-name">LibraMail</span>
       <span class="version-badge" id="app-version">v0.2.18</span>
     </span>
@@ -392,13 +395,13 @@
                 <option value="custom" data-i18n="settings.accent.custom"></option>
               </select>
               <div class="accent-color-fields">
-                <input id="set-accent-color" type="color" value="#D4A94F" aria-label="Couleur dominante">
-                <input id="set-accent-hex" type="text" value="#D4A94F" maxlength="7" spellcheck="false" data-i18n-title="settings.accentHex">
+                <input id="set-accent-color" type="color" value="#A879DA" aria-label="Couleur dominante">
+                <input id="set-accent-hex" type="text" value="#A879DA" maxlength="7" spellcheck="false" data-i18n-title="settings.accentHex">
                 <span class="accent-preview-chip" id="accent-preview-chip" data-i18n="settings.preview"></span>
               </div>
             </div>
             <div class="accent-swatches" id="accent-swatches">
-              <button type="button" class="accent-swatch" data-color="#D4A94F" data-preset="libra" data-i18n-title="settings.accent.libra"><span style="background:#D4A94F"></span></button>
+              <button type="button" class="accent-swatch" data-color="#A879DA" data-preset="libra" data-i18n-title="settings.accent.libra"><span style="background:#A879DA"></span></button>
               <button type="button" class="accent-swatch" data-color="#4F8BD6" data-preset="blue" data-i18n-title="settings.accent.blue"><span style="background:#4F8BD6"></span></button>
               <button type="button" class="accent-swatch" data-color="#49A86B" data-preset="green" data-i18n-title="settings.accent.green"><span style="background:#49A86B"></span></button>
               <button type="button" class="accent-swatch" data-color="#8B7DD8" data-preset="purple" data-i18n-title="settings.accent.purple"><span style="background:#8B7DD8"></span></button>
