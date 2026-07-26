@@ -123,9 +123,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            release-assets/* \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "LibraMail ${GITHUB_REF_NAME#v}" \
-            --notes-file .github/release-notes.md \
-            --verify-tag
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+  echo "Release existante détectée : $GITHUB_REF_NAME"
+
+      gh release edit "$GITHUB_REF_NAME" \
+        --repo "$GITHUB_REPOSITORY" \
+        --title "LibraMail ${GITHUB_REF_NAME#v}" \
+        --notes-file .github/release-notes.md
+
+      gh release upload "$GITHUB_REF_NAME" \
+        release-assets/* \
+        --repo "$GITHUB_REPOSITORY" \
+        --clobber
+    else
+      gh release create "$GITHUB_REF_NAME" \
+        release-assets/* \
+        --repo "$GITHUB_REPOSITORY" \
+        --title "LibraMail ${GITHUB_REF_NAME#v}" \
+        --notes-file .github/release-notes.md \
+        --verify-tag
+    fi
