@@ -33,7 +33,7 @@
       "center": true,
       "resizable": true,
       "exitProcessOnClose": false,
-      "icon": "/resources/icons/appIcon.png"
+      "icon": "/resources/favicon.ico"
     }
   },
   "cli": {
