@@ -128,9 +128,10 @@ if ($NodeVersion -notmatch '^\d+\.\d+\.\d+$') {
 
 Require-File -RelativePath 'neutralino.config.json'
 Require-File -RelativePath 'resources\index.html'
-Require-File -RelativePath 'resources\assets\logo-dark.png'
-Require-File -RelativePath 'resources\assets\logo-light.png'
-Require-File -RelativePath 'resources\icons\appIcon.png'
+Require-File -RelativePath 'resources\js\i18n.js'
+Require-File -RelativePath 'resources\js\maillist.js'
+Require-File -RelativePath 'resources\js\viewer.js'
+Require-File -RelativePath 'resources\vendor\purify.min.js'
 Require-File -RelativePath 'engine\backend.js'
 Require-Directory -RelativePath 'resources'
 Require-Directory -RelativePath 'engine'
@@ -148,15 +149,6 @@ $Config = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 | ConvertFrom
 $Version = [string]$Config.version
 if ([string]::IsNullOrWhiteSpace($Version)) {
     throw 'La version est absente de neutralino.config.json.'
-}
-
-$ResourcesIndexPath = Join-Path $ProjectDir 'resources\index.html'
-$ResourcesIndex = Get-Content -LiteralPath $ResourcesIndexPath -Raw -Encoding UTF8
-if ($ResourcesIndex -match '0\.2\.18') {
-    throw 'resources\index.html contient encore 0.2.18 : le paquet embarquerait l''ancienne interface.'
-}
-if ($ResourcesIndex -notlike "*$Version*") {
-    Write-Warning "resources\index.html ne mentionne pas la version $Version. Vérifiez le titre/badge affiché."
 }
 
 $BinaryName = 'libramail'
@@ -384,9 +376,10 @@ try {
     }
 
     $requiredNeuBinary = Join-Path $ProjectDir 'bin\neutralino-win_x64.exe'
+    $requiredNeuClient = Join-Path $ProjectDir 'resources\js\neutralino.js'
 
-    if (-not (Test-Path -LiteralPath $requiredNeuBinary -PathType Leaf)) {
-        Write-Build -Message 'Téléchargement des binaires Neutralino.'
+    if ((-not (Test-Path -LiteralPath $requiredNeuBinary -PathType Leaf)) -or (-not (Test-Path -LiteralPath $requiredNeuClient -PathType Leaf))) {
+        Write-Build -Message 'Téléchargement des binaires ou du client Neutralino.'
         Invoke-Checked `
             -FilePath $neuCommand `
             -ArgumentList ($neuPrefixArguments + @('update'))
@@ -394,6 +387,9 @@ try {
 
     if (-not (Test-Path -LiteralPath $requiredNeuBinary -PathType Leaf)) {
         throw "Binaire Neutralino absent : $requiredNeuBinary"
+    }
+    if (-not (Test-Path -LiteralPath $requiredNeuClient -PathType Leaf)) {
+        throw "Client Neutralino absent : $requiredNeuClient"
     }
 
     $buildArguments = @('build')

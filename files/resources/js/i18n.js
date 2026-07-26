@@ -1,33 +1,59 @@
-/* LibraMail — i18n
- * Fichiers JSON dans /locales. Ajout d'une langue = un fichier de plus.
- * Usage HTML : <span data-i18n="clé"></span> ou data-i18n-ph pour un placeholder.
- * Usage JS  : t('clé', { var: valeur })
- */
+/* LibraMail — internationalisation légère */
 'use strict';
-const I18N = (() => {
-  let dict = {};
-  let locale = 'fr';
+(function () {
+  const DEFAULT_LOCALE = 'fr';
+  const I18N = {
+    locale: '',
+    messages: {},
+    async load(locale = DEFAULT_LOCALE) {
+      const requested = String(locale || DEFAULT_LOCALE).toLowerCase().startsWith('en') ? 'en' : 'fr';
+      let messages = {};
+      try {
+        const response = await fetch(`locales/${requested}.json`, { cache: 'no-store' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        messages = await response.json();
+      } catch (error) {
+        if (requested !== DEFAULT_LOCALE) {
+          try {
+            const fallback = await fetch(`locales/${DEFAULT_LOCALE}.json`, { cache: 'no-store' });
+            if (fallback.ok) messages = await fallback.json();
+          } catch {}
+        }
+        if (!Object.keys(messages).length) {
+          console.warn('[LibraMail] Traductions indisponibles :', error);
+        }
+      }
+      this.locale = requested;
+      this.messages = messages || {};
+      this.apply(document);
+      return this.messages;
+    },
+    translate(key, variables = {}) {
+      const raw = this.messages?.[key] ?? key;
+      return String(raw).replace(/\{([\w.-]+)\}/g, (match, name) => {
+        return Object.prototype.hasOwnProperty.call(variables, name) ? String(variables[name]) : match;
+      });
+    },
+    apply(root = document) {
+      const scope = root || document;
+      scope.querySelectorAll?.('[data-i18n]').forEach(element => {
+        element.textContent = this.translate(element.dataset.i18n);
+      });
+      scope.querySelectorAll?.('[data-i18n-title]').forEach(element => {
+        element.setAttribute('title', this.translate(element.dataset.i18nTitle));
+        element.setAttribute('aria-label', this.translate(element.dataset.i18nTitle));
+      });
+      scope.querySelectorAll?.('[data-i18n-ph]').forEach(element => {
+        element.setAttribute('placeholder', this.translate(element.dataset.i18nPh));
+      });
+    },
+  };
 
-  async function load(loc) {
-    locale = loc;
-    const res = await fetch(`locales/${loc}.json`);
-    dict = await res.json();
-    apply();
-    document.documentElement.lang = loc;
-  }
+  window.I18N = I18N;
+  window.t = (key, variables) => I18N.translate(key, variables);
 
-  function t(key, vars) {
-    let s = dict[key] || key;
-    if (vars) for (const [k, v] of Object.entries(vars)) s = s.replaceAll(`{${k}}`, v);
-    return s;
-  }
-
-  function apply(root = document) {
-    root.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
-    root.querySelectorAll('[data-i18n-ph]').forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
-    root.querySelectorAll('[data-i18n-title]').forEach(el => { el.title = t(el.dataset.i18nTitle); });
-  }
-
-  return { load, t, apply, get locale() { return locale; } };
+  window.addEventListener('DOMContentLoaded', () => {
+    const browserLocale = (navigator.language || DEFAULT_LOCALE).slice(0, 2);
+    I18N.load(browserLocale).catch(error => console.warn('[LibraMail] Chargement langue :', error));
+  });
 })();
-const t = (k, v) => I18N.t(k, v);

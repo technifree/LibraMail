@@ -536,7 +536,9 @@ async function emptyTrash({ source = 'manual', onProgress = null } = {}) {
 
 async function cleanupExpiredSpamForAccount(account, { source = 'retention', silent = false } = {}) {
   if (!account || !Number(account.spamRetentionDays)) return { processed: 0, disabled: true };
-  if (activeCleanups.has(account.id)) return activeCleanups.get(account.id);
+  if (maintenanceOperation || shuttingDown) return { processed: 0, skipped: true };
+  const activeCleanup = activeCleanups.get(account.id);
+  if (activeCleanup) return activeCleanup.promise || activeCleanup;
 
   const task = (async () => {
     const cutoff = Date.now() - Number(account.spamRetentionDays) * 86400000;
@@ -560,7 +562,16 @@ async function cleanupExpiredSpamForAccount(account, { source = 'retention', sil
     throw error;
   }).finally(() => activeCleanups.delete(account.id));
 
-  activeCleanups.set(account.id, task);
+  activeCleanups.set(account.id, {
+    promise: task,
+    source,
+    silent: Boolean(silent),
+    // Les nettoyages automatiques de rétention ne doivent pas bloquer une sauvegarde.
+    // Ils sont lancés en arrière-plan et peuvent rester ouverts plusieurs secondes si
+    // un serveur IMAP traîne des pieds, comme s'il découvrait Internet en 1997.
+    blocking: !silent && source !== 'retention' && source !== 'settings',
+    startedAt: Date.now(),
+  });
   return task;
 }
 
@@ -599,6 +610,15 @@ function stopAccountRuntime() {
   imap.stopAllWatches?.();
 }
 
+function canRunBackgroundCleanup() {
+  return !shuttingDown && !maintenanceOperation && activeSyncs.size === 0;
+}
+
+function runBackgroundCleanup() {
+  if (!canRunBackgroundCleanup()) return;
+  cleanupAllExpiredSpam({ silent: true }).catch(() => {});
+}
+
 function startAccountRuntime({ resolveFolders = false } = {}) {
   for (const account of accounts) {
     if (resolveFolders) initializeAccount(account).catch(() => {});
@@ -608,9 +628,9 @@ function startAccountRuntime({ resolveFolders = false } = {}) {
     }
   }
   if (retentionTimer) clearInterval(retentionTimer);
-  retentionTimer = setInterval(() => cleanupAllExpiredSpam({ silent: true }).catch(() => {}), RETENTION_CHECK_MS);
+  retentionTimer = setInterval(runBackgroundCleanup, RETENTION_CHECK_MS);
   retentionTimer.unref?.();
-  setTimeout(() => cleanupAllExpiredSpam({ silent: true }).catch(() => {}), 8000).unref?.();
+  setTimeout(runBackgroundCleanup, 8000).unref?.();
 }
 
 function backupTimestamp(date = new Date()) {
@@ -618,10 +638,26 @@ function backupTimestamp(date = new Date()) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}_${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}`;
 }
 
+function activeBlockingCleanupCount() {
+  let count = 0;
+  for (const entry of activeCleanups.values()) {
+    // Compatibilité avec les anciennes entrées stockées comme Promise brute.
+    if (!entry || typeof entry !== 'object' || !('blocking' in entry)) {
+      count++;
+      continue;
+    }
+    if (entry.blocking) count++;
+  }
+  return count;
+}
+
 function ensureMaintenanceAvailable() {
   if (maintenanceOperation) throw new Error('Une opération de sauvegarde ou de restauration est déjà en cours');
-  if (activeSyncs.size || activeCleanups.size) {
-    throw new Error('Une relève ou une opération de nettoyage est en cours. Réessayez lorsqu’elle est terminée.');
+  if (activeSyncs.size) {
+    throw new Error('Une relève est en cours. Réessayez lorsqu’elle est terminée.');
+  }
+  if (activeBlockingCleanupCount()) {
+    throw new Error('Une opération de nettoyage manuelle est en cours. Réessayez lorsqu’elle est terminée.');
   }
 }
 

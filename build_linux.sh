@@ -84,9 +84,10 @@ require_cmd()  { command -v "$1" >/dev/null 2>&1 || die "Commande requise absent
 
 require_file neutralino.config.json
 require_file resources/index.html
-require_file resources/assets/logo-dark.png
-require_file resources/assets/logo-light.png
-require_file resources/icons/appIcon.png
+require_file resources/js/i18n.js
+require_file resources/js/maillist.js
+require_file resources/js/viewer.js
+require_file resources/vendor/purify.min.js
 require_file engine/backend.js
 require_dir resources
 require_dir engine
@@ -119,16 +120,6 @@ PY
 VERSION="${META[0]}"
 BINARY_NAME="${META[1]}"
 APPLICATION_ID="${META[2]}"
-
-if stale_version_matches="$(grep -n '0\.2\.18' "$PROJECT_DIR/resources/index.html" 2>/dev/null || true)" \
-   && [[ -n "$stale_version_matches" ]]; then
-  printf '%s\n' "$stale_version_matches" >&2
-  die "resources/index.html contient encore 0.2.18 : le paquet embarquerait l'ancienne interface."
-fi
-
-if ! grep -Fq "$VERSION" "$PROJECT_DIR/resources/index.html"; then
-  warn "resources/index.html ne mentionne pas la version ${VERSION}. Vérifiez le titre/badge affiché."
-fi
 
 case "$(uname -m)" in
   x86_64|amd64)
@@ -281,12 +272,15 @@ else
 fi
 
 NEU_SOURCE_BINARY="$PROJECT_DIR/bin/neutralino-linux_${NEU_ARCH}"
-if [[ ! -f "$NEU_SOURCE_BINARY" ]]; then
-  log "Binaires Neutralino absents. Téléchargement de la version déclarée dans neutralino.config.json..."
+NEU_CLIENT_LIBRARY="$PROJECT_DIR/resources/js/neutralino.js"
+if [[ ! -f "$NEU_SOURCE_BINARY" || ! -f "$NEU_CLIENT_LIBRARY" ]]; then
+  log "Binaires ou client Neutralino absents. Téléchargement de la version déclarée dans neutralino.config.json..."
   "${NEU[@]}" update
 fi
 [[ -f "$NEU_SOURCE_BINARY" ]] \
   || die "Le binaire Neutralino attendu n'a pas été téléchargé : $NEU_SOURCE_BINARY"
+[[ -f "$NEU_CLIENT_LIBRARY" ]] \
+  || die "Le client Neutralino attendu n'a pas été généré : $NEU_CLIENT_LIBRARY"
 
 log "Construction Neutralino ${VERSION} pour Linux ${PACKAGE_ARCH}..."
 BUILD_ARGS=(build)
@@ -530,15 +524,10 @@ LOG_FILE="$DATA_DIR/engine.log"
 cd "$APP_DIR"
 export WEBKIT_DISABLE_DMABUF_RENDERER="${WEBKIT_DISABLE_DMABUF_RENDERER:-1}"
 
-if [[ ! -e "$NODE_BIN" ]]; then
+[[ -x "$NODE_BIN" ]] || {
   printf 'Erreur : runtime Node.js embarqué introuvable : %s\n' "$NODE_BIN" >&2
   exit 1
-fi
-if [[ ! -x "$NODE_BIN" ]]; then
-  printf 'Erreur : runtime Node.js présent mais non exécutable : %s\n' "$NODE_BIN" >&2
-  printf 'Correction possible : chmod +x "%s"\n' "$NODE_BIN" >&2
-  exit 1
-fi
+}
 [[ -f "$ENGINE_FILE" ]] || {
   printf 'Erreur : moteur LibraMail introuvable : %s\n' "$ENGINE_FILE" >&2
   exit 1
@@ -603,16 +592,6 @@ cat > "$PACKAGE_DIR/check_portable.sh" <<'CHECKER'
 set -Eeuo pipefail
 APP_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 NODE_BIN="$APP_DIR/runtime/node/bin/node"
-
-if [[ ! -e "$NODE_BIN" ]]; then
-  printf 'Runtime Node.js introuvable : %s\n' "$NODE_BIN" >&2
-  exit 1
-fi
-if [[ ! -x "$NODE_BIN" ]]; then
-  printf 'Runtime Node.js présent mais non exécutable : %s\n' "$NODE_BIN" >&2
-  printf 'Correction possible : chmod +x "%s"\n' "$NODE_BIN" >&2
-  exit 1
-fi
 
 printf 'Runtime embarqué : '
 "$NODE_BIN" --version
