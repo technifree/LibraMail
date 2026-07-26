@@ -577,5 +577,6 @@
   "about.storageValue": "Local storage in the data/ folder",
   "about.engineLabel": "Engine",
   "group.week": "This week",
-  "group.month": "This month"
+  "group.month": "This month",
+  "backup.waitingEngine": "Connecting to local engine…"
 }

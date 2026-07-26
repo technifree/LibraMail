@@ -64,6 +64,7 @@ const App = (() => {
   // ---------- RPC ----------
   function connect() {
     if (shuttingDown) return;
+    if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
     ws = new WebSocket(ENGINE);
     ws.onopen = async () => {
       setEngine(true);
@@ -97,6 +98,24 @@ const App = (() => {
       pending.set(id, { resolve, reject });
       ws.send(JSON.stringify({ id, method, params }));
     });
+  }
+
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const engineConnected = () => ws && ws.readyState === WebSocket.OPEN;
+
+  async function waitForEngineConnection({ timeout = 6000, label = '' } = {}) {
+    if (engineConnected()) return;
+    const message = label || t('status.disconnected');
+    status(message, 'busy');
+    if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+      connect();
+    }
+    const started = Date.now();
+    while (Date.now() - started < timeout) {
+      if (engineConnected()) return;
+      await sleep(120);
+    }
+    throw new Error(t('status.disconnected'));
   }
 
   // ---------- Activité et redimensionnement ----------
@@ -4415,6 +4434,7 @@ const App = (() => {
     resetBackupProgress();
     setBackupBusy(true);
     try {
+      await waitForEngineConnection({ label: t('backup.waitingEngine') });
       let target = await selectBackupArchivePath('export');
       if (!target) {
         setBackupOperationStatus('');
@@ -4460,6 +4480,7 @@ const App = (() => {
     let sourcePath;
     let inspection;
     try {
+      await waitForEngineConnection({ label: t('backup.waitingEngine') });
       sourcePath = await selectBackupArchivePath('import');
       if (!sourcePath) {
         setBackupOperationStatus('');
@@ -5285,9 +5306,17 @@ const App = (() => {
   }
 
   window.addEventListener('DOMContentLoaded', () => {
-    try { Neutralino.init(); } catch {}
-    wire();
-    connect();
+    try { Neutralino.init(); } catch (error) {
+      console.warn('[LibraMail] Initialisation Neutralino impossible :', error);
+    }
+    try {
+      wire();
+    } catch (error) {
+      console.error('[LibraMail] Initialisation de l’interface incomplète :', error);
+      try { status(`${t('error')} : ${error.message}`, 'error'); } catch {}
+    } finally {
+      connect();
+    }
   });
 
   return {
