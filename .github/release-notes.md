@@ -1,18 +1,15 @@
-# LibraMail 0.2.19
+# LibraMail 0.2.20
 
 ## Français
 
-Améliorations et corrections de LibraMail.
+- Icône d’application remplacée par le logo LibraMail.
+- Fenêtre « À propos » enrichie au clic sur le logo.
+- Jauge dédiée aux opérations longues : corbeille, indésirables et nettoyages massifs.
+- Vérification discrète de disponibilité d’une nouvelle version.
 
 ## English
 
-LibraMail improvements and fixes.
-
-### Downloads / Téléchargements
-
-- Linux x86_64 portable package
-- Windows x86_64 portable package
-- SHA-256 checksums
-
-Public packages contain no account, password or message data.
-Les paquets publics ne contiennent aucun compte, mot de passe ou message.
+- Application icon replaced with the LibraMail logo.
+- Enriched About dialog when clicking the logo.
+- Dedicated progress gauge for long operations: trash, junk and bulk cleanups.
+- Discreet check for newly available versions.

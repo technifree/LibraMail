@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.20] - 2026-07-26
+
+- Remplacement de l’icône d’application par le logo LibraMail.
+- Ajout d’une fenêtre « À propos » enrichie au clic sur le logo.
+- Ajout d’une jauge dédiée aux opérations longues de nettoyage.
+- Ajout d’une vérification discrète de nouvelle version disponible.
+
 All notable changes to LibraMail are documented here.
 
 ## [0.2.18] - 2026-07-24

@@ -26,7 +26,7 @@ Ce dossier est une surcouche à copier à la racine du projet LibraMail.
 
 9. Publier une version :
 
-   ./github.sh release 0.2.19
+   ./github.sh release 0.2.20
 
 Le script de publication met à jour les numéros de version, crée le commit,
 pousse le tag et attend la publication GitHub contenant les deux archives.

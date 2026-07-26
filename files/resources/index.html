@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LibraMail 0.2.19</title>
+  <title>LibraMail 0.2.20</title>
   <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
   <link rel="stylesheet" href="themes/dark.css">
   <link rel="stylesheet" href="themes/light.css">
@@ -13,13 +13,13 @@
 <div id="app" data-layout="vertical">
 
   <div id="topbar">
-    <span id="brand" title="LibraMail 0.2.19">
+    <span id="brand" title="LibraMail 0.2.20" role="button" tabindex="0" data-i18n-title="about.open">
       <span class="brand-logo-box" aria-hidden="true">
         <img class="brand-logo brand-logo-light" src="assets/logo-light.png" alt="">
         <img class="brand-logo brand-logo-dark" src="assets/logo-dark.png" alt="">
       </span>
       <span class="brand-name">LibraMail</span>
-      <span class="version-badge" id="app-version">v0.2.19</span>
+      <span class="version-badge" id="app-version">v0.2.20</span>
     </span>
     <button class="btn primary" id="btn-compose">
       <i class="fa-solid fa-pen"></i><span data-i18n="compose"></span>
@@ -210,6 +210,10 @@
       <i id="status-icon" class="fa-solid fa-circle-info"></i>
       <span id="status-text" data-i18n="status.disconnected"></span>
     </span>
+    <button id="update-notice" class="update-notice hidden" type="button" data-i18n-title="update.openAbout">
+      <i class="fa-solid fa-circle-arrow-up"></i>
+      <span id="update-notice-text"></span>
+    </button>
     <span id="link-target-status" class="link-target-status hidden" aria-live="polite">
       <i class="fa-solid fa-link"></i>
       <span id="link-target-text"></span>
@@ -222,6 +226,13 @@
       <i class="fa-solid fa-chevron-up activity-chevron"></i>
     </button>
     <span id="spam-stats"></span>
+    <div id="operation-progress" class="operation-progress hidden" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+      <span id="operation-progress-label" class="operation-progress-label"></span>
+      <div class="operation-progress-track" aria-hidden="true">
+        <div id="operation-progress-bar" class="operation-progress-bar"></div>
+      </div>
+      <strong id="operation-progress-percent">0 %</strong>
+    </div>
 
     <section id="activity-panel" class="activity-panel hidden" aria-live="polite">
       <header>
@@ -778,6 +789,52 @@
       <button class="btn danger" id="btn-confirm-exit" type="button">
         <i class="fa-solid fa-power-off"></i><span data-i18n="quit.confirm"></span>
       </button>
+    </footer>
+  </div>
+</div>
+
+
+<div class="modal-veil" id="about-modal">
+  <div class="modal about-modal-box">
+    <header>
+      <span><i class="fa-solid fa-circle-info"></i> <span data-i18n="about.title"></span></span>
+      <button class="iconbtn" data-close><i class="fa-solid fa-xmark"></i></button>
+    </header>
+    <div class="body about-body">
+      <div class="about-hero">
+        <img id="about-logo-light" class="about-logo about-logo-light" src="assets/logo-light.png" alt="">
+        <img id="about-logo-dark" class="about-logo about-logo-dark" src="assets/logo-dark.png" alt="">
+        <div class="about-title-block">
+          <h2>LibraMail</h2>
+          <p id="about-version-line">v0.2.20</p>
+        </div>
+      </div>
+      <div id="about-update-card" class="about-update-card checking">
+        <i id="about-update-icon" class="fa-solid fa-rotate fa-spin"></i>
+        <div>
+          <strong id="about-update-title" data-i18n="update.checking"></strong>
+          <p id="about-update-detail" data-i18n="update.checkingDetail"></p>
+        </div>
+      </div>
+      <div class="about-grid">
+        <div class="about-info-card">
+          <strong data-i18n="about.localFirstTitle"></strong>
+          <p data-i18n="about.localFirstText"></p>
+        </div>
+        <div class="about-info-card">
+          <strong data-i18n="about.engineTitle"></strong>
+          <p id="about-engine-line"></p>
+        </div>
+      </div>
+      <div class="about-disclaimer">
+        <i class="fa-solid fa-shield-halved"></i>
+        <p data-i18n="about.disclaimer"></p>
+      </div>
+    </div>
+    <footer>
+      <button class="btn" id="btn-about-check-update" type="button"><i class="fa-solid fa-rotate"></i><span data-i18n="update.checkNow"></span></button>
+      <button class="btn" id="btn-about-open-releases" type="button"><i class="fa-brands fa-github"></i><span data-i18n="update.openReleases"></span></button>
+      <button class="btn primary" data-close data-i18n="close"></button>
     </footer>
   </div>
 </div>

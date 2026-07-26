@@ -12,7 +12,7 @@ body:
     id: version
     attributes:
       label: LibraMail version
-      placeholder: "0.2.19"
+      placeholder: "0.2.20"
     validations:
       required: true
   - type: dropdown

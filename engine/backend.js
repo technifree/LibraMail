@@ -6,6 +6,7 @@
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const https = require('https');
 const { spawn } = require('child_process');
 const { WebSocketServer } = require('ws');
 const { simpleParser } = require('mailparser');
@@ -18,7 +19,7 @@ const backup = require('./lib/backup');
 const nativeDialog = require('./lib/native_dialog');
 
 const PORT = 47800;
-const APP_VERSION = '0.2.19';
+const APP_VERSION = '0.2.20';
 const ROOT = path.resolve(__dirname, '..');
 const DATA = path.join(ROOT, 'data');
 const ACCOUNTS_FILE = path.join(DATA, 'accounts.json');
@@ -26,6 +27,9 @@ const CONFIG_FILE = path.join(DATA, 'config.json');
 const BACKUPS_DIR = path.join(ROOT, 'backups');
 const RESTORE_STATE_FILE = path.join(ROOT, '.libramail-restore-state.json');
 const RETENTION_CHECK_MS = 6 * 60 * 60 * 1000;
+const UPDATE_CHECK_URL = 'https://api.github.com/repos/technifree/LibraMail/releases/latest';
+const UPDATE_CHECK_CACHE_MS = 6 * 60 * 60 * 1000;
+let versionCheckCache = null;
 
 fs.mkdirSync(DATA, { recursive: true });
 
@@ -421,16 +425,24 @@ async function setMessageSpamState(message, isSpam) {
   return true;
 }
 
-async function moveMessagesToTrash(messages, { source = 'manual' } = {}) {
+async function moveMessagesToTrash(messages, { source = 'manual', onProgress = null, total = null } = {}) {
   const succeededIds = [];
   const affectedAccounts = new Set();
   const errors = [];
+  const expectedTotal = Number.isFinite(Number(total)) ? Number(total) : messages.length;
+  let completed = 0;
+  const emitProgress = extra => {
+    if (typeof onProgress !== 'function') return;
+    onProgress({ completed, total: expectedTotal, ...extra });
+  };
 
   for (const group of groupMessages(messages)) {
     const first = group[0];
     const account = getAccount(first.account_id);
     if (!account) {
       errors.push({ accountId: first.account_id, error: 'Compte introuvable' });
+      completed += group.length;
+      emitProgress({ accountId: first.account_id, folder: first.folder, error: 'Compte introuvable' });
       continue;
     }
 
@@ -446,6 +458,9 @@ async function moveMessagesToTrash(messages, { source = 'manual' } = {}) {
       succeededIds.push(...group.map(message => message.id));
     } catch (error) {
       errors.push({ accountId: account.id, folder: first.folder, error: error.message });
+    } finally {
+      completed += group.length;
+      emitProgress({ accountId: account?.id || first.account_id, folder: first.folder });
     }
   }
 
@@ -468,10 +483,16 @@ async function moveMessagesToTrash(messages, { source = 'manual' } = {}) {
   };
 }
 
-async function emptyTrash({ source = 'manual' } = {}) {
+async function emptyTrash({ source = 'manual', onProgress = null } = {}) {
   const messages = db.listMessagesByRole('trash');
   const removedIds = [];
   const errors = [];
+  const expectedTotal = messages.length;
+  let completed = 0;
+  const emitProgress = extra => {
+    if (typeof onProgress !== 'function') return;
+    onProgress({ completed, total: expectedTotal, ...extra });
+  };
   const localByAccountFolder = new Map();
   for (const group of groupMessages(messages)) {
     const first = group[0];
@@ -497,13 +518,17 @@ async function emptyTrash({ source = 'manual' } = {}) {
         await imap.emptyFolder(account, folder);
         const local = localByAccountFolder.get(`${account.id}\u0000${folder}`) || [];
         removedIds.push(...local.map(message => message.id));
+        completed += local.length;
         db.clearSyncState(account.id, folder);
+        emitProgress({ accountId: account.id, folder });
       } catch (error) {
         errors.push({ accountId: account.id, folder, error: error.message });
+        emitProgress({ accountId: account.id, folder, error: error.message });
       }
     }
   }
 
+  if (expectedTotal === 0) emitProgress({ completed: 0, total: 0, done: true });
   const removed = db.deleteMessages(removedIds);
   removeLocalFiles(removed);
   return { deleted: removed.length, errors, source };
@@ -763,6 +788,88 @@ async function importCompleteBackup(sourcePath) {
     fs.rmSync(rollbackRoot, { recursive: true, force: true });
     fs.rmSync(RESTORE_STATE_FILE, { force: true });
     throw error;
+  }
+}
+
+
+function compareVersions(left, right) {
+  const normalize = value => String(value || '')
+    .trim()
+    .replace(/^v/i, '')
+    .split(/[+-]/)[0]
+    .split('.')
+    .map(part => Number.parseInt(part, 10) || 0);
+  const a = normalize(left);
+  const b = normalize(right);
+  const size = Math.max(a.length, b.length, 3);
+  for (let index = 0; index < size; index++) {
+    const diff = (a[index] || 0) - (b[index] || 0);
+    if (diff) return diff;
+  }
+  return 0;
+}
+
+function requestJson(url, { timeoutMs = 5000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, {
+      headers: {
+        'Accept': 'application/vnd.github+json',
+        'User-Agent': `LibraMail/${APP_VERSION}`,
+      },
+      timeout: timeoutMs,
+    }, response => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', chunk => { body += chunk; });
+      response.on('end', () => {
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          reject(new Error(`HTTP ${response.statusCode}`));
+          return;
+        }
+        try { resolve(JSON.parse(body)); }
+        catch (error) { reject(new Error(`Réponse JSON invalide : ${error.message}`)); }
+      });
+    });
+    request.on('timeout', () => request.destroy(new Error('Délai de vérification dépassé')));
+    request.on('error', reject);
+  });
+}
+
+async function checkVersionInfo({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && versionCheckCache && now - versionCheckCache.checkedAtMs < UPDATE_CHECK_CACHE_MS) {
+    return versionCheckCache.public;
+  }
+
+  const base = {
+    current: APP_VERSION,
+    latest: '',
+    updateAvailable: false,
+    releaseUrl: 'https://github.com/technifree/LibraMail/releases',
+    checkedAt: new Date(now).toISOString(),
+    checked: true,
+    source: UPDATE_CHECK_URL,
+    platform: process.platform,
+    node: process.version,
+    error: '',
+  };
+
+  try {
+    const latest = await requestJson(UPDATE_CHECK_URL);
+    const latestVersion = String(latest.tag_name || latest.name || '').replace(/^v/i, '').trim();
+    if (!latestVersion) throw new Error('Version distante introuvable');
+    const result = {
+      ...base,
+      latest: latestVersion,
+      updateAvailable: compareVersions(latestVersion, APP_VERSION) > 0,
+      releaseUrl: latest.html_url || base.releaseUrl,
+    };
+    versionCheckCache = { checkedAtMs: now, public: result };
+    return result;
+  } catch (error) {
+    const result = { ...base, error: error.message };
+    versionCheckCache = { checkedAtMs: now, public: result };
+    return result;
   }
 }
 
@@ -1147,25 +1254,34 @@ const methods = {
   'spam.stats': async () => spam.stats(),
   'spam.empty': async () => {
     const messages = db.listSpamMessages();
-    broadcast('folder.empty.started', { kind: 'spam', count: messages.length });
+    const operationId = crypto.randomUUID();
+    broadcast('folder.empty.started', { operationId, kind: 'spam', count: messages.length, total: messages.length });
     try {
-      const result = await moveMessagesToTrash(messages, { source: 'empty-spam' });
-      broadcast('folder.empty.done', { kind: 'spam', count: result.processed, errors: result.errors });
+      const result = await moveMessagesToTrash(messages, {
+        source: 'empty-spam',
+        total: messages.length,
+        onProgress: progress => broadcast('folder.empty.progress', { operationId, kind: 'spam', ...progress }),
+      });
+      broadcast('folder.empty.done', { operationId, kind: 'spam', count: result.processed, completed: messages.length, total: messages.length, errors: result.errors });
       return result;
     } catch (error) {
-      broadcast('folder.empty.error', { kind: 'spam', error: error.message });
+      broadcast('folder.empty.error', { operationId, kind: 'spam', error: error.message, completed: 0, total: messages.length });
       throw error;
     }
   },
   'trash.empty': async () => {
     const count = db.countMessages({ folderRole: 'trash', spam: null }).n;
-    broadcast('folder.empty.started', { kind: 'trash', count });
+    const operationId = crypto.randomUUID();
+    broadcast('folder.empty.started', { operationId, kind: 'trash', count, total: count });
     try {
-      const result = await emptyTrash({ source: 'empty-trash' });
-      broadcast('folder.empty.done', { kind: 'trash', count: result.deleted, errors: result.errors });
+      const result = await emptyTrash({
+        source: 'empty-trash',
+        onProgress: progress => broadcast('folder.empty.progress', { operationId, kind: 'trash', ...progress }),
+      });
+      broadcast('folder.empty.done', { operationId, kind: 'trash', count: result.deleted, completed: count, total: count, errors: result.errors });
       return result;
     } catch (error) {
-      broadcast('folder.empty.error', { kind: 'trash', error: error.message });
+      broadcast('folder.empty.error', { operationId, kind: 'trash', error: error.message, completed: 0, total: count });
       throw error;
     }
   },
@@ -1287,6 +1403,9 @@ const methods = {
       sentCopyWarning,
     };
   },
+
+  // ---------- Informations application ----------
+  'app.versionInfo': async ({ force = false } = {}) => checkVersionInfo({ force }),
 
   // ---------- Ouverture externe sécurisée ----------
   'app.openExternal': async ({ url }) => openExternalWithSystem(url),
