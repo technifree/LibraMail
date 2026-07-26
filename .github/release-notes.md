@@ -1,4 +1,4 @@
-# LibraMail 0.2.18
+# LibraMail 0.2.19
 
 ## Français
 

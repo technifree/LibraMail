@@ -1,0 +1,44 @@
+/* LibraMail — Thème sombre (défaut, accordé au logo fuchsia)
+ * Pour créer un thème personnalisé : copiez ce fichier dans themes/,
+ * renommez [data-theme="..."], ajustez les variables, déclarez-le
+ * dans Paramètres. Aucune autre modification nécessaire. */
+:root[data-theme="dark"] {
+  /* Fonds bleu nuit / violet, sans dominante brune */
+  --bg-app: #0f1220;
+  --bg-panel: #15192a;
+  --bg-panel-2: #1a2035;
+  --bg-hover: #242b43;
+  --bg-active: #2d3655;
+  --bg-input: #0d1020;
+
+  /* Texte */
+  --fg: #e0e6f2;
+  --fg-strong: #f7f9ff;
+  --fg-muted: #a1adc4;
+  --fg-faint: #69758f;
+
+  /* Accent tiré du logo violet / fuchsia */
+  --accent: #a879da;
+  --accent-soft: rgba(168, 121, 218, .18);
+  --accent-fg: #160d20;
+
+  /* Sémantique */
+  --danger: #f06f98;
+  --danger-soft: rgba(240, 111, 152, .14);
+  --ok: #58c9d8;
+  --warn: #c38cff;
+  --warn-soft: rgba(195, 140, 255, .15);
+
+  /* Structure */
+  --border: #29324b;
+  --border-soft: #202840;
+  --shadow: 0 8px 28px rgba(0, 0, 0, .48);
+  --radius: 8px;
+  --radius-lg: 12px;
+
+  /* Liste des messages */
+  --row-unread-fg: var(--fg-strong);
+  --row-height: 68px;
+
+  color-scheme: dark;
+}

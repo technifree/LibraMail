@@ -18,7 +18,7 @@ const backup = require('./lib/backup');
 const nativeDialog = require('./lib/native_dialog');
 
 const PORT = 47800;
-const APP_VERSION = '0.2.18';
+const APP_VERSION = '0.2.19';
 const ROOT = path.resolve(__dirname, '..');
 const DATA = path.join(ROOT, 'data');
 const ACCOUNTS_FILE = path.join(DATA, 'accounts.json');
