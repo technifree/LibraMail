@@ -2781,17 +2781,43 @@ body.resizing-panes.resize-rows { cursor: row-resize; }
 :root[data-theme="dark"] .about-logo-dark { display: block; }
 .about-title-block h2 { margin: 0 0 5px; color: var(--fg-strong); font-size: 28px; letter-spacing: .2px; }
 .about-title-block p { margin: 0; color: var(--fg-muted); font-size: 13px; }
-.about-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .about-info-card,
-.about-update-card,
-.about-disclaimer {
+.about-update-card {
   border: 1px solid var(--border-soft);
   border-radius: 12px;
   background: var(--bg-panel-2);
 }
-.about-info-card { padding: 12px; }
+.about-info-card { padding: 13px; }
 .about-info-card strong { display: block; color: var(--fg-strong); margin-bottom: 5px; }
 .about-info-card p { margin: 0; color: var(--fg-muted); line-height: 1.45; }
+.about-global-card { display: grid; gap: 12px; }
+.about-global-intro {
+  display: flex;
+  gap: 11px;
+  color: var(--fg-muted);
+  line-height: 1.45;
+}
+.about-global-intro i { color: var(--accent); margin-top: 2px; }
+.about-meta-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 14px;
+  margin: 0;
+}
+.about-meta-list div { min-width: 0; }
+.about-meta-list dt {
+  color: var(--fg-faint);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  margin-bottom: 3px;
+}
+.about-meta-list dd {
+  margin: 0;
+  color: var(--fg-strong);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
 .about-update-card {
   display: flex;
   align-items: flex-start;
@@ -2804,16 +2830,10 @@ body.resizing-panes.resize-rows { cursor: row-resize; }
 .about-update-card.error > i { color: var(--fg-faint); }
 .about-update-card strong { color: var(--fg-strong); }
 .about-update-card p { margin: 4px 0 0; color: var(--fg-muted); line-height: 1.45; }
-.about-disclaimer {
-  display: flex;
-  gap: 11px;
-  padding: 12px;
-  color: var(--fg-muted);
-  line-height: 1.45;
-}
-.about-disclaimer i { color: var(--accent); margin-top: 2px; }
-.about-disclaimer p { margin: 0; }
+#btn-about-check-update.is-busy i { animation: about-spin 0.9s linear infinite; }
+#btn-about-check-update:disabled { opacity: .75; cursor: progress; }
+@keyframes about-spin { to { transform: rotate(360deg); } }
 @media (max-width: 900px) {
   .operation-progress { display: none; }
-  .about-grid { grid-template-columns: 1fr; }
+  .about-meta-list { grid-template-columns: 1fr; }
 }

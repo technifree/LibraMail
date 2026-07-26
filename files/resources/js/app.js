@@ -656,7 +656,18 @@ const App = (() => {
     }
   }
 
+  function setAboutCheckBusy(active) {
+    const button = document.getElementById('btn-about-check-update');
+    if (!button) return;
+    const icon = button.querySelector('i');
+    button.classList.toggle('is-busy', Boolean(active));
+    button.disabled = Boolean(active);
+    if (icon) icon.classList.toggle('fa-spin', Boolean(active));
+  }
+
   async function checkApplicationVersion({ force = false, quiet = true } = {}) {
+    setAboutCheckBusy(true);
+    if (!quiet) status(t('update.checking'), 'info');
     try {
       const info = await rpc('app.versionInfo', { force });
       versionInfo = { ...versionInfo, ...info, checked: true };
@@ -674,6 +685,8 @@ const App = (() => {
       renderAboutVersionInfo(versionInfo);
       if (!quiet) status(`${t('error')} : ${error.message}`, 'error');
       return versionInfo;
+    } finally {
+      setAboutCheckBusy(false);
     }
   }
 
@@ -4993,7 +5006,6 @@ const App = (() => {
     });
     document.getElementById('update-notice')?.addEventListener('click', openAboutModal);
     document.getElementById('btn-about-check-update')?.addEventListener('click', () => checkApplicationVersion({ force: true, quiet: false }));
-    document.getElementById('btn-about-open-releases')?.addEventListener('click', () => openExternal(versionInfo.releaseUrl || 'https://github.com/technifree/LibraMail/releases'));
     document.getElementById('btn-confirm-action').onclick = () => resolveConfirmAction(true);
     document.getElementById('btn-cancel-confirm-action').onclick = () => resolveConfirmAction(false);
     document.getElementById('btn-close-confirm-action').onclick = () => resolveConfirmAction(false);
