@@ -24,6 +24,19 @@ const MAX_CENTRAL_DIRECTORY = 256 * 1024 * 1024;
 const MAX_UNCOMPRESSED_TOTAL = 500n * 1024n * 1024n * 1024n;
 const FORMAT = 'libramail-backup';
 const FORMAT_VERSION = 1;
+const RUNTIME_DATA_FILES = new Set([
+  'engine.log',
+  'engine.stdout.log',
+  'engine.stderr.log',
+  'index.db-wal',
+  'index.db-shm',
+]);
+
+function isRuntimeDataPath(relative) {
+  const normalized = String(relative || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  const basename = path.posix.basename(normalized);
+  return RUNTIME_DATA_FILES.has(normalized) || RUNTIME_DATA_FILES.has(basename);
+}
 
 const CRC_TABLE = (() => {
   const table = new Uint32Array(256);
@@ -529,7 +542,7 @@ async function extractArchive(sourcePath, targetRoot, { onProgress } = {}) {
   const dataEntries = inspection.entries.filter(entry => {
     if (!entry.name.startsWith('data/') || entry.isDirectory) return false;
     const relative = entry.name.slice('data/'.length);
-    return !['engine.log', 'index.db-wal', 'index.db-shm'].includes(relative);
+    return !isRuntimeDataPath(relative);
   });
   for (const entry of dataEntries) {
     const relative = entry.name.slice('data/'.length);
@@ -547,7 +560,7 @@ async function extractArchive(sourcePath, targetRoot, { onProgress } = {}) {
 function shouldExcludeDataPath(relative) {
   const normalized = String(relative || '').replace(/\\/g, '/');
   const basename = path.posix.basename(normalized);
-  if (['index.db', 'index.db-wal', 'index.db-shm', 'engine.log'].includes(normalized)) return true;
+  if (normalized === 'index.db' || isRuntimeDataPath(normalized)) return true;
   if (basename.endsWith('.tmp') || basename.endsWith('.lock')) return true;
   return false;
 }

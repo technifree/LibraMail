@@ -6,7 +6,6 @@
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const https = require('https');
 const { spawn } = require('child_process');
 const { WebSocketServer } = require('ws');
 const { simpleParser } = require('mailparser');
@@ -19,7 +18,7 @@ const backup = require('./lib/backup');
 const nativeDialog = require('./lib/native_dialog');
 
 const PORT = 47800;
-const APP_VERSION = '0.2.20';
+const APP_VERSION = '0.2.21';
 const ROOT = path.resolve(__dirname, '..');
 const DATA = path.join(ROOT, 'data');
 const ACCOUNTS_FILE = path.join(DATA, 'accounts.json');
@@ -27,9 +26,11 @@ const CONFIG_FILE = path.join(DATA, 'config.json');
 const BACKUPS_DIR = path.join(ROOT, 'backups');
 const RESTORE_STATE_FILE = path.join(ROOT, '.libramail-restore-state.json');
 const RETENTION_CHECK_MS = 6 * 60 * 60 * 1000;
-const UPDATE_CHECK_URL = 'https://api.github.com/repos/technifree/LibraMail/releases/latest';
-const UPDATE_CHECK_CACHE_MS = 6 * 60 * 60 * 1000;
-let versionCheckCache = null;
+const RUNTIME_DATA_FILES = new Set(['engine.log', 'engine.stdout.log', 'engine.stderr.log']);
+
+function isRuntimeDataFile(name) {
+  return RUNTIME_DATA_FILES.has(String(name || '').replace(/\\/g, '/'));
+}
 
 fs.mkdirSync(DATA, { recursive: true });
 
@@ -45,10 +46,11 @@ function recoverInterruptedRestore() {
   if (safeRollback && fs.existsSync(rollbackRoot)) {
     try {
       for (const name of fs.readdirSync(DATA)) {
-        if (name === 'engine.log') continue;
+        if (isRuntimeDataFile(name)) continue;
         fs.rmSync(path.join(DATA, name), { recursive: true, force: true });
       }
       for (const name of fs.readdirSync(rollbackRoot)) {
+        if (isRuntimeDataFile(name)) continue;
         fs.renameSync(path.join(rollbackRoot, name), path.join(DATA, name));
       }
       console.warn('[LibraMail] Une restauration interrompue a été annulée automatiquement.');
@@ -98,9 +100,17 @@ const defaultConfig = {
   trustedSenders: [],
 };
 
+function normalizeLogoData(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (raw.length > 400000) return '';
+  return /^data:image\/(?:png|jpe?g|webp|svg\+xml);base64,/i.test(raw) ? raw : '';
+}
+
 function normalizeAccount(account) {
   return {
     ...account,
+    logoData: normalizeLogoData(account.logoData),
     syncIntervalMinutes: Number.isFinite(Number(account.syncIntervalMinutes))
       ? Math.max(0, Math.min(1440, Math.round(Number(account.syncIntervalMinutes))))
       : 5,
@@ -191,6 +201,7 @@ function publicAccount(account) {
     displayName: account.displayName,
     email: account.email,
     color: account.color,
+    logoData: normalizeLogoData(account.logoData),
     syncIntervalMinutes: account.syncIntervalMinutes,
     spamRetentionDays: account.spamRetentionDays,
     folders: {
@@ -425,16 +436,12 @@ async function setMessageSpamState(message, isSpam) {
   return true;
 }
 
-async function moveMessagesToTrash(messages, { source = 'manual', onProgress = null, total = null } = {}) {
+async function moveMessagesToTrash(messages, { source = 'manual', onProgress = null } = {}) {
+  const total = Array.isArray(messages) ? messages.length : 0;
+  let completed = 0;
   const succeededIds = [];
   const affectedAccounts = new Set();
   const errors = [];
-  const expectedTotal = Number.isFinite(Number(total)) ? Number(total) : messages.length;
-  let completed = 0;
-  const emitProgress = extra => {
-    if (typeof onProgress !== 'function') return;
-    onProgress({ completed, total: expectedTotal, ...extra });
-  };
 
   for (const group of groupMessages(messages)) {
     const first = group[0];
@@ -442,7 +449,7 @@ async function moveMessagesToTrash(messages, { source = 'manual', onProgress = n
     if (!account) {
       errors.push({ accountId: first.account_id, error: 'Compte introuvable' });
       completed += group.length;
-      emitProgress({ accountId: first.account_id, folder: first.folder, error: 'Compte introuvable' });
+      if (typeof onProgress === 'function') onProgress({ completed, total });
       continue;
     }
 
@@ -460,7 +467,7 @@ async function moveMessagesToTrash(messages, { source = 'manual', onProgress = n
       errors.push({ accountId: account.id, folder: first.folder, error: error.message });
     } finally {
       completed += group.length;
-      emitProgress({ accountId: account?.id || first.account_id, folder: first.folder });
+      if (typeof onProgress === 'function') onProgress({ completed, total });
     }
   }
 
@@ -485,14 +492,10 @@ async function moveMessagesToTrash(messages, { source = 'manual', onProgress = n
 
 async function emptyTrash({ source = 'manual', onProgress = null } = {}) {
   const messages = db.listMessagesByRole('trash');
+  const total = messages.length;
+  let completed = 0;
   const removedIds = [];
   const errors = [];
-  const expectedTotal = messages.length;
-  let completed = 0;
-  const emitProgress = extra => {
-    if (typeof onProgress !== 'function') return;
-    onProgress({ completed, total: expectedTotal, ...extra });
-  };
   const localByAccountFolder = new Map();
   for (const group of groupMessages(messages)) {
     const first = group[0];
@@ -514,31 +517,30 @@ async function emptyTrash({ source = 'manual', onProgress = null } = {}) {
     }
 
     for (const folder of candidates) {
+      const local = localByAccountFolder.get(`${account.id}\u0000${folder}`) || [];
       try {
         await imap.emptyFolder(account, folder);
-        const local = localByAccountFolder.get(`${account.id}\u0000${folder}`) || [];
         removedIds.push(...local.map(message => message.id));
         completed += local.length;
         db.clearSyncState(account.id, folder);
-        emitProgress({ accountId: account.id, folder });
       } catch (error) {
         errors.push({ accountId: account.id, folder, error: error.message });
-        emitProgress({ accountId: account.id, folder, error: error.message });
+        completed += local.length;
+      } finally {
+        if (typeof onProgress === 'function') onProgress({ completed, total });
       }
     }
   }
 
-  if (expectedTotal === 0) emitProgress({ completed: 0, total: 0, done: true });
   const removed = db.deleteMessages(removedIds);
   removeLocalFiles(removed);
   return { deleted: removed.length, errors, source };
 }
 
 async function cleanupExpiredSpamForAccount(account, { source = 'retention', silent = false } = {}) {
+  if (maintenanceOperation) return { processed: 0, skipped: 'maintenance' };
   if (!account || !Number(account.spamRetentionDays)) return { processed: 0, disabled: true };
-  if (maintenanceOperation || shuttingDown) return { processed: 0, skipped: true };
-  const activeCleanup = activeCleanups.get(account.id);
-  if (activeCleanup) return activeCleanup.promise || activeCleanup;
+  if (activeCleanups.has(account.id)) return activeCleanups.get(account.id);
 
   const task = (async () => {
     const cutoff = Date.now() - Number(account.spamRetentionDays) * 86400000;
@@ -562,16 +564,7 @@ async function cleanupExpiredSpamForAccount(account, { source = 'retention', sil
     throw error;
   }).finally(() => activeCleanups.delete(account.id));
 
-  activeCleanups.set(account.id, {
-    promise: task,
-    source,
-    silent: Boolean(silent),
-    // Les nettoyages automatiques de rétention ne doivent pas bloquer une sauvegarde.
-    // Ils sont lancés en arrière-plan et peuvent rester ouverts plusieurs secondes si
-    // un serveur IMAP traîne des pieds, comme s'il découvrait Internet en 1997.
-    blocking: !silent && source !== 'retention' && source !== 'settings',
-    startedAt: Date.now(),
-  });
+  activeCleanups.set(account.id, task);
   return task;
 }
 
@@ -610,15 +603,6 @@ function stopAccountRuntime() {
   imap.stopAllWatches?.();
 }
 
-function canRunBackgroundCleanup() {
-  return !shuttingDown && !maintenanceOperation && activeSyncs.size === 0;
-}
-
-function runBackgroundCleanup() {
-  if (!canRunBackgroundCleanup()) return;
-  cleanupAllExpiredSpam({ silent: true }).catch(() => {});
-}
-
 function startAccountRuntime({ resolveFolders = false } = {}) {
   for (const account of accounts) {
     if (resolveFolders) initializeAccount(account).catch(() => {});
@@ -628,9 +612,9 @@ function startAccountRuntime({ resolveFolders = false } = {}) {
     }
   }
   if (retentionTimer) clearInterval(retentionTimer);
-  retentionTimer = setInterval(runBackgroundCleanup, RETENTION_CHECK_MS);
+  retentionTimer = setInterval(() => cleanupAllExpiredSpam({ silent: true }).catch(() => {}), RETENTION_CHECK_MS);
   retentionTimer.unref?.();
-  setTimeout(runBackgroundCleanup, 8000).unref?.();
+  setTimeout(() => cleanupAllExpiredSpam({ silent: true }).catch(() => {}), 8000).unref?.();
 }
 
 function backupTimestamp(date = new Date()) {
@@ -638,26 +622,10 @@ function backupTimestamp(date = new Date()) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}_${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}`;
 }
 
-function activeBlockingCleanupCount() {
-  let count = 0;
-  for (const entry of activeCleanups.values()) {
-    // Compatibilité avec les anciennes entrées stockées comme Promise brute.
-    if (!entry || typeof entry !== 'object' || !('blocking' in entry)) {
-      count++;
-      continue;
-    }
-    if (entry.blocking) count++;
-  }
-  return count;
-}
-
 function ensureMaintenanceAvailable() {
   if (maintenanceOperation) throw new Error('Une opération de sauvegarde ou de restauration est déjà en cours');
   if (activeSyncs.size) {
     throw new Error('Une relève est en cours. Réessayez lorsqu’elle est terminée.');
-  }
-  if (activeBlockingCleanupCount()) {
-    throw new Error('Une opération de nettoyage manuelle est en cours. Réessayez lorsqu’elle est terminée.');
   }
 }
 
@@ -665,6 +633,9 @@ async function withMaintenance(kind, task) {
   ensureMaintenanceAvailable();
   maintenanceOperation = kind;
   stopAccountRuntime();
+  if (activeCleanups.size) {
+    await Promise.allSettled([...activeCleanups.values()]);
+  }
   broadcast('backup.started', { kind });
   try {
     const result = await task();
@@ -728,7 +699,7 @@ function moveDataContents(sourceDir, targetDir, { keepEngineLog = false } = {}) 
   fs.mkdirSync(targetDir, { recursive: true });
   const names = fs.existsSync(sourceDir) ? fs.readdirSync(sourceDir) : [];
   for (const name of names) {
-    if (keepEngineLog && name === 'engine.log') continue;
+    if (keepEngineLog && isRuntimeDataFile(name)) continue;
     fs.renameSync(path.join(sourceDir, name), path.join(targetDir, name));
   }
 }
@@ -736,7 +707,7 @@ function moveDataContents(sourceDir, targetDir, { keepEngineLog = false } = {}) 
 function clearDataContents(dataDir, { keepEngineLog = false } = {}) {
   if (!fs.existsSync(dataDir)) return;
   for (const name of fs.readdirSync(dataDir)) {
-    if (keepEngineLog && name === 'engine.log') continue;
+    if (keepEngineLog && isRuntimeDataFile(name)) continue;
     fs.rmSync(path.join(dataDir, name), { recursive: true, force: true });
   }
 }
@@ -761,7 +732,7 @@ async function importCompleteBackup(sourcePath) {
     const extractTotal = inspection.entries.filter(entry => {
       if (!entry.name.startsWith('data/') || entry.isDirectory) return false;
       const relative = entry.name.slice('data/'.length);
-      return !['engine.log', 'index.db-wal', 'index.db-shm'].includes(relative);
+      return !isRuntimeDataFile(relative) && !['index.db-wal', 'index.db-shm'].includes(relative);
     }).length;
     broadcast('backup.progress', { kind: 'import', step: 'extract', completed: 0, total: extractTotal, name: '' });
     const extracted = await backup.extractArchive(resolvedSource, stagingRoot, {
@@ -827,88 +798,6 @@ async function importCompleteBackup(sourcePath) {
   }
 }
 
-
-function compareVersions(left, right) {
-  const normalize = value => String(value || '')
-    .trim()
-    .replace(/^v/i, '')
-    .split(/[+-]/)[0]
-    .split('.')
-    .map(part => Number.parseInt(part, 10) || 0);
-  const a = normalize(left);
-  const b = normalize(right);
-  const size = Math.max(a.length, b.length, 3);
-  for (let index = 0; index < size; index++) {
-    const diff = (a[index] || 0) - (b[index] || 0);
-    if (diff) return diff;
-  }
-  return 0;
-}
-
-function requestJson(url, { timeoutMs = 5000 } = {}) {
-  return new Promise((resolve, reject) => {
-    const request = https.get(url, {
-      headers: {
-        'Accept': 'application/vnd.github+json',
-        'User-Agent': `LibraMail/${APP_VERSION}`,
-      },
-      timeout: timeoutMs,
-    }, response => {
-      let body = '';
-      response.setEncoding('utf8');
-      response.on('data', chunk => { body += chunk; });
-      response.on('end', () => {
-        if (response.statusCode < 200 || response.statusCode >= 300) {
-          reject(new Error(`HTTP ${response.statusCode}`));
-          return;
-        }
-        try { resolve(JSON.parse(body)); }
-        catch (error) { reject(new Error(`Réponse JSON invalide : ${error.message}`)); }
-      });
-    });
-    request.on('timeout', () => request.destroy(new Error('Délai de vérification dépassé')));
-    request.on('error', reject);
-  });
-}
-
-async function checkVersionInfo({ force = false } = {}) {
-  const now = Date.now();
-  if (!force && versionCheckCache && now - versionCheckCache.checkedAtMs < UPDATE_CHECK_CACHE_MS) {
-    return versionCheckCache.public;
-  }
-
-  const base = {
-    current: APP_VERSION,
-    latest: '',
-    updateAvailable: false,
-    releaseUrl: 'https://github.com/technifree/LibraMail/releases',
-    checkedAt: new Date(now).toISOString(),
-    checked: true,
-    source: UPDATE_CHECK_URL,
-    platform: process.platform,
-    node: process.version,
-    error: '',
-  };
-
-  try {
-    const latest = await requestJson(UPDATE_CHECK_URL);
-    const latestVersion = String(latest.tag_name || latest.name || '').replace(/^v/i, '').trim();
-    if (!latestVersion) throw new Error('Version distante introuvable');
-    const result = {
-      ...base,
-      latest: latestVersion,
-      updateAvailable: compareVersions(latestVersion, APP_VERSION) > 0,
-      releaseUrl: latest.html_url || base.releaseUrl,
-    };
-    versionCheckCache = { checkedAtMs: now, public: result };
-    return result;
-  } catch (error) {
-    const result = { ...base, error: error.message };
-    versionCheckCache = { checkedAtMs: now, public: result };
-    return result;
-  }
-}
-
 function normalizeExternalUrl(value) {
   let raw = String(value || '').trim()
     .replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, '');
@@ -958,6 +847,36 @@ function openExternalWithSystem(value) {
       resolve({ opened: true, url });
     });
   });
+}
+
+
+async function checkLatestRelease() {
+  const endpoint = 'https://api.github.com/repos/technifree/LibraMail/releases/latest';
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6000);
+  try {
+    if (typeof fetch !== 'function') throw new Error('fetch indisponible dans ce runtime Node.js');
+    const response = await fetch(endpoint, {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': `LibraMail/${APP_VERSION}`,
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`GitHub ${response.status}`);
+    const payload = await response.json();
+    const latest = String(payload.tag_name || payload.name || '').replace(/^v/i, '');
+    return {
+      current: APP_VERSION,
+      latest,
+      tagName: payload.tag_name || '',
+      name: payload.name || '',
+      url: payload.html_url || 'https://github.com/technifree/LibraMail/releases',
+      publishedAt: payload.published_at || '',
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 const methods = {
@@ -1011,6 +930,7 @@ const methods = {
       displayName: String(input.displayName || '').trim(),
       email: String(input.email || '').trim(),
       color: input.color || '#8b7dd8',
+      logoData: normalizeLogoData(input.logoData),
       imap: {
         host: String(input.imap.host || '').trim(),
         port: Number(input.imap.port) || 993,
@@ -1056,6 +976,7 @@ const methods = {
       displayName: String(input.displayName || '').trim(),
       email: String(input.email || '').trim(),
       color: input.color || current.color || '#8b7dd8',
+      logoData: normalizeLogoData(input.logoData),
       imap: {
         host: String(input.imap.host || '').trim(),
         port: Number(input.imap.port) || 993,
@@ -1290,34 +1211,31 @@ const methods = {
   'spam.stats': async () => spam.stats(),
   'spam.empty': async () => {
     const messages = db.listSpamMessages();
-    const operationId = crypto.randomUUID();
-    broadcast('folder.empty.started', { operationId, kind: 'spam', count: messages.length, total: messages.length });
+    broadcast('folder.empty.started', { kind: 'spam', count: messages.length });
     try {
       const result = await moveMessagesToTrash(messages, {
         source: 'empty-spam',
-        total: messages.length,
-        onProgress: progress => broadcast('folder.empty.progress', { operationId, kind: 'spam', ...progress }),
+        onProgress: progress => broadcast('folder.empty.progress', { kind: 'spam', ...progress }),
       });
-      broadcast('folder.empty.done', { operationId, kind: 'spam', count: result.processed, completed: messages.length, total: messages.length, errors: result.errors });
+      broadcast('folder.empty.done', { kind: 'spam', count: result.processed, errors: result.errors });
       return result;
     } catch (error) {
-      broadcast('folder.empty.error', { operationId, kind: 'spam', error: error.message, completed: 0, total: messages.length });
+      broadcast('folder.empty.error', { kind: 'spam', error: error.message });
       throw error;
     }
   },
   'trash.empty': async () => {
     const count = db.countMessages({ folderRole: 'trash', spam: null }).n;
-    const operationId = crypto.randomUUID();
-    broadcast('folder.empty.started', { operationId, kind: 'trash', count, total: count });
+    broadcast('folder.empty.started', { kind: 'trash', count });
     try {
       const result = await emptyTrash({
         source: 'empty-trash',
-        onProgress: progress => broadcast('folder.empty.progress', { operationId, kind: 'trash', ...progress }),
+        onProgress: progress => broadcast('folder.empty.progress', { kind: 'trash', ...progress }),
       });
-      broadcast('folder.empty.done', { operationId, kind: 'trash', count: result.deleted, completed: count, total: count, errors: result.errors });
+      broadcast('folder.empty.done', { kind: 'trash', count: result.deleted, errors: result.errors });
       return result;
     } catch (error) {
-      broadcast('folder.empty.error', { operationId, kind: 'trash', error: error.message, completed: 0, total: count });
+      broadcast('folder.empty.error', { kind: 'trash', error: error.message });
       throw error;
     }
   },
@@ -1440,11 +1358,11 @@ const methods = {
     };
   },
 
-  // ---------- Informations application ----------
-  'app.versionInfo': async ({ force = false } = {}) => checkVersionInfo({ force }),
-
   // ---------- Ouverture externe sécurisée ----------
   'app.openExternal': async ({ url }) => openExternalWithSystem(url),
+
+  // ---------- Version ----------
+  'app.checkLatestVersion': async () => checkLatestRelease(),
 
   // ---------- Arrêt ----------
   'app.shutdown': async () => {

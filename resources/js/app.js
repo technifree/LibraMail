@@ -3,6 +3,8 @@
 const App = (() => {
   const ENGINE = 'ws://127.0.0.1:47800';
   let ws;
+  let connecting = false;
+  let reconnectTimer = null;
   let reqId = 0;
   let shuttingDown = false;
   const pending = new Map();
@@ -44,8 +46,7 @@ const App = (() => {
   let contactsSearchTimer = null;
   const contactSuggestionState = new Map();
   let externalLinkOpening = false;
-  let versionInfo = { current: '0.2.20', latest: '', updateAvailable: false, checked: false, error: '' };
-  let operationProgressTimer = null;
+  let updateState = { checking: false, latest: '', url: '', available: false, checkedAt: 0, error: '' };
 
   const LABEL_COLORS = [
     '#8b7dd8', '#4f8bd6', '#36a3a0', '#49a86b', '#a8a33a',
@@ -62,22 +63,48 @@ const App = (() => {
   ];
 
   // ---------- RPC ----------
+  function scheduleReconnect(delay = 1500) {
+    if (shuttingDown || reconnectTimer) return;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      connect();
+    }, delay);
+  }
+
   function connect() {
     if (shuttingDown) return;
-    if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
-    ws = new WebSocket(ENGINE);
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+    if (connecting) return;
+    connecting = true;
+    setEngine(false, true);
+    try {
+      ws = new WebSocket(ENGINE);
+    } catch (error) {
+      connecting = false;
+      status(`${t('error')} : ${error.message}`, 'error');
+      scheduleReconnect();
+      return;
+    }
     ws.onopen = async () => {
+      connecting = false;
       setEngine(true);
       try { await boot(); }
-      catch (error) { status(`${t('error')} : ${error.message}`); }
+      catch (error) {
+        console.error('[LibraMail] Démarrage de l’interface :', error);
+        status(`${t('error')} : ${error.message}`, 'error');
+      }
     };
     ws.onclose = () => {
+      connecting = false;
       setEngine(false);
       for (const request of pending.values()) request.reject(new Error(t('status.disconnected')));
       pending.clear();
-      if (!shuttingDown) setTimeout(connect, 1500);
+      scheduleReconnect();
     };
-    ws.onerror = () => setEngine(false);
+    ws.onerror = () => {
+      connecting = false;
+      setEngine(false);
+    };
     ws.onmessage = event => {
       const message = JSON.parse(event.data);
       if (message.event) return onEvent(message.event, message.data || {});
@@ -100,20 +127,13 @@ const App = (() => {
     });
   }
 
-  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-  const engineConnected = () => ws && ws.readyState === WebSocket.OPEN;
-
-  async function waitForEngineConnection({ timeout = 6000, label = '' } = {}) {
-    if (engineConnected()) return;
-    const message = label || t('status.disconnected');
-    status(message, 'busy');
-    if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
-      connect();
-    }
+  async function waitForEngine({ timeout = 8000 } = {}) {
+    if (ws?.readyState === WebSocket.OPEN) return true;
+    connect();
     const started = Date.now();
     while (Date.now() - started < timeout) {
-      if (engineConnected()) return;
-      await sleep(120);
+      if (ws?.readyState === WebSocket.OPEN) return true;
+      await new Promise(resolve => setTimeout(resolve, 120));
     }
     throw new Error(t('status.disconnected'));
   }
@@ -321,59 +341,6 @@ const App = (() => {
     activeMaintenanceActivities.delete(key);
   }
 
-
-  function operationPercent(data) {
-    const total = Math.max(0, Number(data?.total ?? data?.count) || 0);
-    if (!total) return data?.done ? 100 : 0;
-    const completed = Math.max(0, Math.min(total, Number(data?.completed) || 0));
-    return Math.max(0, Math.min(100, Math.round((completed / total) * 100)));
-  }
-
-  function setOperationProgress(data = {}, state = 'busy') {
-    const root = document.getElementById('operation-progress');
-    const label = document.getElementById('operation-progress-label');
-    const bar = document.getElementById('operation-progress-bar');
-    const percent = document.getElementById('operation-progress-percent');
-    if (!root || !label || !bar || !percent) return;
-
-    if (operationProgressTimer) {
-      clearTimeout(operationProgressTimer);
-      operationProgressTimer = null;
-    }
-
-    const value = operationPercent(data);
-    const folder = maintenanceLabel(data.kind);
-    const completed = Math.max(0, Number(data.completed) || 0);
-    const total = Math.max(0, Number(data.total ?? data.count) || 0);
-    const detail = total > 0
-      ? t('operation.detail', { completed, total })
-      : t('operation.preparing');
-
-    root.classList.remove('hidden', 'busy', 'success', 'error');
-    root.classList.add(state);
-    root.setAttribute('aria-valuenow', String(value));
-    label.textContent = t('operation.running', { folder }) + (state === 'busy' ? ` · ${detail}` : '');
-    label.title = label.textContent;
-    bar.style.width = `${value}%`;
-    percent.textContent = `${value} %`;
-  }
-
-  function completeOperationProgress(data = {}, failed = false) {
-    setOperationProgress({ ...data, completed: data.completed ?? data.count ?? data.total, total: data.total ?? data.count, done: true }, failed ? 'error' : 'success');
-    const root = document.getElementById('operation-progress');
-    const label = document.getElementById('operation-progress-label');
-    if (label) {
-      label.textContent = failed
-        ? t('operation.failed', { folder: maintenanceLabel(data.kind) })
-        : t('operation.done', { folder: maintenanceLabel(data.kind) });
-      label.title = label.textContent;
-    }
-    operationProgressTimer = setTimeout(() => {
-      root?.classList.add('hidden');
-      operationProgressTimer = null;
-    }, failed ? 8000 : 3500);
-  }
-
   function addRetentionActivity(data, failed = false) {
     addActivity({
       kind: 'maintenance',
@@ -557,18 +524,13 @@ const App = (() => {
       }), 'error');
     } else if (event === 'folder.empty.started') {
       beginMaintenanceActivity(data);
-      setOperationProgress({ ...data, completed: 0, total: data.count }, 'busy');
+      setCleanupProgress({ kind: data.kind, total: data.count, state: 'busy', indeterminate: true });
       status(t('status.emptyStarting', { folder: maintenanceLabel(data.kind) }), 'busy');
     } else if (event === 'folder.empty.progress') {
-      setOperationProgress(data, 'busy');
-      status(t('status.emptyProgress', {
-        folder: maintenanceLabel(data.kind),
-        completed: Number(data.completed) || 0,
-        total: Number(data.total) || 0,
-      }), 'busy');
+      setCleanupProgress({ kind: data.kind, current: data.completed, total: data.total, state: 'busy' });
     } else if (event === 'folder.empty.done') {
       finishMaintenanceActivity(data, false);
-      completeOperationProgress(data, false);
+      setCleanupProgress({ kind: data.kind, current: data.count, total: data.count, state: 'success' });
       status(t('status.emptyDone', {
         folder: maintenanceLabel(data.kind),
         count: Number(data.count) || 0,
@@ -576,7 +538,7 @@ const App = (() => {
       refresh();
     } else if (event === 'folder.empty.error') {
       finishMaintenanceActivity(data, true);
-      completeOperationProgress(data, true);
+      setCleanupProgress({ kind: data.kind, state: 'error', error: data.error || t('error') });
       status(t('status.emptyFailed', {
         folder: maintenanceLabel(data.kind),
         error: data.error || t('error'),
@@ -626,95 +588,6 @@ const App = (() => {
     }
   }
 
-
-  function renderVersionNotice(info = versionInfo) {
-    const notice = document.getElementById('update-notice');
-    const textElement = document.getElementById('update-notice-text');
-    if (!notice || !textElement) return;
-    const available = Boolean(info?.updateAvailable && info.latest);
-    notice.classList.toggle('hidden', !available);
-    if (available) {
-      textElement.textContent = t('update.notice', { version: info.latest });
-      notice.title = t('update.noticeTitle', { version: info.latest });
-    }
-  }
-
-  function renderAboutVersionInfo(info = versionInfo) {
-    const current = info?.current || String(window.NL_APPVERSION || '0.2.20').replace(/^v/i, '');
-    const line = document.getElementById('about-version-line');
-    const engine = document.getElementById('about-engine-line');
-    const card = document.getElementById('about-update-card');
-    const icon = document.getElementById('about-update-icon');
-    const title = document.getElementById('about-update-title');
-    const detail = document.getElementById('about-update-detail');
-    if (line) line.textContent = t('about.versionLine', { version: current });
-    if (engine) engine.textContent = t('about.engineText', { node: info?.node || t('about.unknown'), platform: info?.platform || t('about.unknown') });
-    if (!card || !icon || !title || !detail) return;
-
-    card.classList.remove('checking', 'available', 'current', 'error');
-    if (!info?.checked && !info?.error) {
-      card.classList.add('checking');
-      icon.className = 'fa-solid fa-rotate fa-spin';
-      title.textContent = t('update.checking');
-      detail.textContent = t('update.checkingDetail');
-    } else if (info?.updateAvailable) {
-      card.classList.add('available');
-      icon.className = 'fa-solid fa-circle-arrow-up';
-      title.textContent = t('update.availableTitle', { version: info.latest });
-      detail.textContent = t('update.availableDetail', { current, latest: info.latest });
-    } else if (info?.error) {
-      card.classList.add('error');
-      icon.className = 'fa-solid fa-wifi';
-      title.textContent = t('update.errorTitle');
-      detail.textContent = t('update.errorDetail', { error: info.error });
-    } else {
-      card.classList.add('current');
-      icon.className = 'fa-solid fa-circle-check';
-      title.textContent = t('update.currentTitle');
-      detail.textContent = t('update.currentDetail', { version: current });
-    }
-  }
-
-  function setAboutCheckBusy(active) {
-    const button = document.getElementById('btn-about-check-update');
-    if (!button) return;
-    const icon = button.querySelector('i');
-    button.classList.toggle('is-busy', Boolean(active));
-    button.disabled = Boolean(active);
-    if (icon) icon.classList.toggle('fa-spin', Boolean(active));
-  }
-
-  async function checkApplicationVersion({ force = false, quiet = true } = {}) {
-    setAboutCheckBusy(true);
-    if (!quiet) status(t('update.checking'), 'info');
-    try {
-      const info = await rpc('app.versionInfo', { force });
-      versionInfo = { ...versionInfo, ...info, checked: true };
-      renderVersionNotice(versionInfo);
-      renderAboutVersionInfo(versionInfo);
-      if (!quiet && versionInfo.updateAvailable) {
-        status(t('update.notice', { version: versionInfo.latest }), 'info');
-      } else if (!quiet && !versionInfo.error) {
-        status(t('update.currentTitle'), 'success');
-      }
-      return versionInfo;
-    } catch (error) {
-      versionInfo = { ...versionInfo, checked: true, error: error.message };
-      renderVersionNotice(versionInfo);
-      renderAboutVersionInfo(versionInfo);
-      if (!quiet) status(`${t('error')} : ${error.message}`, 'error');
-      return versionInfo;
-    } finally {
-      setAboutCheckBusy(false);
-    }
-  }
-
-  function openAboutModal() {
-    renderAboutVersionInfo(versionInfo);
-    openModal('about-modal');
-    if (!versionInfo.checked) checkApplicationVersion({ quiet: true }).catch(() => {});
-  }
-
   // ---------- Démarrage ----------
   async function boot() {
     const state = await rpc('config.get');
@@ -738,7 +611,7 @@ const App = (() => {
     await refreshSpamStats();
     await refreshContactsCount();
     status(t('status.connected'), 'success');
-    checkApplicationVersion({ quiet: true }).catch(() => {});
+    checkForUpdates(false).catch(() => {});
 
     // Une seule relève est demandée lorsque l'interface est réellement prête.
     // Le moteur protège cette action contre les reconnexions WebSocket.
@@ -767,13 +640,12 @@ const App = (() => {
   };
 
   function applyAppVersion() {
-    const rawVersion = String(window.NL_APPVERSION || '0.2.20').replace(/^v/i, '');
+    const rawVersion = String(window.NL_APPVERSION || '0.2.21').replace(/^v/i, '');
     const badge = document.getElementById('app-version');
     if (badge) {
       badge.textContent = `v${rawVersion}`;
       badge.title = t('app.version', { version: rawVersion });
     }
-    versionInfo.current = rawVersion;
     document.title = `LibraMail ${rawVersion}`;
   }
 
@@ -813,6 +685,23 @@ const App = (() => {
     }
   }
 
+  function providerIconForAccount(account) {
+    const email = String(account?.email || '').toLowerCase();
+    const host = String(account?.imap?.host || account?.smtp?.host || '').toLowerCase();
+    const source = `${email} ${host}`;
+    if (account?.logoData) {
+      return `<span class="account-provider-logo custom"><img src="${esc(account.logoData)}" alt=""></span>`;
+    }
+    if (/gmail|googlemail/.test(source)) return '<span class="account-provider-logo provider-gmail"><i class="fa-brands fa-google"></i></span>';
+    if (/outlook|hotmail|live\.com|office365|microsoft/.test(source)) return '<span class="account-provider-logo provider-outlook"><i class="fa-brands fa-microsoft"></i></span>';
+    if (/yahoo/.test(source)) return '<span class="account-provider-logo provider-yahoo"><i class="fa-brands fa-yahoo"></i></span>';
+    if (/icloud|me\.com|mac\.com/.test(source)) return '<span class="account-provider-logo provider-icloud"><i class="fa-brands fa-apple"></i></span>';
+    if (/proton/.test(source)) return '<span class="account-provider-logo provider-proton"><i class="fa-solid fa-shield-halved"></i></span>';
+    if (/orange/.test(source)) return '<span class="account-provider-logo provider-orange"><i class="fa-solid fa-envelope"></i></span>';
+    const initials = String(account?.displayName || account?.email || '?').trim().slice(0, 2).toUpperCase() || '?';
+    return `<span class="account-provider-logo provider-initials" style="background:${safeColor(account?.color)}">${esc(initials)}</span>`;
+  }
+
   function renderSidebar() {
     const element = document.getElementById('account-list');
     element.innerHTML = '';
@@ -825,7 +714,7 @@ const App = (() => {
       button.className = 'side-item';
       if (view.type === 'account' && String(view.accountId) === String(account.id)) button.classList.add('active');
       button.dataset.view = 'account:' + account.id;
-      button.innerHTML = `<span class="account-dot" style="background:${safeColor(account.color)}"></span>
+      button.innerHTML = `${providerIconForAccount(account)}
         <span class="account-sidebar-name">${esc(account.displayName || account.email)}</span>
         ${account.id === config.defaultAccountId
           ? `<i class="fa-solid fa-star default-star" title="${esc(t('account.default'))}"></i>`
@@ -3971,6 +3860,37 @@ const App = (() => {
     if (state) element.classList.add(state);
   }
 
+  function updateAccountLogoPreview(data = '', account = null) {
+    const preview = accountField('acc-logo-preview');
+    if (!preview) return;
+    if (data) {
+      preview.innerHTML = `<img src="${esc(data)}" alt="">`;
+      preview.classList.add('has-image');
+    } else {
+      const sample = account || { displayName: accountField('acc-name')?.value, email: accountField('acc-email')?.value, color: accountField('acc-color')?.value };
+      preview.innerHTML = providerIconForAccount(sample);
+      preview.classList.remove('has-image');
+    }
+  }
+
+  function readAccountLogoFile(file) {
+    return new Promise((resolve, reject) => {
+      if (!file) { resolve(''); return; }
+      if (!/^image\//i.test(file.type || '')) {
+        reject(new Error(t('account.logoInvalid')));
+        return;
+      }
+      if (file.size > 256 * 1024) {
+        reject(new Error(t('account.logoTooLarge')));
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error(t('account.logoReadError')));
+      reader.readAsDataURL(file);
+    });
+  }
+
   function resetAccountForm() {
     editingAccountId = null;
     accountField('acc-id').value = '';
@@ -3979,6 +3899,8 @@ const App = (() => {
     accountField('acc-name').value = '';
     accountField('acc-email').value = '';
     accountField('acc-color').value = '#8b7dd8';
+    accountField('acc-logo-data').value = '';
+    updateAccountLogoPreview('');
     accountField('acc-imap-host').value = '';
     accountField('acc-imap-port').value = '993';
     accountField('acc-imap-secure').value = '1';
@@ -4016,6 +3938,8 @@ const App = (() => {
       accountField('acc-name').value = details.displayName || '';
       accountField('acc-email').value = details.email || '';
       accountField('acc-color').value = safeColor(details.color);
+      accountField('acc-logo-data').value = details.logoData || '';
+      updateAccountLogoPreview(details.logoData || '', details);
       accountField('acc-imap-host').value = details.imap?.host || '';
       accountField('acc-imap-port').value = Number(details.imap?.port) || 993;
       accountField('acc-imap-secure').value = details.imap?.secure === false ? '0' : '1';
@@ -4319,6 +4243,153 @@ const App = (() => {
     closeRemoteContentDialog();
   }
 
+  // ---------- Mise à jour et À propos ----------
+  function appVersion() {
+    return String(window.NL_APPVERSION || '0.2.21').replace(/^v/i, '');
+  }
+
+  function compareVersions(a, b) {
+    const left = String(a || '').replace(/^v/i, '').split('.').map(n => Number(n) || 0);
+    const right = String(b || '').replace(/^v/i, '').split('.').map(n => Number(n) || 0);
+    for (let i = 0; i < Math.max(left.length, right.length); i++) {
+      const diff = (left[i] || 0) - (right[i] || 0);
+      if (diff) return diff;
+    }
+    return 0;
+  }
+
+  function setUpdateNotice() {
+    const notice = document.getElementById('update-notice');
+    if (!notice) return;
+    if (updateState.available && updateState.latest) {
+      notice.classList.remove('hidden');
+      notice.querySelector('span').textContent = t('update.notice', { version: updateState.latest });
+      notice.title = t('update.noticeTitle');
+    } else {
+      notice.classList.add('hidden');
+    }
+  }
+
+  function renderUpdateStatus() {
+    const state = document.getElementById('about-update-state');
+    const details = document.getElementById('about-update-details');
+    const button = document.getElementById('btn-check-update');
+    if (button) {
+      button.disabled = updateState.checking;
+      button.classList.toggle('is-checking', updateState.checking);
+    }
+    if (!state || !details) return;
+    if (updateState.checking) {
+      state.innerHTML = `<i class="fa-solid fa-rotate fa-spin"></i><strong>${esc(t('update.checking'))}</strong>`;
+      details.textContent = t('update.checkingDetail');
+    } else if (updateState.available) {
+      state.innerHTML = `<i class="fa-solid fa-circle-up"></i><strong>${esc(t('update.availableTitle', { version: updateState.latest }))}</strong>`;
+      details.textContent = t('update.availableDetail', { current: appVersion(), latest: updateState.latest });
+    } else if (updateState.latest) {
+      state.innerHTML = `<i class="fa-solid fa-circle-check"></i><strong>${esc(t('update.currentTitle'))}</strong>`;
+      details.textContent = t('update.currentDetail', { version: appVersion() });
+    } else if (updateState.error) {
+      state.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i><strong>${esc(t('update.unavailableTitle'))}</strong>`;
+      details.textContent = updateState.error;
+    } else {
+      state.innerHTML = `<i class="fa-solid fa-circle-info"></i><strong>${esc(t('update.unknownTitle'))}</strong>`;
+      details.textContent = t('update.unknownDetail');
+    }
+  }
+
+  async function fetchLatestReleaseFromBrowser() {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
+    try {
+      const response = await fetch('https://api.github.com/repos/technifree/LibraMail/releases/latest', {
+        headers: { Accept: 'application/vnd.github+json' },
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`GitHub ${response.status}`);
+      const payload = await response.json();
+      return {
+        latest: String(payload.tag_name || payload.name || '').replace(/^v/i, ''),
+        url: payload.html_url || 'https://github.com/technifree/LibraMail/releases',
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function checkForUpdates(manual = false) {
+    if (updateState.checking) return updateState;
+    if (!manual && updateState.checkedAt && Date.now() - updateState.checkedAt < 6 * 60 * 60 * 1000) return updateState;
+    updateState = { ...updateState, checking: true, error: '' };
+    renderUpdateStatus();
+    if (manual) status(t('update.checking'), 'busy');
+    try {
+      let payload = null;
+      try {
+        await waitForEngine({ timeout: manual ? 8000 : 2500 });
+        payload = await rpc('app.checkLatestVersion');
+      } catch (engineError) {
+        // Sous certains WebView Windows, fetch côté interface est capricieux.
+        // On privilégie donc le moteur Node, puis on garde ce repli pour Linux/dev.
+        payload = await fetchLatestReleaseFromBrowser();
+      }
+      const latest = String(payload?.latest || payload?.tagName || '').replace(/^v/i, '');
+      updateState = {
+        checking: false,
+        latest,
+        url: payload?.url || 'https://github.com/technifree/LibraMail/releases',
+        available: latest ? compareVersions(latest, appVersion()) > 0 : false,
+        checkedAt: Date.now(),
+        error: '',
+      };
+      if (manual) {
+        status(updateState.available
+          ? t('update.availableTitle', { version: latest })
+          : t('update.currentTitle'), updateState.available ? 'info' : 'success');
+      }
+    } catch (error) {
+      updateState = {
+        ...updateState,
+        checking: false,
+        checkedAt: Date.now(),
+        error: manual ? `${t('update.error')} : ${error.message}` : '',
+      };
+      if (manual && updateState.error) status(updateState.error, 'error');
+    }
+    setUpdateNotice();
+    renderUpdateStatus();
+    return updateState;
+  }
+
+  function openAboutModal() {
+    const version = appVersion();
+    const versionElement = document.getElementById('about-version');
+    if (versionElement) versionElement.textContent = version;
+    renderUpdateStatus();
+    openModal('about-modal');
+    checkForUpdates(false).catch(() => {});
+  }
+
+  function setCleanupProgress({ kind = '', current = 0, total = 0, state = '', error = '', indeterminate = false } = {}) {
+    const root = document.getElementById('cleanup-progress');
+    const labelElement = document.getElementById('cleanup-progress-label');
+    const bar = document.getElementById('cleanup-progress-bar');
+    const countElement = document.getElementById('cleanup-progress-count');
+    if (!root || !labelElement || !bar || !countElement) return;
+    const folder = maintenanceLabel(kind);
+    root.classList.remove('hidden', 'busy', 'success', 'error', 'is-indeterminate');
+    if (state) root.classList.add(state);
+    root.classList.toggle('is-indeterminate', Boolean(indeterminate));
+    const done = Math.max(0, Number(current) || 0);
+    const max = Math.max(0, Number(total) || 0);
+    const percent = max > 0 ? Math.max(0, Math.min(100, Math.round((done / max) * 100))) : 0;
+    labelElement.textContent = error || (state === 'success'
+      ? t('cleanup.done', { folder })
+      : t('cleanup.running', { folder }));
+    countElement.textContent = max > 0 ? `${Math.min(done, max)} / ${max}` : '…';
+    bar.style.width = `${percent}%`;
+    if (state === 'success') setTimeout(() => root.classList.add('hidden'), 2200);
+  }
+
   // ---------- Sauvegarde et restauration ----------
   function setBackupOperationStatus(message = '', state = '') {
     const element = document.getElementById('backup-operation-status');
@@ -4434,7 +4505,8 @@ const App = (() => {
     resetBackupProgress();
     setBackupBusy(true);
     try {
-      await waitForEngineConnection({ label: t('backup.waitingEngine') });
+      setBackupOperationStatus(t('status.connectingEngine'), 'busy');
+      await waitForEngine();
       let target = await selectBackupArchivePath('export');
       if (!target) {
         setBackupOperationStatus('');
@@ -4480,7 +4552,8 @@ const App = (() => {
     let sourcePath;
     let inspection;
     try {
-      await waitForEngineConnection({ label: t('backup.waitingEngine') });
+      setBackupOperationStatus(t('status.connectingEngine'), 'busy');
+      await waitForEngine();
       sourcePath = await selectBackupArchivePath('import');
       if (!sourcePath) {
         setBackupOperationStatus('');
@@ -5018,15 +5091,6 @@ const App = (() => {
     document.getElementById('btn-bulk-spam').onclick = runBulkSpam;
     document.getElementById('btn-bulk-delete').onclick = runBulkDelete;
     document.getElementById('btn-empty-folder').onclick = emptyCurrentFolder;
-    document.getElementById('brand').onclick = openAboutModal;
-    document.getElementById('brand').addEventListener('keydown', event => {
-      if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        openAboutModal();
-      }
-    });
-    document.getElementById('update-notice')?.addEventListener('click', openAboutModal);
-    document.getElementById('btn-about-check-update')?.addEventListener('click', () => checkApplicationVersion({ force: true, quiet: false }));
     document.getElementById('btn-confirm-action').onclick = () => resolveConfirmAction(true);
     document.getElementById('btn-cancel-confirm-action').onclick = () => resolveConfirmAction(false);
     document.getElementById('btn-close-confirm-action').onclick = () => resolveConfirmAction(false);
@@ -5208,6 +5272,12 @@ const App = (() => {
     wireContactAutocomplete('compose-cc');
     wireContactAutocomplete('compose-bcc');
     document.querySelectorAll('[data-close]').forEach(button => { button.onclick = closeModals; });
+    document.getElementById('brand')?.addEventListener('click', openAboutModal);
+    document.getElementById('brand')?.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openAboutModal(); }
+    });
+    document.getElementById('update-notice')?.addEventListener('click', openAboutModal);
+    document.getElementById('btn-check-update')?.addEventListener('click', () => checkForUpdates(true));
     document.getElementById('set-signature-account').onchange = event => loadSignatureEditor(event.target.value);
     document.getElementById('btn-save-signature').onclick = saveSignatureSettings;
     [
@@ -5270,6 +5340,29 @@ const App = (() => {
     document.getElementById('set-default-account').onchange = event =>
       applySetting('defaultAccountId', event.target.value);
 
+    document.getElementById('acc-logo-file')?.addEventListener('change', async event => {
+      const file = event.target.files?.[0] || null;
+      if (!file) return;
+      try {
+        const data = await readAccountLogoFile(file);
+        accountField('acc-logo-data').value = data;
+        updateAccountLogoPreview(data);
+      } catch (error) {
+        setAccountStatus(`${t('error')} : ${error.message}`, 'error');
+      } finally {
+        event.target.value = '';
+      }
+    });
+    document.getElementById('btn-clear-account-logo')?.addEventListener('click', () => {
+      accountField('acc-logo-data').value = '';
+      updateAccountLogoPreview('');
+    });
+    ['acc-name', 'acc-email', 'acc-color'].forEach(id => {
+      document.getElementById(id)?.addEventListener('input', () => {
+        if (!accountField('acc-logo-data').value) updateAccountLogoPreview('');
+      });
+    });
+
     document.getElementById('list-sort').onchange = event =>
       applyListPreference('sortBy', event.target.value);
     document.getElementById('list-sort-direction').onclick = () =>
@@ -5306,17 +5399,9 @@ const App = (() => {
   }
 
   window.addEventListener('DOMContentLoaded', () => {
-    try { Neutralino.init(); } catch (error) {
-      console.warn('[LibraMail] Initialisation Neutralino impossible :', error);
-    }
-    try {
-      wire();
-    } catch (error) {
-      console.error('[LibraMail] Initialisation de l’interface incomplète :', error);
-      try { status(`${t('error')} : ${error.message}`, 'error'); } catch {}
-    } finally {
-      connect();
-    }
+    try { Neutralino.init(); } catch {}
+    wire();
+    connect();
   });
 
   return {

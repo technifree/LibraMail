@@ -84,10 +84,6 @@ require_cmd()  { command -v "$1" >/dev/null 2>&1 || die "Commande requise absent
 
 require_file neutralino.config.json
 require_file resources/index.html
-require_file resources/js/i18n.js
-require_file resources/js/maillist.js
-require_file resources/js/viewer.js
-require_file resources/vendor/purify.min.js
 require_file engine/backend.js
 require_dir resources
 require_dir engine
@@ -272,15 +268,12 @@ else
 fi
 
 NEU_SOURCE_BINARY="$PROJECT_DIR/bin/neutralino-linux_${NEU_ARCH}"
-NEU_CLIENT_LIBRARY="$PROJECT_DIR/resources/js/neutralino.js"
-if [[ ! -f "$NEU_SOURCE_BINARY" || ! -f "$NEU_CLIENT_LIBRARY" ]]; then
-  log "Binaires ou client Neutralino absents. Téléchargement de la version déclarée dans neutralino.config.json..."
+if [[ ! -f "$NEU_SOURCE_BINARY" ]]; then
+  log "Binaires Neutralino absents. Téléchargement de la version déclarée dans neutralino.config.json..."
   "${NEU[@]}" update
 fi
 [[ -f "$NEU_SOURCE_BINARY" ]] \
   || die "Le binaire Neutralino attendu n'a pas été téléchargé : $NEU_SOURCE_BINARY"
-[[ -f "$NEU_CLIENT_LIBRARY" ]] \
-  || die "Le client Neutralino attendu n'a pas été généré : $NEU_CLIENT_LIBRARY"
 
 log "Construction Neutralino ${VERSION} pour Linux ${PACKAGE_ARCH}..."
 BUILD_ARGS=(build)

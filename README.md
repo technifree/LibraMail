@@ -1,6 +1,6 @@
 # LibraMail
 
-[![Version](https://img.shields.io/badge/version-0.2.20-4f8bd8)](https://github.com/technifree/LibraMail/releases)
+[![Version](https://img.shields.io/badge/version-0.2.21-4f8bd8)](https://github.com/technifree/LibraMail/releases)
 [![Verification](https://github.com/technifree/LibraMail/actions/workflows/verify.yml/badge.svg)](https://github.com/technifree/LibraMail/actions/workflows/verify.yml)
 [![Builds](https://github.com/technifree/LibraMail/actions/workflows/build.yml/badge.svg)](https://github.com/technifree/LibraMail/actions/workflows/build.yml)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -82,7 +82,7 @@ This repository includes one command centre:
 ./github.sh check
 ./github.sh init
 ./github.sh build
-./github.sh release 0.2.20
+./github.sh release 0.2.21
 ```
 
 - `init` creates/configures the GitHub repository and pushes the source
@@ -189,7 +189,7 @@ Un seul script sert de tableau de commande :
 ./github.sh check
 ./github.sh init
 ./github.sh build
-./github.sh release 0.2.20
+./github.sh release 0.2.21
 ```
 
 - `init` crée et configure le dépôt GitHub, puis envoie les sources
