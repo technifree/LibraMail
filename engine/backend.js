@@ -94,9 +94,17 @@ const defaultConfig = {
   trustedSenders: [],
 };
 
+function normalizeLogoData(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (raw.length > 400000) return '';
+  return /^data:image\/(?:png|jpe?g|webp|svg\+xml);base64,/i.test(raw) ? raw : '';
+}
+
 function normalizeAccount(account) {
   return {
     ...account,
+    logoData: normalizeLogoData(account.logoData),
     syncIntervalMinutes: Number.isFinite(Number(account.syncIntervalMinutes))
       ? Math.max(0, Math.min(1440, Math.round(Number(account.syncIntervalMinutes))))
       : 5,
@@ -187,6 +195,7 @@ function publicAccount(account) {
     displayName: account.displayName,
     email: account.email,
     color: account.color,
+    logoData: normalizeLogoData(account.logoData),
     syncIntervalMinutes: account.syncIntervalMinutes,
     spamRetentionDays: account.spamRetentionDays,
     folders: {
@@ -421,7 +430,9 @@ async function setMessageSpamState(message, isSpam) {
   return true;
 }
 
-async function moveMessagesToTrash(messages, { source = 'manual' } = {}) {
+async function moveMessagesToTrash(messages, { source = 'manual', onProgress = null } = {}) {
+  const total = Array.isArray(messages) ? messages.length : 0;
+  let completed = 0;
   const succeededIds = [];
   const affectedAccounts = new Set();
   const errors = [];
@@ -431,6 +442,8 @@ async function moveMessagesToTrash(messages, { source = 'manual' } = {}) {
     const account = getAccount(first.account_id);
     if (!account) {
       errors.push({ accountId: first.account_id, error: 'Compte introuvable' });
+      completed += group.length;
+      if (typeof onProgress === 'function') onProgress({ completed, total });
       continue;
     }
 
@@ -446,6 +459,9 @@ async function moveMessagesToTrash(messages, { source = 'manual' } = {}) {
       succeededIds.push(...group.map(message => message.id));
     } catch (error) {
       errors.push({ accountId: account.id, folder: first.folder, error: error.message });
+    } finally {
+      completed += group.length;
+      if (typeof onProgress === 'function') onProgress({ completed, total });
     }
   }
 
@@ -468,8 +484,10 @@ async function moveMessagesToTrash(messages, { source = 'manual' } = {}) {
   };
 }
 
-async function emptyTrash({ source = 'manual' } = {}) {
+async function emptyTrash({ source = 'manual', onProgress = null } = {}) {
   const messages = db.listMessagesByRole('trash');
+  const total = messages.length;
+  let completed = 0;
   const removedIds = [];
   const errors = [];
   const localByAccountFolder = new Map();
@@ -493,13 +511,17 @@ async function emptyTrash({ source = 'manual' } = {}) {
     }
 
     for (const folder of candidates) {
+      const local = localByAccountFolder.get(`${account.id}\u0000${folder}`) || [];
       try {
         await imap.emptyFolder(account, folder);
-        const local = localByAccountFolder.get(`${account.id}\u0000${folder}`) || [];
         removedIds.push(...local.map(message => message.id));
+        completed += local.length;
         db.clearSyncState(account.id, folder);
       } catch (error) {
         errors.push({ accountId: account.id, folder, error: error.message });
+        completed += local.length;
+      } finally {
+        if (typeof onProgress === 'function') onProgress({ completed, total });
       }
     }
   }
@@ -510,6 +532,7 @@ async function emptyTrash({ source = 'manual' } = {}) {
 }
 
 async function cleanupExpiredSpamForAccount(account, { source = 'retention', silent = false } = {}) {
+  if (maintenanceOperation) return { processed: 0, skipped: 'maintenance' };
   if (!account || !Number(account.spamRetentionDays)) return { processed: 0, disabled: true };
   if (activeCleanups.has(account.id)) return activeCleanups.get(account.id);
 
@@ -595,8 +618,8 @@ function backupTimestamp(date = new Date()) {
 
 function ensureMaintenanceAvailable() {
   if (maintenanceOperation) throw new Error('Une opération de sauvegarde ou de restauration est déjà en cours');
-  if (activeSyncs.size || activeCleanups.size) {
-    throw new Error('Une relève ou une opération de nettoyage est en cours. Réessayez lorsqu’elle est terminée.');
+  if (activeSyncs.size) {
+    throw new Error('Une relève est en cours. Réessayez lorsqu’elle est terminée.');
   }
 }
 
@@ -604,6 +627,9 @@ async function withMaintenance(kind, task) {
   ensureMaintenanceAvailable();
   maintenanceOperation = kind;
   stopAccountRuntime();
+  if (activeCleanups.size) {
+    await Promise.allSettled([...activeCleanups.values()]);
+  }
   broadcast('backup.started', { kind });
   try {
     const result = await task();
@@ -868,6 +894,7 @@ const methods = {
       displayName: String(input.displayName || '').trim(),
       email: String(input.email || '').trim(),
       color: input.color || '#8b7dd8',
+      logoData: normalizeLogoData(input.logoData),
       imap: {
         host: String(input.imap.host || '').trim(),
         port: Number(input.imap.port) || 993,
@@ -913,6 +940,7 @@ const methods = {
       displayName: String(input.displayName || '').trim(),
       email: String(input.email || '').trim(),
       color: input.color || current.color || '#8b7dd8',
+      logoData: normalizeLogoData(input.logoData),
       imap: {
         host: String(input.imap.host || '').trim(),
         port: Number(input.imap.port) || 993,
@@ -1149,7 +1177,10 @@ const methods = {
     const messages = db.listSpamMessages();
     broadcast('folder.empty.started', { kind: 'spam', count: messages.length });
     try {
-      const result = await moveMessagesToTrash(messages, { source: 'empty-spam' });
+      const result = await moveMessagesToTrash(messages, {
+        source: 'empty-spam',
+        onProgress: progress => broadcast('folder.empty.progress', { kind: 'spam', ...progress }),
+      });
       broadcast('folder.empty.done', { kind: 'spam', count: result.processed, errors: result.errors });
       return result;
     } catch (error) {
@@ -1161,7 +1192,10 @@ const methods = {
     const count = db.countMessages({ folderRole: 'trash', spam: null }).n;
     broadcast('folder.empty.started', { kind: 'trash', count });
     try {
-      const result = await emptyTrash({ source: 'empty-trash' });
+      const result = await emptyTrash({
+        source: 'empty-trash',
+        onProgress: progress => broadcast('folder.empty.progress', { kind: 'trash', ...progress }),
+      });
       broadcast('folder.empty.done', { kind: 'trash', count: result.deleted, errors: result.errors });
       return result;
     } catch (error) {

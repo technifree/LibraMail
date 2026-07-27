@@ -13,14 +13,14 @@
 <div id="app" data-layout="vertical">
 
   <div id="topbar">
-    <span id="brand" title="LibraMail 0.2.21">
+    <button id="brand" class="brand-button" type="button" title="LibraMail 0.2.21" data-i18n-title="about.open">
       <span class="brand-logo-box" aria-hidden="true">
         <img class="brand-logo brand-logo-light" src="assets/logo-light.png" alt="">
         <img class="brand-logo brand-logo-dark" src="assets/logo-dark.png" alt="">
       </span>
       <span class="brand-name">LibraMail</span>
       <span class="version-badge" id="app-version">v0.2.21</span>
-    </span>
+    </button>
     <button class="btn primary" id="btn-compose">
       <i class="fa-solid fa-pen"></i><span data-i18n="compose"></span>
     </button>
@@ -51,6 +51,18 @@
     <button class="iconbtn exit-btn" id="btn-exit" data-i18n-title="app.quit">
       <i class="fa-solid fa-power-off"></i>
     </button>
+  </div>
+
+  <button id="update-notice" class="update-notice hidden" type="button">
+    <i class="fa-solid fa-circle-up"></i><span></span>
+  </button>
+
+  <div id="cleanup-progress" class="cleanup-progress hidden" role="status" aria-live="polite">
+    <div class="cleanup-progress-head">
+      <span id="cleanup-progress-label"></span>
+      <strong id="cleanup-progress-count">…</strong>
+    </div>
+    <div class="cleanup-progress-track" aria-hidden="true"><div id="cleanup-progress-bar"></div></div>
   </div>
 
   <nav id="sidebar">
@@ -345,6 +357,17 @@
       </div>
       <div class="grid2 account-options-grid">
         <div class="field"><label data-i18n="account.color"></label><input id="acc-color" type="color" value="#8b7dd8"></div>
+        <div class="field account-logo-field">
+          <label data-i18n="account.logo"></label>
+          <input id="acc-logo-data" type="hidden">
+          <div class="account-logo-controls">
+            <span id="acc-logo-preview" class="account-logo-preview"></span>
+            <label class="btn compact" for="acc-logo-file"><i class="fa-solid fa-image"></i><span data-i18n="account.logoChoose"></span></label>
+            <input id="acc-logo-file" class="hidden" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml">
+            <button class="btn compact" id="btn-clear-account-logo" type="button"><i class="fa-solid fa-rotate-left"></i><span data-i18n="account.logoAuto"></span></button>
+          </div>
+          <small class="field-hint" data-i18n="account.logoHint"></small>
+        </div>
         <div class="field"><label data-i18n="settings.syncInterval"></label>
           <div class="input-suffix"><input id="acc-sync-interval" type="number" min="0" max="1440" value="5"><span data-i18n="settings.minutes"></span></div>
         </div>
@@ -752,6 +775,41 @@
       <button class="btn danger" id="btn-confirm-action" type="button">
         <i class="fa-solid fa-check"></i><span data-i18n="confirm"></span>
       </button>
+    </footer>
+  </div>
+</div>
+
+<div class="modal-veil" id="about-modal">
+  <div class="modal about-modal-box">
+    <header>
+      <span><i class="fa-solid fa-circle-info"></i> <span data-i18n="about.title"></span></span>
+      <button class="iconbtn" data-close><i class="fa-solid fa-xmark"></i></button>
+    </header>
+    <div class="body about-body">
+      <section class="about-hero">
+        <span class="about-logo-box"><img src="assets/logo-dark.png" alt="LibraMail"></span>
+        <span><strong>LibraMail</strong><small><span data-i18n="about.installedVersion"></span> <b id="about-version">0.2.21</b></small></span>
+      </section>
+      <section class="about-info-card">
+        <h3 data-i18n="about.infoTitle"></h3>
+        <p data-i18n="about.description"></p>
+        <dl class="about-meta">
+          <div><dt data-i18n="about.authorLabel"></dt><dd>Vincent · technifree.com</dd></div>
+          <div><dt data-i18n="about.licenseLabel"></dt><dd>MIT</dd></div>
+          <div><dt data-i18n="about.storageLabel"></dt><dd data-i18n="about.storageValue"></dd></div>
+          <div><dt data-i18n="about.engineLabel"></dt><dd data-i18n="about.engineValue"></dd></div>
+        </dl>
+      </section>
+      <section class="about-update-card">
+        <div id="about-update-state" class="about-update-state"></div>
+        <p id="about-update-details" class="about-update-details"></p>
+      </section>
+    </div>
+    <footer>
+      <button class="btn" id="btn-check-update" type="button">
+        <i class="fa-solid fa-rotate"></i><span data-i18n="update.checkNow"></span>
+      </button>
+      <button class="btn primary" data-close data-i18n="close"></button>
     </footer>
   </div>
 </div>

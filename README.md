@@ -82,7 +82,7 @@ This repository includes one command centre:
 ./github.sh check
 ./github.sh init
 ./github.sh build
-./github.sh release 0.2.19
+./github.sh release 0.2.21
 ```
 
 - `init` creates/configures the GitHub repository and pushes the source
@@ -189,7 +189,7 @@ Un seul script sert de tableau de commande :
 ./github.sh check
 ./github.sh init
 ./github.sh build
-./github.sh release 0.2.19
+./github.sh release 0.2.21
 ```
 
 - `init` crée et configure le dépôt GitHub, puis envoie les sources
