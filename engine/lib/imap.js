@@ -230,13 +230,24 @@ async function storeNewMessages(client, account, folder, dataDir, firstUid, last
     row.references_json = JSON.stringify(thread.references);
 
     if (role === 'inbox') {
-      if (db.isTrustedEmail(row.from_addr)) {
+      const decision = db.spamRuleDecision(row.from_addr);
+      if (decision?.action === 'allow' || db.isTrustedEmail(row.from_addr)) {
         row.is_spam = 0;
+      } else if (decision?.action === 'block') {
+        row.is_spam = 1;
       } else {
         const score = spam.classify(`${row.subject} ${row.from_addr} ${text}`);
         if (score > 0.92) row.is_spam = 1;
       }
     }
+
+    db.recordSenderSeen({
+      email: row.from_addr,
+      name: row.from_name,
+      subject: row.subject,
+      date: row.date,
+      isSpam: row.is_spam || role === 'junk',
+    });
 
     const { id } = db.upsertMessage(row);
     db.indexBody(id, row, text);

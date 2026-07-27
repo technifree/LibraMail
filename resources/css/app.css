@@ -2840,3 +2840,96 @@ body.resizing-panes.resize-rows { cursor: row-resize; }
   .cleanup-progress.is-indeterminate #cleanup-progress-bar,
   #btn-check-update.is-checking i { animation-duration: 2.4s; }
 }
+
+
+/* 0.2.22 — règles indésirables et icônes expéditeurs */
+.avatar.avatar-image,
+.avatar.avatar-provider {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.avatar.avatar-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.avatar.avatar-provider {
+  background: color-mix(in srgb, var(--accent) 22%, var(--panel));
+  color: var(--accent-strong, var(--accent));
+}
+.spam-rules-card {
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+.spam-rule-form {
+  display: grid;
+  grid-template-columns: minmax(120px, .7fr) minmax(110px, .6fr) minmax(180px, 1.6fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+.spam-rule-form input,
+.spam-rule-form select {
+  min-width: 0;
+}
+.spam-rules-list,
+.spam-senders-list {
+  display: grid;
+  gap: 8px;
+}
+.spam-rule-row,
+.spam-sender-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border-soft, var(--border));
+}
+.spam-sender-row {
+  grid-template-columns: minmax(180px, 1fr) auto auto auto auto;
+}
+.spam-rule-row.allow { border-color: color-mix(in srgb, #49a86b 45%, var(--border)); }
+.spam-rule-row.block { border-color: color-mix(in srgb, #cf5b78 45%, var(--border)); }
+.spam-rule-main,
+.spam-sender-main {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.spam-rule-main strong,
+.spam-sender-main strong,
+.spam-rule-main small,
+.spam-sender-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.spam-rule-main small,
+.spam-sender-main small,
+.spam-rule-hits,
+.spam-sender-counts {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.spam-collected-box summary {
+  cursor: pointer;
+  color: var(--fg-muted);
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+@media (max-width: 900px) {
+  .spam-rule-form,
+  .spam-rule-row,
+  .spam-sender-row { grid-template-columns: 1fr; }
+}

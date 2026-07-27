@@ -1,3 +1,9 @@
+## [0.2.22] - 2026-07-27
+
+- Gestion enrichie des indésirables : règles d’adresses/domaines bloqués ou autorisés, expéditeurs collectés et application aux messages existants.
+- Icônes des comptes renforcées : logo personnalisé réellement sauvegardé et détection de fournisseurs étendue.
+- Icônes d’expéditeurs : avatar de contact, fournisseur reconnu ou favicon de domaine mis en cache localement quand c’est possible.
+
 # Changelog
 
 ## [0.2.21] - 2026-07-27

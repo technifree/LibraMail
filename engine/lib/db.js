@@ -223,6 +223,43 @@ function init(dataDir) {
   );
   INSERT OR IGNORE INTO spam_stats VALUES ('ham_msgs', 0), ('spam_msgs', 0);
 
+  CREATE TABLE IF NOT EXISTS spam_sender_rules (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL CHECK(kind IN ('email','domain')),
+    value TEXT NOT NULL COLLATE NOCASE,
+    action TEXT NOT NULL CHECK(action IN ('block','allow')),
+    label TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    hits INTEGER NOT NULL DEFAULT 0,
+    last_seen INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(kind, value)
+  );
+  CREATE INDEX IF NOT EXISTS idx_spam_sender_rules_action ON spam_sender_rules(action, kind, value);
+
+  CREATE TABLE IF NOT EXISTS spam_sender_seen (
+    value TEXT PRIMARY KEY COLLATE NOCASE,
+    kind TEXT NOT NULL DEFAULT 'email',
+    display_name TEXT NOT NULL DEFAULT '',
+    domain TEXT NOT NULL DEFAULT '',
+    total INTEGER NOT NULL DEFAULT 0,
+    spam INTEGER NOT NULL DEFAULT 0,
+    ham INTEGER NOT NULL DEFAULT 0,
+    last_seen INTEGER NOT NULL DEFAULT 0,
+    last_subject TEXT NOT NULL DEFAULT ''
+  );
+  CREATE INDEX IF NOT EXISTS idx_spam_sender_seen_domain ON spam_sender_seen(domain, last_seen DESC);
+  CREATE INDEX IF NOT EXISTS idx_spam_sender_seen_spam ON spam_sender_seen(spam DESC, last_seen DESC);
+
+  CREATE TABLE IF NOT EXISTS sender_icon_cache (
+    value TEXT PRIMARY KEY COLLATE NOCASE,
+    icon_data TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT '',
+    checked_at INTEGER NOT NULL DEFAULT 0
+  );
+
   CREATE TABLE IF NOT EXISTS sync_state (
     account_id TEXT, folder TEXT,
     uidvalidity INTEGER, last_uid INTEGER DEFAULT 0,
@@ -429,6 +466,12 @@ function listMessages({ limit = 200, offset = 0, sortBy = 'date', sortDirection 
          WHERE ce.email=m.from_addr COLLATE NOCASE LIMIT 1) AS contact_name,
       EXISTS(SELECT 1 FROM contact_emails ce JOIN contacts c ON c.id=ce.contact_id
          WHERE ce.email=m.from_addr COLLATE NOCASE AND c.trusted=1) AS contact_trusted,
+      (SELECT c.avatar_data FROM contact_emails ce JOIN contacts c ON c.id=ce.contact_id
+         WHERE ce.email=m.from_addr COLLATE NOCASE AND c.avatar_data <> '' LIMIT 1) AS contact_avatar_data,
+      (SELECT sic.icon_data FROM sender_icon_cache sic
+         WHERE sic.value='domain:' || lower(substr(m.from_addr, instr(m.from_addr, '@') + 1)) COLLATE NOCASE LIMIT 1) AS sender_icon_data,
+      (SELECT sic.source FROM sender_icon_cache sic
+         WHERE sic.value='domain:' || lower(substr(m.from_addr, instr(m.from_addr, '@') + 1)) COLLATE NOCASE LIMIT 1) AS sender_icon_source,
       (SELECT json_group_array(json_object('name', l.name, 'color', l.color))
          FROM message_labels ml JOIN labels l ON l.id = ml.label_id
         WHERE ml.message_id = m.id) AS labels
@@ -475,6 +518,12 @@ function listConversations({ limit = 200, offset = 0, sortBy = 'date', sortDirec
              WHERE ce.email=r.from_addr COLLATE NOCASE LIMIT 1) AS contact_name,
            EXISTS(SELECT 1 FROM contact_emails ce JOIN contacts c ON c.id=ce.contact_id
              WHERE ce.email=r.from_addr COLLATE NOCASE AND c.trusted=1) AS contact_trusted,
+      (SELECT c.avatar_data FROM contact_emails ce JOIN contacts c ON c.id=ce.contact_id
+         WHERE ce.email=m.from_addr COLLATE NOCASE AND c.avatar_data <> '' LIMIT 1) AS contact_avatar_data,
+      (SELECT sic.icon_data FROM sender_icon_cache sic
+         WHERE sic.value='domain:' || lower(substr(m.from_addr, instr(m.from_addr, '@') + 1)) COLLATE NOCASE LIMIT 1) AS sender_icon_data,
+      (SELECT sic.source FROM sender_icon_cache sic
+         WHERE sic.value='domain:' || lower(substr(m.from_addr, instr(m.from_addr, '@') + 1)) COLLATE NOCASE LIMIT 1) AS sender_icon_source,
            r.thread_count, r.thread_unread, 1 AS is_thread,
            (SELECT group_concat(DISTINCT COALESCE(
               (SELECT c.display_name FROM contact_emails ce JOIN contacts c ON c.id=ce.contact_id
@@ -1306,6 +1355,123 @@ function countContacts() {
   return { n: Number(row.n) || 0, trusted: Number(row.trusted) || 0, favorites: Number(row.favorites) || 0 };
 }
 
+
+// ---------- Règles expéditeurs / indésirables ----------
+function senderDomain(email) {
+  const match = String(email || '').trim().toLowerCase().match(/@([^>\s]+)$/);
+  return match ? match[1].replace(/^www\./, '') : '';
+}
+
+function normalizeRuleValue(kind, value) {
+  const cleanKind = String(kind || 'email').toLowerCase() === 'domain' ? 'domain' : 'email';
+  let cleanValue = String(value || '').trim().toLowerCase();
+  if (cleanKind === 'domain') {
+    cleanValue = cleanValue.replace(/^@/, '').replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+  }
+  if (cleanKind === 'email' && !/^.+@.+\..+$/.test(cleanValue)) throw new Error('Adresse e-mail invalide');
+  if (cleanKind === 'domain' && !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(cleanValue)) throw new Error('Domaine invalide');
+  return { kind: cleanKind, value: cleanValue };
+}
+
+function listSpamRules() {
+  return db.prepare(`SELECT * FROM spam_sender_rules ORDER BY action DESC, kind, value COLLATE NOCASE`).all();
+}
+
+function saveSpamRule(input = {}) {
+  const { kind, value } = normalizeRuleValue(input.kind, input.value);
+  const action = String(input.action || 'block').toLowerCase() === 'allow' ? 'allow' : 'block';
+  const label = String(input.label || '').trim().slice(0, 120);
+  const notes = String(input.notes || '').trim().slice(0, 500);
+  const now = Date.now();
+  db.prepare(`INSERT INTO spam_sender_rules(kind,value,action,label,notes,hits,last_seen,created_at,updated_at)
+              VALUES(?,?,?,?,?,0,0,?,?)
+              ON CONFLICT(kind,value) DO UPDATE SET action=excluded.action,
+                label=excluded.label, notes=excluded.notes, updated_at=excluded.updated_at`).run(
+    kind, value, action, label, notes, now, now
+  );
+  return db.prepare('SELECT * FROM spam_sender_rules WHERE kind=? AND value=?').get(kind, value);
+}
+
+function removeSpamRule(id) {
+  return db.prepare('DELETE FROM spam_sender_rules WHERE id=?').run(Number(id));
+}
+
+function spamRuleDecision(email) {
+  const clean = normalizeContactEmail(email);
+  const domain = senderDomain(clean);
+  if (!clean && !domain) return null;
+  const rows = db.prepare(`SELECT * FROM spam_sender_rules
+                            WHERE (kind='email' AND value=@email)
+                               OR (kind='domain' AND value=@domain)`).all({ email: clean, domain });
+  const by = (action, kind) => rows.find(row => row.action === action && row.kind === kind);
+  return by('allow', 'email') || by('allow', 'domain') || by('block', 'email') || by('block', 'domain') || null;
+}
+
+function applySpamRuleToExistingMessages(rule) {
+  if (!rule) return 0;
+  const wanted = rule.action === 'block' ? 1 : 0;
+  const field = rule.kind === 'email'
+    ? 'lower(from_addr)=@value'
+    : "lower(substr(from_addr, instr(from_addr, '@') + 1))=@value";
+  return db.prepare(`UPDATE messages SET is_spam=@wanted
+                      WHERE folder_role='inbox' AND ${field}`).run({ wanted, value: String(rule.value || '').toLowerCase() }).changes;
+}
+
+function recordSenderSeen({ email, name = '', subject = '', date = Date.now(), isSpam = 0 } = {}) {
+  const value = normalizeContactEmail(email);
+  if (!value) return null;
+  const domain = senderDomain(value);
+  const spamValue = Number(isSpam) ? 1 : 0;
+  const hamValue = spamValue ? 0 : 1;
+  const timestamp = Number(date) || Date.now();
+  db.prepare(`INSERT INTO spam_sender_seen(value,kind,display_name,domain,total,spam,ham,last_seen,last_subject)
+              VALUES(@value,'email',@name,@domain,1,@spam,@ham,@lastSeen,@subject)
+              ON CONFLICT(value) DO UPDATE SET
+                display_name=CASE WHEN excluded.display_name <> '' THEN excluded.display_name ELSE spam_sender_seen.display_name END,
+                domain=excluded.domain,
+                total=spam_sender_seen.total + 1,
+                spam=spam_sender_seen.spam + excluded.spam,
+                ham=spam_sender_seen.ham + excluded.ham,
+                last_seen=MAX(spam_sender_seen.last_seen, excluded.last_seen),
+                last_subject=CASE WHEN excluded.last_subject <> '' THEN excluded.last_subject ELSE spam_sender_seen.last_subject END`).run({
+    value, name: String(name || '').trim(), domain, spam: spamValue, ham: hamValue,
+    lastSeen: timestamp, subject: String(subject || '').trim().slice(0, 180),
+  });
+  const rule = spamRuleDecision(value);
+  if (rule) {
+    db.prepare('UPDATE spam_sender_rules SET hits=hits+1,last_seen=?,updated_at=? WHERE id=?')
+      .run(timestamp, Date.now(), rule.id);
+  }
+  return value;
+}
+
+function listCollectedSenders({ limit = 300 } = {}) {
+  return db.prepare(`SELECT s.*,
+      (SELECT action FROM spam_sender_rules r WHERE r.kind='email' AND r.value=s.value) AS email_action,
+      (SELECT id FROM spam_sender_rules r WHERE r.kind='email' AND r.value=s.value) AS email_rule_id,
+      (SELECT action FROM spam_sender_rules r WHERE r.kind='domain' AND r.value=s.domain) AS domain_action,
+      (SELECT id FROM spam_sender_rules r WHERE r.kind='domain' AND r.value=s.domain) AS domain_rule_id
+    FROM spam_sender_seen s
+    ORDER BY s.spam DESC, s.last_seen DESC
+    LIMIT @limit`).all({ limit: Math.max(1, Math.min(2000, Number(limit) || 300)) });
+}
+
+function getSenderIconCache(value) {
+  return db.prepare('SELECT * FROM sender_icon_cache WHERE value=?').get(String(value || '').toLowerCase());
+}
+function setSenderIconCache(value, { iconData = '', source = '', status = '' } = {}) {
+  const key = String(value || '').toLowerCase();
+  if (!key) return null;
+  const data = String(iconData || '');
+  db.prepare(`INSERT INTO sender_icon_cache(value,icon_data,source,status,checked_at)
+              VALUES(?,?,?,?,?)
+              ON CONFLICT(value) DO UPDATE SET icon_data=excluded.icon_data,
+                source=excluded.source,status=excluded.status,checked_at=excluded.checked_at`).run(
+    key, data.length > 400000 ? '' : data, String(source || ''), String(status || ''), Date.now()
+  );
+  return getSenderIconCache(key);
+}
+
 // ---------- Synchronisation ----------
 const getSyncState = (accountId, folder) => db.prepare(
   'SELECT * FROM sync_state WHERE account_id=? AND folder=?'
@@ -1422,6 +1588,16 @@ module.exports = {
   isTrustedEmail,
   clearSpamForContact,
   countContacts,
+  setSenderIconCache,
+  getSenderIconCache,
+  listCollectedSenders,
+  recordSenderSeen,
+  applySpamRuleToExistingMessages,
+  spamRuleDecision,
+  removeSpamRule,
+  saveSpamRule,
+  listSpamRules,
+  senderDomain,
   getSyncState,
   setSyncState,
   countFolderMessages,

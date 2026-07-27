@@ -697,7 +697,11 @@ const App = (() => {
     if (/yahoo/.test(source)) return '<span class="account-provider-logo provider-yahoo"><i class="fa-brands fa-yahoo"></i></span>';
     if (/icloud|me\.com|mac\.com/.test(source)) return '<span class="account-provider-logo provider-icloud"><i class="fa-brands fa-apple"></i></span>';
     if (/proton/.test(source)) return '<span class="account-provider-logo provider-proton"><i class="fa-solid fa-shield-halved"></i></span>';
-    if (/orange/.test(source)) return '<span class="account-provider-logo provider-orange"><i class="fa-solid fa-envelope"></i></span>';
+    if (/orange|wanadoo/.test(source)) return '<span class="account-provider-logo provider-orange"><i class="fa-solid fa-envelope"></i></span>';
+    if (/laposte\.net/.test(source)) return '<span class="account-provider-logo provider-laposte"><i class="fa-solid fa-envelope"></i></span>';
+    if (/free\.fr/.test(source)) return '<span class="account-provider-logo provider-free"><i class="fa-solid fa-wifi"></i></span>';
+    if (/sfr\.fr/.test(source)) return '<span class="account-provider-logo provider-sfr"><i class="fa-solid fa-envelope"></i></span>';
+    if (/ovh|ovhcloud/.test(source)) return '<span class="account-provider-logo provider-ovh"><i class="fa-solid fa-cloud"></i></span>';
     const initials = String(account?.displayName || account?.email || '?').trim().slice(0, 2).toUpperCase() || '?';
     return `<span class="account-provider-logo provider-initials" style="background:${safeColor(account?.color)}">${esc(initials)}</span>`;
   }
@@ -804,6 +808,31 @@ const App = (() => {
     }));
   }
 
+
+  function senderEmailForRow(row) {
+    return String(row?.from_addr || '').trim().toLowerCase();
+  }
+
+  async function hydrateSenderIcons(rows = []) {
+    const targets = (rows || []).filter(row => senderEmailForRow(row) && !row.sender_icon_data && !row.contact_avatar_data);
+    const emails = [...new Set(targets.map(senderEmailForRow))].slice(0, 80);
+    if (!emails.length || !ws || ws.readyState !== WebSocket.OPEN) return;
+    const resolved = await rpc('icons.sender.resolveMany', { emails });
+    let changed = false;
+    for (const row of rows || []) {
+      const info = resolved?.[senderEmailForRow(row)];
+      if (!info) continue;
+      if (info.iconData && row.sender_icon_data !== info.iconData) {
+        row.sender_icon_data = info.iconData;
+        changed = true;
+      }
+      if (info.providerKey && row.sender_icon_source !== `provider:${info.providerKey}`) {
+        row.sender_icon_source = `provider:${info.providerKey}`;
+      }
+    }
+    if (changed && list) list.render(true);
+  }
+
   function updateFolderActionButton() {
     const button = document.getElementById('btn-empty-folder');
     if (!button) return;
@@ -838,6 +867,7 @@ const App = (() => {
     result.rows = decorateRows(result.rows);
     updateFolderActionButton();
     list.setData(result.rows, mailListOptions(preserveListState));
+    hydrateSenderIcons(result.rows).catch(() => {});
 
     const counts = result.counts || {};
     document.getElementById('list-sub').textContent = conversationMode
@@ -3968,6 +3998,7 @@ const App = (() => {
       color: accountField('acc-color').value,
       syncIntervalMinutes: Number(accountField('acc-sync-interval').value) || 0,
       spamRetentionDays: Number(accountField('acc-spam-retention').value) || 0,
+      logoData: accountField('acc-logo-data')?.value || '',
       imap: {
         host: value('acc-imap-host'),
         port: Number(value('acc-imap-port')),
@@ -4620,6 +4651,79 @@ const App = (() => {
     }
   }
 
+
+  // ---------- Règles d'indésirables ----------
+  function spamRuleBadge(action) {
+    return action === 'allow' ? t('spam.ruleAllowed') : t('spam.ruleBlocked');
+  }
+
+  async function refreshSpamRuleSettings() {
+    const rulesBox = document.getElementById('spam-rules-list');
+    const sendersBox = document.getElementById('spam-senders-list');
+    if (!rulesBox || !sendersBox || !ws || ws.readyState !== WebSocket.OPEN) return;
+    try {
+      const data = await rpc('spam.rules.list');
+      const rules = data.rules || [];
+      rulesBox.innerHTML = rules.length ? rules.map(rule => `
+        <div class="spam-rule-row ${esc(rule.action)}">
+          <span class="spam-rule-main">
+            <strong>${esc(rule.value)}</strong>
+            <small>${esc(t(rule.kind === 'domain' ? 'spam.ruleDomain' : 'spam.ruleEmail'))} · ${esc(spamRuleBadge(rule.action))}</small>
+          </span>
+          <span class="spam-rule-hits">${esc(t('spam.ruleHits', { count: Number(rule.hits || 0) }))}</span>
+          <button class="iconbtn" type="button" data-remove-spam-rule="${esc(rule.id)}" title="${esc(t('delete'))}"><i class="fa-solid fa-trash"></i></button>
+        </div>`).join('') : `<div class="empty-hint">${esc(t('spam.noRules'))}</div>`;
+      rulesBox.querySelectorAll('[data-remove-spam-rule]').forEach(button => {
+        button.onclick = async () => {
+          await rpc('spam.rules.remove', { id: Number(button.dataset.removeSpamRule) });
+          await refreshSpamRuleSettings();
+          await refreshVisibleList({ preserveListState: true });
+        };
+      });
+      const senders = data.senders || [];
+      sendersBox.innerHTML = senders.length ? senders.map(sender => `
+        <div class="spam-sender-row">
+          <span class="spam-sender-main">
+            <strong>${esc(sender.display_name || sender.value)}</strong>
+            <small>${esc(sender.value)}${sender.domain ? ` · ${esc(sender.domain)}` : ''}</small>
+          </span>
+          <span class="spam-sender-counts">${esc(t('spam.senderCounts', { spam: Number(sender.spam || 0), total: Number(sender.total || 0) }))}</span>
+          <button class="btn compact" type="button" data-sender-rule="block:email:${esc(sender.value)}"><i class="fa-solid fa-ban"></i>${esc(t('spam.blockAddress'))}</button>
+          <button class="btn compact" type="button" data-sender-rule="block:domain:${esc(sender.domain || '')}" ${sender.domain ? '' : 'disabled'}><i class="fa-solid fa-globe"></i>${esc(t('spam.blockDomain'))}</button>
+          <button class="btn compact" type="button" data-sender-rule="allow:email:${esc(sender.value)}"><i class="fa-solid fa-shield"></i>${esc(t('spam.allowAddress'))}</button>
+        </div>`).join('') : `<div class="empty-hint">${esc(t('spam.noCollected'))}</div>`;
+      sendersBox.querySelectorAll('[data-sender-rule]').forEach(button => {
+        button.onclick = async () => {
+          const [action, kind, ...valueParts] = String(button.dataset.senderRule || '').split(':');
+          const value = valueParts.join(':');
+          if (!value) return;
+          await rpc('spam.rules.save', { action, kind, value });
+          await refreshSpamRuleSettings();
+          await refreshVisibleList({ preserveListState: true });
+        };
+      });
+    } catch (error) {
+      rulesBox.innerHTML = `<div class="error-inline">${esc(error.message)}</div>`;
+    }
+  }
+
+  async function addSpamRuleFromSettings() {
+    const action = document.getElementById('spam-rule-action')?.value || 'block';
+    const kind = document.getElementById('spam-rule-kind')?.value || 'email';
+    const input = document.getElementById('spam-rule-value');
+    const value = input?.value || '';
+    if (!value.trim()) return;
+    try {
+      const result = await rpc('spam.rules.save', { action, kind, value });
+      if (input) input.value = '';
+      status(t('spam.ruleSaved', { changed: Number(result.changed || 0) }), 'success');
+      await refreshSpamRuleSettings();
+      await refreshVisibleList({ preserveListState: true });
+    } catch (error) {
+      status(`${t('error')} : ${error.message}`, 'error');
+    }
+  }
+
   // ---------- Paramètres ----------
   function openSettings() {
     document.getElementById('set-theme').value = config.theme || 'dark';
@@ -5156,6 +5260,7 @@ const App = (() => {
     });
     document.getElementById('contacts-group-filter').onchange = () => loadContacts().catch(() => {});
     document.getElementById('btn-settings').onclick = openSettings;
+    document.getElementById('btn-add-spam-rule')?.addEventListener('click', addSpamRuleFromSettings);
     document.getElementById('btn-export-backup').onclick = exportCompleteBackup;
     document.getElementById('btn-import-backup').onclick = importCompleteBackup;
     document.getElementById('btn-allow-remote').onclick = openRemoteContentDialog;

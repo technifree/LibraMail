@@ -1,10 +1,7 @@
-# LibraMail 0.2.21
+# LibraMail 0.2.22
 
-- Reprise depuis la base stable 0.2.19 pour éviter les régressions de la 0.2.20.
-- Icône d’application alignée avec le nouveau logo LibraMail.
-- Fenêtre À propos simplifiée avec auteur, licence MIT, stockage local et vérification de version.
-- Notification discrète lorsqu’une version plus récente est disponible.
-- Jauge dédiée aux opérations longues de nettoyage, séparée de la relève du courrier.
-- Correction de l’import/export de sauvegarde pendant les nettoyages automatiques.
-- Amélioration du lanceur Windows et des journaux moteur.
-- Logos de comptes : icône automatique par fournisseur et image personnalisée possible dans les paramètres du compte.
+- Gestion améliorée des indésirables : règles d’adresses et de domaines bloqués/autorisés.
+- Collecte des expéditeurs rencontrés pour les traiter plus facilement.
+- Icônes de comptes personnalisables avec détection fournisseur enrichie.
+- Icônes d’expéditeurs façon client moderne : avatars de contacts, fournisseurs connus ou favicons de domaine en cache local.
+- Conservation des corrections Windows 0.2.21 sur import/restauration et vérification de version.

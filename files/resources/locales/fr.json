@@ -576,5 +576,26 @@
   "update.noticeTitle": "Ouvrir les informations de version",
   "update.unavailableTitle": "Vérification indisponible",
   "update.unknownDetail": "La vérification sera faite automatiquement au démarrage ou avec le bouton ci-dessous.",
-  "update.unknownTitle": "Version non vérifiée"
+  "update.unknownTitle": "Version non vérifiée",
+  "spam": {
+    "rulesTitle": "Expéditeurs indésirables",
+    "ruleBlock": "Bloquer",
+    "ruleAllow": "Autoriser",
+    "ruleEmail": "Adresse",
+    "ruleDomain": "Domaine",
+    "rulePlaceholder": "adresse@exemple.fr ou domaine.fr",
+    "ruleAdd": "Ajouter la règle",
+    "rulesHint": "Les adresses autorisées passent avant les domaines autorisés, puis les blocages. Les contacts de confiance restent protégés.",
+    "collectedSenders": "Adresses collectées dans les messages",
+    "ruleBlocked": "bloqué",
+    "ruleAllowed": "autorisé",
+    "ruleHits": "{count} occurrence(s)",
+    "noRules": "Aucune règle définie.",
+    "noCollected": "Aucun expéditeur collecté pour le moment.",
+    "senderCounts": "{spam} indésirable(s) / {total} message(s)",
+    "blockAddress": "Bloquer adresse",
+    "blockDomain": "Bloquer domaine",
+    "allowAddress": "Autoriser adresse",
+    "ruleSaved": "Règle enregistrée. {changed} message(s) existant(s) mis à jour."
+  }
 }

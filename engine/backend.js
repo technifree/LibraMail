@@ -15,10 +15,11 @@ const imap = require('./lib/imap');
 const smtp = require('./lib/smtp');
 const spam = require('./lib/spam');
 const backup = require('./lib/backup');
+const iconCache = require('./lib/icon_cache');
 const nativeDialog = require('./lib/native_dialog');
 
 const PORT = 47800;
-const APP_VERSION = '0.2.21';
+const APP_VERSION = '0.2.22';
 const ROOT = path.resolve(__dirname, '..');
 const DATA = path.join(ROOT, 'data');
 const ACCOUNTS_FILE = path.join(DATA, 'accounts.json');
@@ -107,10 +108,35 @@ function normalizeLogoData(value) {
   return /^data:image\/(?:png|jpe?g|webp|svg\+xml);base64,/i.test(raw) ? raw : '';
 }
 
+
+function domainFromEmail(value) {
+  const match = String(value || '').trim().toLowerCase().match(/@([^>\s]+)$/);
+  return match ? match[1].replace(/^www\./, '') : '';
+}
+
+function providerKeyForAccount(account = {}) {
+  const email = String(account.email || '').toLowerCase();
+  const domain = domainFromEmail(email);
+  const host = `${account.imap?.host || ''} ${account.smtp?.host || ''}`.toLowerCase();
+  const source = `${email} ${domain} ${host}`;
+  if (/gmail|googlemail/.test(source)) return 'gmail';
+  if (/outlook|hotmail|live\.com|office365|microsoft/.test(source)) return 'outlook';
+  if (/yahoo/.test(source)) return 'yahoo';
+  if (/icloud|me\.com|mac\.com/.test(source)) return 'icloud';
+  if (/proton/.test(source)) return 'proton';
+  if (/laposte\.net/.test(source)) return 'laposte';
+  if (/free\.fr/.test(source)) return 'free';
+  if (/orange|wanadoo/.test(source)) return 'orange';
+  if (/sfr\.fr/.test(source)) return 'sfr';
+  if (/ovh|ovhcloud/.test(source)) return 'ovh';
+  return '';
+}
+
 function normalizeAccount(account) {
   return {
     ...account,
     logoData: normalizeLogoData(account.logoData),
+    providerKey: providerKeyForAccount(account),
     syncIntervalMinutes: Number.isFinite(Number(account.syncIntervalMinutes))
       ? Math.max(0, Math.min(1440, Math.round(Number(account.syncIntervalMinutes))))
       : 5,
@@ -202,6 +228,7 @@ function publicAccount(account) {
     email: account.email,
     color: account.color,
     logoData: normalizeLogoData(account.logoData),
+    providerKey: providerKeyForAccount(account),
     syncIntervalMinutes: account.syncIntervalMinutes,
     spamRetentionDays: account.spamRetentionDays,
     folders: {
@@ -418,8 +445,9 @@ function resolveSelection(items) {
 
 async function setMessageSpamState(message, isSpam) {
   if (!message) return false;
-  if (isSpam && db.isTrustedEmail(message.from_addr)) {
-    throw new Error('Cet expéditeur est un contact de confiance. Désactivez d’abord son statut de confiance dans le carnet d’adresses.');
+  const decision = db.spamRuleDecision(message.from_addr);
+  if (isSpam && (decision?.action === 'allow' || db.isTrustedEmail(message.from_addr))) {
+    throw new Error('Cet expéditeur est autorisé. Retirez-le d’abord des expéditeurs autorisés ou du carnet de confiance.');
   }
   const raw = fs.readFileSync(localMessagePath(message), 'utf8');
   const parsed = await simpleParser(raw);
@@ -432,8 +460,31 @@ async function setMessageSpamState(message, isSpam) {
       spam.train(corpus, false);
     }
     db.db.prepare('UPDATE messages SET is_spam=? WHERE id=?').run(wanted, message.id);
+    db.recordSenderSeen({
+      email: message.from_addr,
+      name: message.from_name,
+      subject: message.subject,
+      date: message.date,
+      isSpam: wanted,
+    });
   }
   return true;
+}
+
+async function resolveSenderIconsForEmails(emails = []) {
+  const unique = [...new Set((Array.isArray(emails) ? emails : [])
+    .map(value => String(value || '').trim().toLowerCase())
+    .filter(Boolean))].slice(0, 80);
+  const result = {};
+  for (const email of unique) {
+    const contact = db.findContactByEmail(email);
+    if (contact?.avatarData) {
+      result[email] = { email, iconData: contact.avatarData, source: 'contact' };
+      continue;
+    }
+    result[email] = await iconCache.resolveSenderIcon({ email, db, dataDir: DATA });
+  }
+  return result;
 }
 
 async function moveMessagesToTrash(messages, { source = 'manual', onProgress = null } = {}) {
@@ -1208,6 +1259,30 @@ const methods = {
     }
     return { processed, skipped, errors, stats: spam.stats() };
   },
+
+  'spam.rules.list': async () => ({
+    rules: db.listSpamRules(),
+    senders: db.listCollectedSenders({ limit: 300 }),
+  }),
+  'spam.rules.save': async input => {
+    const rule = db.saveSpamRule(input || {});
+    const changed = db.applySpamRuleToExistingMessages(rule);
+    broadcast('spam.rules.updated', { rule, changed });
+    return { rule, changed, rules: db.listSpamRules(), senders: db.listCollectedSenders({ limit: 300 }) };
+  },
+  'spam.rules.remove': async ({ id }) => {
+    db.removeSpamRule(id);
+    broadcast('spam.rules.updated', { id: Number(id) });
+    return { rules: db.listSpamRules(), senders: db.listCollectedSenders({ limit: 300 }) };
+  },
+  'spam.rules.promoteSender': async ({ email, action = 'block', kind = 'email' } = {}) => {
+    const value = String(kind) === 'domain' ? db.senderDomain(email) : email;
+    const rule = db.saveSpamRule({ kind, value, action });
+    const changed = db.applySpamRuleToExistingMessages(rule);
+    broadcast('spam.rules.updated', { rule, changed });
+    return { rule, changed, rules: db.listSpamRules(), senders: db.listCollectedSenders({ limit: 300 }) };
+  },
+  'icons.sender.resolveMany': async ({ emails } = {}) => resolveSenderIconsForEmails(emails),
   'spam.stats': async () => spam.stats(),
   'spam.empty': async () => {
     const messages = db.listSpamMessages();

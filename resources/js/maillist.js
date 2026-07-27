@@ -127,7 +127,7 @@ class VirtualMailList {
       <button class="mail-select" type="button" title="${this.escape(window.t?.('selection.select') || 'Sélectionner')}">
         <i class="${this.selectedKeys.has(key) ? 'fa-solid fa-square-check' : 'fa-regular fa-square'}"></i>
       </button>
-      <span class="avatar" style="background:${this.colorFrom(sender)}">${this.initials(sender)}</span>
+      ${this.avatarHtml(row, sender)}
       <span class="from"><span class="name">${this.escape(sender)}</span>${isThread ? `<span class="thread-count"><i class="fa-solid fa-comments"></i> ${count}</span>` : ''}</span>
       <span class="subject"><span class="subj">${this.escape(subject)}</span>${snippet ? ` <span class="snippet">— ${this.escape(snippet)}</span>` : ''}</span>
       <span class="quick">
