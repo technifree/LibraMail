@@ -241,6 +241,26 @@ class VirtualMailList {
     return { id: 'older', label: window.t?.('group.older') || 'Plus ancien' };
   }
 
+
+  avatarHtml(row, sender) {
+    const icon = row?.sender_icon_url || row?.sender_icon || row?.avatar_url || row?.contact_avatar || row?.provider_icon || row?.account_icon || '';
+    const label = sender || row?.from_name || row?.from_addr || row?.to_name || row?.to_addr || '?';
+    const initials = this.initials(label);
+    const bg = this.colorFrom(label);
+
+    if (icon) {
+      const safeIcon = this.escapeAttr(icon);
+      const safeLabel = this.escapeAttr(label);
+      return `<span class="avatar sender-avatar" style="--avatar-bg:${this.escapeAttr(bg)}"><img src="${safeIcon}" alt="${safeLabel}" loading="lazy" onerror="this.remove();"></span>`;
+    }
+
+    return `<span class="avatar sender-avatar" style="--avatar-bg:${this.escapeAttr(bg)}"><span>${this.escape(initials)}</span></span>`;
+  }
+
+  escapeAttr(value) {
+    return String(value || '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+  }
+
   initials(value) {
     const words = String(value || '?').trim().split(/[\s@._-]+/).filter(Boolean);
     return (words[0]?.[0] || '?').toUpperCase() + (words[1]?.[0] || '').toUpperCase();
