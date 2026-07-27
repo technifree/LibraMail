@@ -467,11 +467,11 @@ function listMessages({ limit = 200, offset = 0, sortBy = 'date', sortDirection 
       EXISTS(SELECT 1 FROM contact_emails ce JOIN contacts c ON c.id=ce.contact_id
          WHERE ce.email=m.from_addr COLLATE NOCASE AND c.trusted=1) AS contact_trusted,
       (SELECT c.avatar_data FROM contact_emails ce JOIN contacts c ON c.id=ce.contact_id
-         WHERE ce.email=m.from_addr COLLATE NOCASE AND c.avatar_data <> '' LIMIT 1) AS contact_avatar_data,
+         WHERE ce.email=r.from_addr COLLATE NOCASE AND c.avatar_data <> '' LIMIT 1) AS contact_avatar_data,
       (SELECT sic.icon_data FROM sender_icon_cache sic
-         WHERE sic.value='domain:' || lower(substr(m.from_addr, instr(m.from_addr, '@') + 1)) COLLATE NOCASE LIMIT 1) AS sender_icon_data,
+         WHERE sic.value='domain:' || lower(substr(r.from_addr, instr(r.from_addr, '@') + 1)) COLLATE NOCASE LIMIT 1) AS sender_icon_data,
       (SELECT sic.source FROM sender_icon_cache sic
-         WHERE sic.value='domain:' || lower(substr(m.from_addr, instr(m.from_addr, '@') + 1)) COLLATE NOCASE LIMIT 1) AS sender_icon_source,
+         WHERE sic.value='domain:' || lower(substr(r.from_addr, instr(r.from_addr, '@') + 1)) COLLATE NOCASE LIMIT 1) AS sender_icon_source,
       (SELECT json_group_array(json_object('name', l.name, 'color', l.color))
          FROM message_labels ml JOIN labels l ON l.id = ml.label_id
         WHERE ml.message_id = m.id) AS labels
@@ -519,11 +519,11 @@ function listConversations({ limit = 200, offset = 0, sortBy = 'date', sortDirec
            EXISTS(SELECT 1 FROM contact_emails ce JOIN contacts c ON c.id=ce.contact_id
              WHERE ce.email=r.from_addr COLLATE NOCASE AND c.trusted=1) AS contact_trusted,
       (SELECT c.avatar_data FROM contact_emails ce JOIN contacts c ON c.id=ce.contact_id
-         WHERE ce.email=m.from_addr COLLATE NOCASE AND c.avatar_data <> '' LIMIT 1) AS contact_avatar_data,
+         WHERE ce.email=r.from_addr COLLATE NOCASE AND c.avatar_data <> '' LIMIT 1) AS contact_avatar_data,
       (SELECT sic.icon_data FROM sender_icon_cache sic
-         WHERE sic.value='domain:' || lower(substr(m.from_addr, instr(m.from_addr, '@') + 1)) COLLATE NOCASE LIMIT 1) AS sender_icon_data,
+         WHERE sic.value='domain:' || lower(substr(r.from_addr, instr(r.from_addr, '@') + 1)) COLLATE NOCASE LIMIT 1) AS sender_icon_data,
       (SELECT sic.source FROM sender_icon_cache sic
-         WHERE sic.value='domain:' || lower(substr(m.from_addr, instr(m.from_addr, '@') + 1)) COLLATE NOCASE LIMIT 1) AS sender_icon_source,
+         WHERE sic.value='domain:' || lower(substr(r.from_addr, instr(r.from_addr, '@') + 1)) COLLATE NOCASE LIMIT 1) AS sender_icon_source,
            r.thread_count, r.thread_unread, 1 AS is_thread,
            (SELECT group_concat(DISTINCT COALESCE(
               (SELECT c.display_name FROM contact_emails ce JOIN contacts c ON c.id=ce.contact_id
