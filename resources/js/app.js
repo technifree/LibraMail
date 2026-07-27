@@ -4297,30 +4297,55 @@ const App = (() => {
     }
   }
 
+  async function fetchLatestReleaseFromBrowser() {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
+    try {
+      const response = await fetch('https://api.github.com/repos/technifree/LibraMail/releases/latest', {
+        headers: { Accept: 'application/vnd.github+json' },
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`GitHub ${response.status}`);
+      const payload = await response.json();
+      return {
+        latest: String(payload.tag_name || payload.name || '').replace(/^v/i, ''),
+        url: payload.html_url || 'https://github.com/technifree/LibraMail/releases',
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async function checkForUpdates(manual = false) {
     if (updateState.checking) return updateState;
     if (!manual && updateState.checkedAt && Date.now() - updateState.checkedAt < 6 * 60 * 60 * 1000) return updateState;
     updateState = { ...updateState, checking: true, error: '' };
     renderUpdateStatus();
+    if (manual) status(t('update.checking'), 'busy');
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 5000);
-      const response = await fetch('https://api.github.com/repos/technifree/LibraMail/releases/latest', {
-        headers: { Accept: 'application/vnd.github+json' },
-        signal: controller.signal,
-      });
-      clearTimeout(timer);
-      if (!response.ok) throw new Error(`GitHub ${response.status}`);
-      const payload = await response.json();
-      const latest = String(payload.tag_name || payload.name || '').replace(/^v/i, '');
+      let payload = null;
+      try {
+        await waitForEngine({ timeout: manual ? 8000 : 2500 });
+        payload = await rpc('app.checkLatestVersion');
+      } catch (engineError) {
+        // Sous certains WebView Windows, fetch côté interface est capricieux.
+        // On privilégie donc le moteur Node, puis on garde ce repli pour Linux/dev.
+        payload = await fetchLatestReleaseFromBrowser();
+      }
+      const latest = String(payload?.latest || payload?.tagName || '').replace(/^v/i, '');
       updateState = {
         checking: false,
         latest,
-        url: payload.html_url || 'https://github.com/technifree/LibraMail/releases',
+        url: payload?.url || 'https://github.com/technifree/LibraMail/releases',
         available: latest ? compareVersions(latest, appVersion()) > 0 : false,
         checkedAt: Date.now(),
         error: '',
       };
+      if (manual) {
+        status(updateState.available
+          ? t('update.availableTitle', { version: latest })
+          : t('update.currentTitle'), updateState.available ? 'info' : 'success');
+      }
     } catch (error) {
       updateState = {
         ...updateState,
@@ -4328,6 +4353,7 @@ const App = (() => {
         checkedAt: Date.now(),
         error: manual ? `${t('update.error')} : ${error.message}` : '',
       };
+      if (manual && updateState.error) status(updateState.error, 'error');
     }
     setUpdateNotice();
     renderUpdateStatus();

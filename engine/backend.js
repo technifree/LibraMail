@@ -26,6 +26,11 @@ const CONFIG_FILE = path.join(DATA, 'config.json');
 const BACKUPS_DIR = path.join(ROOT, 'backups');
 const RESTORE_STATE_FILE = path.join(ROOT, '.libramail-restore-state.json');
 const RETENTION_CHECK_MS = 6 * 60 * 60 * 1000;
+const RUNTIME_DATA_FILES = new Set(['engine.log', 'engine.stdout.log', 'engine.stderr.log']);
+
+function isRuntimeDataFile(name) {
+  return RUNTIME_DATA_FILES.has(String(name || '').replace(/\\/g, '/'));
+}
 
 fs.mkdirSync(DATA, { recursive: true });
 
@@ -41,10 +46,11 @@ function recoverInterruptedRestore() {
   if (safeRollback && fs.existsSync(rollbackRoot)) {
     try {
       for (const name of fs.readdirSync(DATA)) {
-        if (name === 'engine.log') continue;
+        if (isRuntimeDataFile(name)) continue;
         fs.rmSync(path.join(DATA, name), { recursive: true, force: true });
       }
       for (const name of fs.readdirSync(rollbackRoot)) {
+        if (isRuntimeDataFile(name)) continue;
         fs.renameSync(path.join(rollbackRoot, name), path.join(DATA, name));
       }
       console.warn('[LibraMail] Une restauration interrompue a été annulée automatiquement.');
@@ -693,7 +699,7 @@ function moveDataContents(sourceDir, targetDir, { keepEngineLog = false } = {}) 
   fs.mkdirSync(targetDir, { recursive: true });
   const names = fs.existsSync(sourceDir) ? fs.readdirSync(sourceDir) : [];
   for (const name of names) {
-    if (keepEngineLog && name === 'engine.log') continue;
+    if (keepEngineLog && isRuntimeDataFile(name)) continue;
     fs.renameSync(path.join(sourceDir, name), path.join(targetDir, name));
   }
 }
@@ -701,7 +707,7 @@ function moveDataContents(sourceDir, targetDir, { keepEngineLog = false } = {}) 
 function clearDataContents(dataDir, { keepEngineLog = false } = {}) {
   if (!fs.existsSync(dataDir)) return;
   for (const name of fs.readdirSync(dataDir)) {
-    if (keepEngineLog && name === 'engine.log') continue;
+    if (keepEngineLog && isRuntimeDataFile(name)) continue;
     fs.rmSync(path.join(dataDir, name), { recursive: true, force: true });
   }
 }
@@ -726,7 +732,7 @@ async function importCompleteBackup(sourcePath) {
     const extractTotal = inspection.entries.filter(entry => {
       if (!entry.name.startsWith('data/') || entry.isDirectory) return false;
       const relative = entry.name.slice('data/'.length);
-      return !['engine.log', 'index.db-wal', 'index.db-shm'].includes(relative);
+      return !isRuntimeDataFile(relative) && !['index.db-wal', 'index.db-shm'].includes(relative);
     }).length;
     broadcast('backup.progress', { kind: 'import', step: 'extract', completed: 0, total: extractTotal, name: '' });
     const extracted = await backup.extractArchive(resolvedSource, stagingRoot, {
@@ -841,6 +847,36 @@ function openExternalWithSystem(value) {
       resolve({ opened: true, url });
     });
   });
+}
+
+
+async function checkLatestRelease() {
+  const endpoint = 'https://api.github.com/repos/technifree/LibraMail/releases/latest';
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6000);
+  try {
+    if (typeof fetch !== 'function') throw new Error('fetch indisponible dans ce runtime Node.js');
+    const response = await fetch(endpoint, {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': `LibraMail/${APP_VERSION}`,
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`GitHub ${response.status}`);
+    const payload = await response.json();
+    const latest = String(payload.tag_name || payload.name || '').replace(/^v/i, '');
+    return {
+      current: APP_VERSION,
+      latest,
+      tagName: payload.tag_name || '',
+      name: payload.name || '',
+      url: payload.html_url || 'https://github.com/technifree/LibraMail/releases',
+      publishedAt: payload.published_at || '',
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 const methods = {
@@ -1324,6 +1360,9 @@ const methods = {
 
   // ---------- Ouverture externe sécurisée ----------
   'app.openExternal': async ({ url }) => openExternalWithSystem(url),
+
+  // ---------- Version ----------
+  'app.checkLatestVersion': async () => checkLatestRelease(),
 
   // ---------- Arrêt ----------
   'app.shutdown': async () => {
