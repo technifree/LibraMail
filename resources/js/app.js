@@ -138,16 +138,6 @@ const App = (() => {
     throw new Error(t('status.disconnected'));
   }
 
-  function hasActiveSync() {
-    return activeSyncActivities.size > 0;
-  }
-
-  function guardHeavyOperationDuringSync() {
-    if (!hasActiveSync()) return true;
-    status(t('status.syncBusyOperation'), 'busy');
-    return false;
-  }
-
   // ---------- Activité et redimensionnement ----------
   function accountLabel(accountId) {
     const account = accounts.find(item => item.id === accountId);
@@ -665,7 +655,10 @@ const App = (() => {
     const collapsed = config[section.configKey] === true;
     const header = document.getElementById(section.headerId);
     const button = document.getElementById(section.buttonId);
-    const content = '\ufeff' + rows.join('\r\n');
+    const content = document.getElementById(section.contentId);
+    header?.classList.toggle('collapsed', collapsed);
+    content?.classList.toggle('collapsed', collapsed);
+    button?.setAttribute('aria-expanded', String(!collapsed));
     if (button) {
       const sectionLabel = t(section.labelKey);
       button.title = t(collapsed ? 'sidebar.expand' : 'sidebar.collapse', { section: sectionLabel });
@@ -2201,7 +2194,6 @@ const App = (() => {
 
   async function emptyCurrentFolder() {
     if (!['spam', 'trash'].includes(view.type)) return;
-    if (!guardHeavyOperationDuringSync()) return;
     const trash = view.type === 'trash';
     const accepted = await confirmAction({
       title: t(trash ? 'trash.emptyTitle' : 'spam.emptyTitle'),
@@ -2471,7 +2463,6 @@ const App = (() => {
 
   async function runBulkFlag(flag, value) {
     if (!bulkSelection.length) return;
-    if (!guardHeavyOperationDuringSync()) return;
     try {
       const result = await rpc('messages.batchSetFlag', {
         items: selectionPayload(), flag, value: Boolean(value),
@@ -2490,7 +2481,6 @@ const App = (() => {
 
   async function runBulkDelete() {
     if (!bulkSelection.length) return;
-    if (!guardHeavyOperationDuringSync()) return;
     const selectedCount = bulkSelection.length;
     const hasPermanent = bulkSelection.some(item => item.folderRole === 'trash');
     const accepted = await confirmAction({
@@ -2519,7 +2509,6 @@ const App = (() => {
 
   async function runBulkSpam() {
     if (!bulkSelection.length) return;
-    if (!guardHeavyOperationDuringSync()) return;
     const button = document.getElementById('btn-bulk-spam');
     if (button.disabled) return;
     const isSpam = button.dataset.isSpam !== '0';
@@ -3497,7 +3486,869 @@ const App = (() => {
   }
 
   function signaturePlainText(profile) {
-    const content = '\ufeff' + rows.join('\r\n');
+    const content = profile.format === 'html' ? htmlToPlainText(profile.content) : profile.content.trim();
+    if (!content) return '';
+    return `${profile.separator ? '-- \n' : ''}${content}`;
+  }
+
+  function signatureHtml(profile) {
+    const content = profile.format === 'html'
+      ? sanitizeSignatureHtml(profile.content)
+      : `<div style="white-space:pre-wrap">${esc(profile.content.trim()).replaceAll('\n', '<br>')}</div>`;
+    if (!content) return '';
+    return `<div class="libramail-signature">${profile.separator ? '<div>-- </div>' : ''}${content}</div>`;
+  }
+
+  function sourceMeta(source) {
+    return source?.meta || source || {};
+  }
+
+  function sourceText(source) {
+    const meta = sourceMeta(source);
+    return String(source?.text || meta.snippet || '').trim();
+  }
+
+  function formatSourceDate(source) {
+    const meta = sourceMeta(source);
+    const value = source?.headers?.date || meta.date;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? '' : date.toLocaleString(I18N.locale);
+  }
+
+  function quoteOriginalMessage(source, mode) {
+    if (!source) return '';
+    const meta = sourceMeta(source);
+    const from = source?.headers?.from || meta.from_name || meta.from_addr || '';
+    const to = source?.headers?.to || meta.to_addr || '';
+    const subject = source?.headers?.subject || meta.subject || '';
+    const date = formatSourceDate(source);
+    const body = sourceText(source);
+
+    if (mode === 'forward') {
+      return [
+        '-------- ' + t('compose.forwardedMessage') + ' --------',
+        `${t('compose.from')} : ${from}`,
+        `${t('compose.date')} : ${date}`,
+        `${t('compose.subject')} : ${subject}`,
+        `${t('compose.to')} : ${to}`,
+        '',
+        body,
+      ].join('\n').trim();
+    }
+
+    const heading = t('compose.replyQuote', { sender: from, date });
+    const quoted = body.split(/\r?\n/).map(line => `> ${line}`).join('\n');
+    return `${heading}\n${quoted}`.trim();
+  }
+
+  function composePosition(profile) {
+    if (isReplyMode()) return profile.replyPosition;
+    if (composeMode === 'forward') return profile.forwardPosition;
+    return 'above';
+  }
+
+  function updateComposeSignature({ resetChoice = false } = {}) {
+    const accountId = document.getElementById('compose-from').value;
+    const profile = signatureProfile(accountId);
+    const checkbox = document.getElementById('compose-use-signature');
+    const applies = signatureApplies(profile, composeMode);
+    if (resetChoice) checkbox.checked = applies;
+    checkbox.disabled = !applies;
+
+    const account = accounts.find(item => item.id === accountId);
+    document.getElementById('compose-signature-account-hint').textContent = account
+      ? t('compose.signatureForAccount', { account: account.displayName || account.email })
+      : '';
+
+    const signatureBlock = document.getElementById('compose-signature-block');
+    const quoteBlock = document.getElementById('compose-quote-block');
+    const preview = document.getElementById('compose-signature-preview');
+    const useSignature = applies && checkbox.checked;
+
+    signatureBlock.classList.toggle('hidden', !useSignature);
+    quoteBlock.classList.toggle('hidden', !composeQuoteText);
+    if (useSignature) {
+      if (profile.format === 'html') preview.innerHTML = signatureHtml(profile);
+      else preview.textContent = signaturePlainText(profile);
+      preview.classList.toggle('plain', profile.format !== 'html');
+    } else {
+      preview.innerHTML = '';
+    }
+
+    const stack = document.getElementById('compose-render-stack');
+    const position = composePosition(profile);
+    if (composeQuoteText && useSignature && position === 'below') {
+      stack.append(quoteBlock, signatureBlock);
+    } else {
+      stack.append(signatureBlock, quoteBlock);
+    }
+  }
+
+  function splitAddressTokens(value) {
+    const tokens = [];
+    let current = '';
+    let quoted = false;
+    let escaped = false;
+    let angleDepth = 0;
+
+    for (const character of String(value || '')) {
+      if (escaped) {
+        current += character;
+        escaped = false;
+        continue;
+      }
+      if (character === '\\' && quoted) {
+        current += character;
+        escaped = true;
+        continue;
+      }
+      if (character === '"') quoted = !quoted;
+      if (!quoted && character === '<') angleDepth += 1;
+      if (!quoted && character === '>' && angleDepth > 0) angleDepth -= 1;
+      if (!quoted && angleDepth === 0 && (character === ',' || character === ';')) {
+        if (current.trim()) tokens.push(current.trim());
+        current = '';
+      } else {
+        current += character;
+      }
+    }
+    if (current.trim()) tokens.push(current.trim());
+    return tokens;
+  }
+
+  function parseAddressText(value) {
+    return splitAddressTokens(value).map(token => {
+      const match = token.match(/^(.*?)<\s*([^<>]+)\s*>$/);
+      if (match) {
+        return {
+          name: match[1].trim().replace(/^"(.*)"$/, '$1').replace(/\\"/g, '"'),
+          address: match[2].trim(),
+        };
+      }
+      return { name: '', address: token.trim() };
+    }).filter(item => item.address.includes('@'));
+  }
+
+  function headerAddressList(source, name, fallback = '') {
+    const rows = source?.headers?.[`${name}List`];
+    if (Array.isArray(rows) && rows.length) {
+      return rows.map(item => ({
+        name: String(item?.name || '').trim(),
+        address: String(item?.address || '').trim(),
+      })).filter(item => item.address);
+    }
+    return parseAddressText(source?.headers?.[name] || fallback);
+  }
+
+  function normalizeRecipientAddress(value) {
+    return String(value || '').trim().toLocaleLowerCase('en-US');
+  }
+
+  function formatRecipientAddress(item) {
+    const address = String(item?.address || '').trim();
+    const name = String(item?.name || '').trim();
+    if (!address) return '';
+    if (!name) return address;
+    return `"${name.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}" <${address}>`;
+  }
+
+  function uniqueAddressList(rows, excluded = new Set()) {
+    const seen = new Set(excluded);
+    const result = [];
+    for (const row of rows || []) {
+      const key = normalizeRecipientAddress(row?.address);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      result.push(row);
+    }
+    return result;
+  }
+
+  function ownAddressSet(accountId) {
+    const values = accounts.flatMap(account => [account.email]);
+    const selected = accounts.find(account => String(account.id) === String(accountId));
+    if (selected?.email) values.push(selected.email);
+    return new Set(values.map(normalizeRecipientAddress).filter(Boolean));
+  }
+
+  function replyRecipients(source, mode, accountId) {
+    const meta = sourceMeta(source);
+    const outgoing = meta.folder_role === 'sent';
+    const own = ownAddressSet(accountId);
+    const fromList = headerAddressList(source, 'from', meta.from_addr || '');
+    const replyToList = headerAddressList(source, 'replyTo');
+    const toList = headerAddressList(source, 'to', meta.to_addr || '');
+    const ccList = headerAddressList(source, 'cc', meta.cc_addr || '');
+    let to = [];
+    let cc = [];
+
+    if (outgoing) {
+      to = uniqueAddressList(toList, own);
+      if (mode === 'reply-all') {
+        const excluded = new Set([...own, ...to.map(item => normalizeRecipientAddress(item.address))]);
+        cc = uniqueAddressList(ccList, excluded);
+      }
+    } else {
+      const primary = replyToList.length ? replyToList : fromList;
+      to = uniqueAddressList(primary, own);
+      if (mode === 'reply-all') {
+        const excluded = new Set([...own, ...to.map(item => normalizeRecipientAddress(item.address))]);
+        cc = uniqueAddressList([...toList, ...ccList], excluded);
+      }
+    }
+
+    // Repli pour les anciens enregistrements ne disposant pas encore des
+    // listes d'adresses structurées.
+    if (!to.length) {
+      const fallback = outgoing ? meta.to_addr : (source?.headers?.replyTo || meta.from_addr);
+      to = uniqueAddressList(parseAddressText(fallback), own);
+    }
+
+    return {
+      to: to.map(formatRecipientAddress).filter(Boolean).join(', '),
+      cc: cc.map(formatRecipientAddress).filter(Boolean).join(', '),
+    };
+  }
+
+  function openCompose(source = null, mode = 'new') {
+    composeMode = mode;
+    composeSource = source;
+    composeAttachments = [];
+    composeQuoteText = mode === 'new' ? '' : quoteOriginalMessage(source, mode);
+    composeReplyHeaders = isReplyMode(mode) ? {
+      inReplyTo: source?.headers?.messageId || sourceMeta(source).message_id || undefined,
+      references: source?.headers?.references || undefined,
+    } : null;
+
+    document.getElementById('compose-attachments').innerHTML = '';
+    const from = document.getElementById('compose-from');
+    from.innerHTML = accounts.map(account =>
+      `<option value="${esc(account.id)}" ${account.id === config.defaultAccountId ? 'selected' : ''}>
+        ${esc(account.displayName || '')} &lt;${esc(account.email)}&gt;</option>`).join('');
+
+    const meta = sourceMeta(source);
+    if (source && meta.account_id) from.value = meta.account_id;
+
+    const toInput = document.getElementById('compose-to');
+    const ccInput = document.getElementById('compose-cc');
+    const bccInput = document.getElementById('compose-bcc');
+    const subjectInput = document.getElementById('compose-subject');
+    const bodyInput = document.getElementById('compose-body');
+    ccInput.value = '';
+    bccInput.value = '';
+    bodyInput.value = '';
+    document.getElementById('compose-read-receipt').checked = false;
+    document.getElementById('compose-delivery-receipt').checked = false;
+
+    if (isReplyMode(mode) && source) {
+      const recipients = replyRecipients(source, mode, from.value);
+      toInput.value = recipients.to;
+      ccInput.value = recipients.cc;
+      subjectInput.value = /^re\s*:/i.test(meta.subject || '') ? meta.subject : 'Re: ' + (meta.subject || '');
+    } else if (mode === 'forward' && source) {
+      toInput.value = '';
+      const prefix = I18N.locale === 'fr' ? 'Tr: ' : 'Fwd: ';
+      subjectInput.value = /^(tr|fwd?)\s*:/i.test(meta.subject || '') ? meta.subject : prefix + (meta.subject || '');
+    } else {
+      toInput.value = '';
+      subjectInput.value = '';
+    }
+
+    document.getElementById('compose-modal-title').textContent = t(
+      mode === 'reply-all' ? 'compose.replyAllTitle'
+        : mode === 'reply' ? 'compose.replyTitle'
+          : mode === 'forward' ? 'compose.forwardTitle'
+            : 'compose.title');
+    document.getElementById('compose-quote-title').textContent = t(
+      mode === 'forward' ? 'compose.forwardedMessage' : 'compose.quotedMessage');
+    document.getElementById('compose-quote-content').textContent = composeQuoteText;
+    updateComposeSignature({ resetChoice: true });
+    openModal('compose-modal');
+    setTimeout(() => bodyInput.focus(), 0);
+  }
+
+  function buildOutgoingMessage() {
+    const accountId = document.getElementById('compose-from').value;
+    const profile = signatureProfile(accountId);
+    const useSignature = !document.getElementById('compose-use-signature').disabled
+      && document.getElementById('compose-use-signature').checked;
+    const body = document.getElementById('compose-body').value.trimEnd();
+    const signatureText = useSignature ? signaturePlainText(profile) : '';
+    const position = composePosition(profile);
+    const textParts = [body];
+
+    if (composeQuoteText) {
+      if (useSignature && position === 'above') textParts.push(signatureText);
+      textParts.push(composeQuoteText);
+      if (useSignature && position === 'below') textParts.push(signatureText);
+    } else if (useSignature) {
+      textParts.push(signatureText);
+    }
+
+    const text = textParts.filter(Boolean).join('\n\n');
+    let html;
+    if (useSignature && profile.format === 'html') {
+      const bodyHtml = `<div class="libramail-body" style="white-space:pre-wrap">${esc(body).replaceAll('\n', '<br>')}</div>`;
+      const quoteHtml = composeQuoteText
+        ? `<blockquote style="margin:16px 0;padding-left:12px;border-left:3px solid #bbb;white-space:pre-wrap">${esc(composeQuoteText).replaceAll('\n', '<br>')}</blockquote>`
+        : '';
+      const sigHtml = signatureHtml(profile);
+      const htmlParts = [bodyHtml];
+      if (quoteHtml) {
+        if (position === 'above') htmlParts.push(sigHtml);
+        htmlParts.push(quoteHtml);
+        if (position === 'below') htmlParts.push(sigHtml);
+      } else {
+        htmlParts.push(sigHtml);
+      }
+      html = htmlParts.filter(Boolean).join('<br>');
+    }
+
+    return { text, html, accountId };
+  }
+
+  async function attachFile() {
+    const paths = await Neutralino.os.showOpenDialog(t('compose.attach'), { multiSelections: true });
+    for (const filePath of paths || []) {
+      const filename = filePath.split(/[\\/]/).pop();
+      composeAttachments.push({ filename, path: filePath });
+      const chip = document.createElement('span');
+      chip.className = 'att-chip';
+      chip.innerHTML = `<i class="fa-solid fa-paperclip"></i>${esc(filename)}`;
+      document.getElementById('compose-attachments').appendChild(chip);
+    }
+  }
+
+  async function send() {
+    const button = document.getElementById('btn-send');
+    button.disabled = true;
+    try {
+      const outgoing = buildOutgoingMessage();
+      const result = await rpc('mail.send', {
+        accountId: outgoing.accountId,
+        mail: {
+          to: document.getElementById('compose-to').value,
+          cc: document.getElementById('compose-cc').value || undefined,
+          bcc: document.getElementById('compose-bcc').value || undefined,
+          subject: document.getElementById('compose-subject').value,
+          text: outgoing.text,
+          html: outgoing.html,
+          readReceipt: document.getElementById('compose-read-receipt').checked,
+          deliveryReceipt: document.getElementById('compose-delivery-receipt').checked,
+          inReplyTo: composeReplyHeaders?.inReplyTo,
+          references: composeReplyHeaders?.references,
+          attachments: composeAttachments,
+        },
+      });
+      closeModals();
+      status(result.sentCopyWarning
+        ? t('compose.sentCopyWarning')
+        : '✓ ' + t('compose.sent'), result.sentCopyWarning ? 'error' : 'success');
+      refreshSidebarCounts().catch(() => {});
+      if (view.type === 'sent') refresh().catch(() => {});
+    } catch (error) {
+      alert(`${t('error')} : ${error.message}`);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  // ---------- Réglages des signatures ----------
+  function populateSignatureAccountSelect() {
+    const select = document.getElementById('set-signature-account');
+    select.innerHTML = accounts.map(account =>
+      `<option value="${esc(account.id)}">${esc(account.displayName || account.email)} — ${esc(account.email)}</option>`).join('');
+    if (config.defaultAccountId && accounts.some(account => account.id === config.defaultAccountId)) {
+      select.value = config.defaultAccountId;
+    }
+    loadSignatureEditor(select.value);
+  }
+
+  function loadSignatureEditor(accountId) {
+    const profile = signatureProfile(accountId);
+    document.getElementById('set-signature-enabled').value = profile.enabled ? '1' : '0';
+    document.getElementById('set-signature-format').value = profile.format;
+    document.getElementById('set-signature-new').value = profile.newMessages ? '1' : '0';
+    document.getElementById('set-signature-replies').value = profile.replies ? '1' : '0';
+    document.getElementById('set-signature-forwards').value = profile.forwards ? '1' : '0';
+    document.getElementById('set-signature-separator').value = profile.separator ? '1' : '0';
+    document.getElementById('set-signature-reply-position').value = profile.replyPosition;
+    document.getElementById('set-signature-forward-position').value = profile.forwardPosition;
+    document.getElementById('set-signature-content').value = profile.content;
+    document.getElementById('signature-settings-status').textContent = '';
+    renderSettingsSignaturePreview();
+  }
+
+  function signatureProfileFromEditor() {
+    return normalizeSignatureProfile({
+      enabled: document.getElementById('set-signature-enabled').value === '1',
+      format: document.getElementById('set-signature-format').value,
+      content: document.getElementById('set-signature-content').value,
+      newMessages: document.getElementById('set-signature-new').value === '1',
+      replies: document.getElementById('set-signature-replies').value === '1',
+      forwards: document.getElementById('set-signature-forwards').value === '1',
+      separator: document.getElementById('set-signature-separator').value === '1',
+      replyPosition: document.getElementById('set-signature-reply-position').value,
+      forwardPosition: document.getElementById('set-signature-forward-position').value,
+    });
+  }
+
+  function renderSettingsSignaturePreview() {
+    const profile = signatureProfileFromEditor();
+    const preview = document.getElementById('settings-signature-preview');
+    preview.classList.toggle('disabled', !profile.enabled);
+    if (!profile.content.trim()) {
+      preview.textContent = t('signature.emptyPreview');
+      preview.classList.add('empty');
+      return;
+    }
+    preview.classList.remove('empty');
+    if (profile.format === 'html') preview.innerHTML = signatureHtml(profile);
+    else preview.textContent = signaturePlainText(profile);
+  }
+
+  async function saveSignatureSettings() {
+    const accountId = document.getElementById('set-signature-account').value;
+    if (!accountId) return;
+    const profile = signatureProfileFromEditor();
+    if (profile.format === 'html') profile.content = sanitizeSignatureHtml(profile.content);
+    const signatureProfiles = { ...(config.signatureProfiles || {}), [accountId]: profile };
+    try {
+      config = await rpc('config.set', { signatureProfiles });
+      document.getElementById('signature-settings-status').textContent = t('signature.saved');
+      status(t('signature.saved'), 'success');
+      renderSettingsSignaturePreview();
+    } catch (error) {
+      document.getElementById('signature-settings-status').textContent = `${t('error')} : ${error.message}`;
+      status(`${t('error')} : ${error.message}`, 'error');
+    }
+  }
+
+  // ---------- Comptes ----------
+  const accountField = id => document.getElementById(id);
+
+  function setAccountStatus(message = '', state = '') {
+    const element = accountField('acc-status');
+    element.textContent = message;
+    element.classList.remove('success', 'error');
+    if (state) element.classList.add(state);
+  }
+
+  function updateAccountLogoPreview(data = '', account = null) {
+    const preview = accountField('acc-logo-preview');
+    if (!preview) return;
+    if (data) {
+      preview.innerHTML = `<img src="${esc(data)}" alt="">`;
+      preview.classList.add('has-image');
+    } else {
+      const sample = account || { displayName: accountField('acc-name')?.value, email: accountField('acc-email')?.value, color: accountField('acc-color')?.value };
+      preview.innerHTML = providerIconForAccount(sample);
+      preview.classList.remove('has-image');
+    }
+  }
+
+  function readAccountLogoFile(file) {
+    return new Promise((resolve, reject) => {
+      if (!file) { resolve(''); return; }
+      if (!/^image\//i.test(file.type || '')) {
+        reject(new Error(t('account.logoInvalid')));
+        return;
+      }
+      if (file.size > 256 * 1024) {
+        reject(new Error(t('account.logoTooLarge')));
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error(t('account.logoReadError')));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function resetAccountForm() {
+    editingAccountId = null;
+    accountField('acc-id').value = '';
+    accountField('account-modal-title').textContent = t('account.add');
+    accountField('btn-delete-account').classList.add('hidden');
+    accountField('acc-name').value = '';
+    accountField('acc-email').value = '';
+    accountField('acc-color').value = '#8b7dd8';
+    accountField('acc-logo-data').value = '';
+    updateAccountLogoPreview('');
+    accountField('acc-imap-host').value = '';
+    accountField('acc-imap-port').value = '993';
+    accountField('acc-imap-secure').value = '1';
+    accountField('acc-imap-user').value = '';
+    accountField('acc-imap-pass').value = '';
+    accountField('acc-smtp-host').value = '';
+    accountField('acc-smtp-port').value = '465';
+    accountField('acc-smtp-secure').value = '1';
+    accountField('acc-smtp-user').value = '';
+    accountField('acc-smtp-pass').value = '';
+    accountField('acc-sync-interval').value = '5';
+    accountField('acc-spam-retention').value = '30';
+    accountField('account-password-hint').textContent = t('account.passwordRequired');
+    setAccountStatus();
+  }
+
+  function openNewAccount() {
+    resetAccountForm();
+    openModal('account-modal');
+    accountField('acc-name').focus();
+  }
+
+  async function openAccountEditor(accountId) {
+    resetAccountForm();
+    editingAccountId = accountId;
+    accountField('acc-id').value = accountId;
+    accountField('account-modal-title').textContent = t('account.editTitle');
+    accountField('btn-delete-account').classList.remove('hidden');
+    accountField('account-password-hint').textContent = t('account.passwordHint');
+    openModal('account-modal');
+    setAccountStatus(t('account.loading'));
+    try {
+      const details = await rpc('accounts.getDetails', { id: accountId });
+      if (editingAccountId !== accountId) return;
+      accountField('acc-name').value = details.displayName || '';
+      accountField('acc-email').value = details.email || '';
+      accountField('acc-color').value = safeColor(details.color);
+      accountField('acc-logo-data').value = details.logoData || '';
+      updateAccountLogoPreview(details.logoData || '', details);
+      accountField('acc-imap-host').value = details.imap?.host || '';
+      accountField('acc-imap-port').value = Number(details.imap?.port) || 993;
+      accountField('acc-imap-secure').value = details.imap?.secure === false ? '0' : '1';
+      accountField('acc-imap-user').value = details.imap?.user || '';
+      accountField('acc-imap-pass').value = '';
+      accountField('acc-smtp-host').value = details.smtp?.host || '';
+      accountField('acc-smtp-port').value = Number(details.smtp?.port) || 465;
+      accountField('acc-smtp-secure').value = details.smtp?.secure === false ? '0' : '1';
+      accountField('acc-smtp-user').value = details.smtp?.user || details.imap?.user || '';
+      accountField('acc-smtp-pass').value = '';
+      accountField('acc-sync-interval').value = Number(details.syncIntervalMinutes) || 0;
+      accountField('acc-spam-retention').value = Number(details.spamRetentionDays) || 0;
+      setAccountStatus();
+      accountField('acc-name').focus();
+    } catch (error) {
+      setAccountStatus(`${t('error')} : ${error.message}`, 'error');
+    }
+  }
+
+  function accountPayload() {
+    const value = id => accountField(id).value.trim();
+    return {
+      id: editingAccountId || undefined,
+      displayName: value('acc-name'),
+      email: value('acc-email'),
+      color: accountField('acc-color').value,
+      syncIntervalMinutes: Number(accountField('acc-sync-interval').value) || 0,
+      spamRetentionDays: Number(accountField('acc-spam-retention').value) || 0,
+      logoData: accountField('acc-logo-data')?.value || '',
+      imap: {
+        host: value('acc-imap-host'),
+        port: Number(value('acc-imap-port')),
+        secure: accountField('acc-imap-secure').value === '1',
+        user: value('acc-imap-user'),
+        pass: accountField('acc-imap-pass').value,
+      },
+      smtp: {
+        host: value('acc-smtp-host'),
+        port: Number(value('acc-smtp-port')),
+        secure: accountField('acc-smtp-secure').value === '1',
+        user: value('acc-smtp-user') || value('acc-imap-user'),
+        pass: accountField('acc-smtp-pass').value,
+      },
+    };
+  }
+
+  async function saveAccount() {
+    const saveButton = accountField('btn-save-account');
+    setAccountStatus(t('account.testing'));
+    saveButton.disabled = true;
+    try {
+      const payload = accountPayload();
+      const method = editingAccountId ? 'accounts.update' : 'accounts.add';
+      const account = await rpc(method, payload);
+      const index = accounts.findIndex(item => item.id === account.id);
+      if (index >= 0) accounts[index] = account;
+      else accounts.push(account);
+      if (!config.defaultAccountId) config.defaultAccountId = account.id;
+      if (view.type === 'account' && view.accountId === account.id) {
+        document.getElementById('list-title').textContent = account.email;
+      }
+      renderSidebar();
+      closeModals();
+      setAccountStatus();
+      status(t(editingAccountId ? 'account.updated' : 'account.added'), 'success');
+      const wasNew = !editingAccountId;
+      editingAccountId = null;
+      if (wasNew) rpc('sync.folder', { accountId: account.id }).catch(error => status(error.message, 'error'));
+    } catch (error) {
+      setAccountStatus('✗ ' + error.message, 'error');
+    } finally {
+      saveButton.disabled = false;
+    }
+  }
+
+  async function deleteEditedAccount() {
+    const accountId = editingAccountId;
+    if (!accountId) return;
+    const account = accounts.find(item => item.id === accountId);
+    const accepted = await confirmAction({
+      title: t('account.removeTitle'),
+      message: t('account.removeConfirm', { account: account?.displayName || account?.email || '' }),
+      confirmLabel: t('account.remove'),
+      icon: 'fa-user-minus',
+      danger: true,
+    });
+    if (!accepted) return;
+    setAccountStatus(t('account.removing'));
+    try {
+      const result = await rpc('accounts.remove', { id: accountId });
+      accounts = Array.isArray(result.accounts) ? result.accounts : accounts.filter(item => item.id !== accountId);
+      config.defaultAccountId = result.defaultAccountId || null;
+      if (view.type === 'account' && view.accountId === accountId) {
+        view = { type: 'unified' };
+        document.getElementById('list-title').textContent = t('unified.inbox');
+        document.querySelectorAll('.side-item').forEach(item => item.classList.remove('active'));
+        document.querySelector('[data-view="unified"]')?.classList.add('active');
+        clearReader();
+      }
+      editingAccountId = null;
+      closeModals();
+      renderSidebar();
+      await refresh();
+      status(t('account.removed'), 'success');
+    } catch (error) {
+      setAccountStatus(`${t('error')} : ${error.message}`, 'error');
+    }
+  }
+
+  // ---------- Contenus distants ----------
+  function remoteTypeIcon(type) {
+    if (type === 'background') return 'fa-solid fa-panorama';
+    if (type === 'stylesheet') return 'fa-solid fa-paintbrush';
+    return 'fa-regular fa-image';
+  }
+
+  function remoteTypeLabel(type) {
+    if (type === 'background') return t('remote.type.background');
+    if (type === 'stylesheet') return t('remote.type.stylesheet');
+    return t('remote.type.image');
+  }
+
+  function remoteOccurrencesLabel(count) {
+    return Number(count) > 1 ? t('remote.occurrences', { count }) : '';
+  }
+
+  function updateRemoteDomainCheckbox(group) {
+    const domainCheckbox = group.querySelector('.remote-domain-checkbox');
+    const resourceChecks = [...group.querySelectorAll('.remote-resource-checkbox:not(:disabled)')];
+    if (!domainCheckbox) return;
+    if (!resourceChecks.length) {
+      domainCheckbox.checked = true;
+      domainCheckbox.indeterminate = false;
+      domainCheckbox.disabled = true;
+      return;
+    }
+    const checked = resourceChecks.filter(input => input.checked).length;
+    domainCheckbox.checked = checked === resourceChecks.length;
+    domainCheckbox.indeterminate = checked > 0 && checked < resourceChecks.length;
+  }
+
+  function updateRemoteDialogState() {
+    const modal = document.getElementById('remote-content-modal');
+    const checks = [...modal.querySelectorAll('.remote-resource-checkbox:not(:disabled)')];
+    const selected = checks.filter(input => input.checked);
+    const button = document.getElementById('btn-display-selected-remote');
+    button.disabled = selected.length === 0;
+    button.querySelector('span').textContent = t('remote.displaySelected', { count: selected.length });
+    modal.querySelectorAll('.remote-domain-group').forEach(updateRemoteDomainCheckbox);
+  }
+
+  function renderRemoteContentDialog(resources) {
+    const listElement = document.getElementById('remote-resource-list');
+    const summaryElement = document.getElementById('remote-summary');
+    listElement.innerHTML = '';
+
+    const totalOccurrences = resources.reduce((sum, resource) => sum + Number(resource.occurrences || 1), 0);
+    const domains = new Set(resources.map(resource => resource.domain).filter(Boolean));
+    const trackers = resources.filter(resource => resource.suspectedTracker)
+      .reduce((sum, resource) => sum + Number(resource.occurrences || 1), 0);
+    const alreadyLoaded = resources.filter(resource => resource.allowed)
+      .reduce((sum, resource) => sum + Number(resource.occurrences || 1), 0);
+
+    summaryElement.innerHTML = `
+      <span class="remote-summary-chip"><i class="fa-regular fa-image"></i>${esc(t('remote.resourceCount', { count: totalOccurrences }))}</span>
+      <span class="remote-summary-chip"><i class="fa-solid fa-globe"></i>${esc(t('remote.domainCount', { count: domains.size }))}</span>
+      ${trackers ? `<span class="remote-summary-chip warning"><i class="fa-solid fa-eye"></i>${esc(t('remote.trackerCount', { count: trackers }))}</span>` : ''}
+      ${alreadyLoaded ? `<span class="remote-summary-chip success"><i class="fa-solid fa-check"></i>${esc(t('remote.loadedCount', { count: alreadyLoaded }))}</span>` : ''}`;
+
+    const grouped = new Map();
+    for (const resource of resources) {
+      const domain = resource.domain || t('remote.unknownDomain');
+      if (!grouped.has(domain)) grouped.set(domain, []);
+      grouped.get(domain).push(resource);
+    }
+
+    [...grouped.entries()].sort(([a], [b]) => a.localeCompare(b, I18N.locale)).forEach(([domain, items]) => {
+      const group = document.createElement('section');
+      group.className = 'remote-domain-group';
+
+      const heading = document.createElement('div');
+      heading.className = 'remote-domain-heading';
+      const domainLabel = document.createElement('label');
+      domainLabel.className = 'remote-domain-select';
+      const domainCheckbox = document.createElement('input');
+      domainCheckbox.type = 'checkbox';
+      domainCheckbox.className = 'remote-domain-checkbox';
+      const domainText = document.createElement('span');
+      domainText.className = 'remote-domain-name';
+      domainText.textContent = domain;
+      domainLabel.append(domainCheckbox, domainText);
+
+      const domainCount = document.createElement('span');
+      domainCount.className = 'remote-domain-count';
+      domainCount.textContent = t('remote.domainResources', {
+        count: items.reduce((sum, item) => sum + Number(item.occurrences || 1), 0),
+      });
+      heading.append(domainLabel, domainCount);
+      group.appendChild(heading);
+
+      const rows = document.createElement('div');
+      rows.className = 'remote-resource-rows';
+
+      items.sort((a, b) => Number(b.suspectedTracker) - Number(a.suspectedTracker) || a.url.localeCompare(b.url))
+        .forEach(resource => {
+          const row = document.createElement('label');
+          row.className = 'remote-resource-row';
+          row.classList.toggle('tracker-suspected', Boolean(resource.suspectedTracker));
+          row.classList.toggle('already-loaded', Boolean(resource.allowed));
+
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.className = 'remote-resource-checkbox';
+          checkbox.dataset.remoteUrl = resource.url;
+          checkbox.checked = resource.allowed || !resource.suspectedTracker;
+          checkbox.disabled = Boolean(resource.allowed);
+          checkbox.addEventListener('change', updateRemoteDialogState);
+
+          const icon = document.createElement('span');
+          icon.className = 'remote-resource-icon';
+          icon.innerHTML = `<i class="${remoteTypeIcon(resource.type)}"></i>`;
+
+          const details = document.createElement('span');
+          details.className = 'remote-resource-details';
+          const titleLine = document.createElement('span');
+          titleLine.className = 'remote-resource-title';
+          const title = document.createElement('strong');
+          title.textContent = resource.label || remoteTypeLabel(resource.type);
+          const type = document.createElement('span');
+          type.className = 'remote-resource-type';
+          type.textContent = remoteTypeLabel(resource.type);
+          titleLine.append(title, type);
+
+          if (resource.suspectedTracker) {
+            const tracker = document.createElement('span');
+            tracker.className = 'remote-tracker-badge';
+            tracker.innerHTML = `<i class="fa-solid fa-eye"></i> ${esc(t('remote.trackerSuspected'))}`;
+            titleLine.appendChild(tracker);
+          }
+          if (resource.allowed) {
+            const loaded = document.createElement('span');
+            loaded.className = 'remote-loaded-badge';
+            loaded.innerHTML = `<i class="fa-solid fa-check"></i> ${esc(t('remote.loaded'))}`;
+            titleLine.appendChild(loaded);
+          }
+
+          const url = document.createElement('code');
+          url.className = 'remote-resource-url';
+          url.textContent = resource.url;
+          url.title = resource.url;
+
+          const metadata = document.createElement('span');
+          metadata.className = 'remote-resource-meta';
+          const parts = [];
+          if (resource.width && resource.height) parts.push(`${resource.width} × ${resource.height} px`);
+          const occurrences = remoteOccurrencesLabel(resource.occurrences);
+          if (occurrences) parts.push(occurrences);
+          if (resource.trackerReason === 'dimensions') parts.push(t('remote.trackerReason.dimensions'));
+          if (resource.trackerReason === 'address') parts.push(t('remote.trackerReason.address'));
+          metadata.textContent = parts.join(' · ');
+
+          details.append(titleLine, url);
+          if (metadata.textContent) details.appendChild(metadata);
+          row.append(checkbox, icon, details);
+          rows.appendChild(row);
+        });
+
+      group.appendChild(rows);
+      listElement.appendChild(group);
+
+      domainCheckbox.addEventListener('change', () => {
+        group.querySelectorAll('.remote-resource-checkbox:not(:disabled)').forEach(input => {
+          input.checked = domainCheckbox.checked;
+        });
+        updateRemoteDialogState();
+      });
+    });
+
+    updateRemoteDialogState();
+  }
+
+  function openRemoteContentDialog() {
+    const resources = Viewer.getRemoteResources();
+    if (!resources.length) {
+      status(t('remote.none'));
+      return;
+    }
+    renderRemoteContentDialog(resources);
+    openModal('remote-content-modal');
+  }
+
+  function closeRemoteContentDialog() {
+    document.getElementById('remote-content-modal').classList.remove('open');
+  }
+
+  function displaySelectedRemoteContent() {
+    const selected = [...document.querySelectorAll('#remote-content-modal .remote-resource-checkbox:checked')]
+      .map(input => input.dataset.remoteUrl)
+      .filter(Boolean);
+    if (!selected.length) return;
+    Viewer.allowRemote(selected);
+    closeRemoteContentDialog();
+  }
+
+  // ---------- Mise à jour et À propos ----------
+  function appVersion() {
+    return String(window.NL_APPVERSION || '0.2.23').replace(/^v/i, '');
+  }
+
+  function compareVersions(a, b) {
+    const left = String(a || '').replace(/^v/i, '').split('.').map(n => Number(n) || 0);
+    const right = String(b || '').replace(/^v/i, '').split('.').map(n => Number(n) || 0);
+    for (let i = 0; i < Math.max(left.length, right.length); i++) {
+      const diff = (left[i] || 0) - (right[i] || 0);
+      if (diff) return diff;
+    }
+    return 0;
+  }
+
+  function setUpdateNotice() {
+    const notice = document.getElementById('update-notice');
+    if (!notice) return;
+    if (updateState.available && updateState.latest) {
+      notice.classList.remove('hidden');
+      notice.querySelector('span').textContent = t('update.notice', { version: updateState.latest });
+      notice.title = t('update.noticeTitle');
+    } else {
+      notice.classList.add('hidden');
+    }
+  }
+
+  function renderUpdateStatus() {
+    const state = document.getElementById('about-update-state');
+    const details = document.getElementById('about-update-details');
+    const button = document.getElementById('btn-check-update');
     if (button) {
       button.disabled = updateState.checking;
       button.classList.toggle('is-checking', updateState.checking);
@@ -3726,7 +4577,6 @@ const App = (() => {
 
   async function exportCompleteBackup() {
     if (backupBusy) return;
-    if (!guardHeavyOperationDuringSync()) return;
     resetBackupProgress();
     setBackupBusy(true);
     try {
@@ -3771,7 +4621,6 @@ const App = (() => {
 
   async function importCompleteBackup() {
     if (backupBusy) return;
-    if (!guardHeavyOperationDuringSync()) return;
     resetBackupProgress();
     setBackupBusy(true);
 
