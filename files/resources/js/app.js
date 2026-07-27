@@ -2970,7 +2970,6 @@ const App = (() => {
         </div>
         <div class="stats-toolbar-actions">
           <button class="btn" id="btn-stats-refresh" type="button"><i class="fa-solid fa-rotate"></i>${esc(t('stats.refresh'))}</button>
-          <button class="btn" id="btn-stats-export" type="button"><i class="fa-solid fa-file-csv"></i>${esc(t('stats.export'))}</button>
         </div>
       </div>
 
@@ -3080,7 +3079,6 @@ const App = (() => {
       loadStatistics();
     };
     document.getElementById('btn-stats-refresh').onclick = loadStatistics;
-    document.getElementById('btn-stats-export').onclick = exportStatisticsCsv;
     document.querySelectorAll('[data-stats-tab]').forEach(button => {
       button.onclick = () => activateStatisticsTab(button.dataset.statsTab);
     });
@@ -4920,6 +4918,17 @@ const App = (() => {
     closeModals();
     toggleActivityPanel(false);
     status(t('status.shuttingDown'), 'busy');
+
+    const forceExit = () => {
+      try { Neutralino?.app?.exit?.(0)?.catch?.(() => {}); } catch {}
+      setTimeout(() => {
+        try { Neutralino?.app?.killProcess?.()?.catch?.(() => {}); } catch {}
+      }, 500);
+      setTimeout(() => {
+        try { window.close(); } catch {}
+      }, 900);
+    };
+
     try {
       if (ws?.readyState === WebSocket.OPEN) {
         await Promise.race([
@@ -4928,8 +4937,11 @@ const App = (() => {
         ]);
       }
     } catch {}
-    try { await Neutralino.app.exit(0); }
-    catch { window.close(); }
+
+    // Ne pas attendre indéfiniment Neutralino.app.exit() : sur certaines plateformes,
+    // le moteur est bien arrêté mais la fenêtre reste vivante. On déclenche donc
+    // la sortie native, puis un killProcess de secours. Charmant, mais efficace.
+    forceExit();
   }
 
   // ---------- Utilitaires ----------
