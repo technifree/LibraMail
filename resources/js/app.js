@@ -593,7 +593,7 @@ const App = (() => {
   };
 
   function applyAppVersion() {
-    const rawVersion = String(window.NL_APPVERSION || '0.2.19').replace(/^v/i, '');
+    const rawVersion = String(window.NL_APPVERSION || '0.2.21').replace(/^v/i, '');
     const badge = document.getElementById('app-version');
     if (badge) {
       badge.textContent = `v${rawVersion}`;
