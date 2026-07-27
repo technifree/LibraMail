@@ -35,7 +35,7 @@ async function fetchWithTimeout(url, timeout = 2500) {
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
     const response = await fetch(url, {
-      headers: { 'User-Agent': 'LibraMail/0.2.22 icon-cache' },
+      headers: { 'User-Agent': 'LibraMail/0.2.23 icon-cache' },
       redirect: 'follow',
       signal: controller.signal,
     });

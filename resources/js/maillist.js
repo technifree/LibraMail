@@ -120,6 +120,7 @@ class VirtualMailList {
     const count = Number(row.thread_count || 0);
     const isThread = row.is_thread && !row.is_thread_child && count > 1;
     const expanded = isThread && this.isThreadExpanded(row.thread_key);
+    const labelsHtml = this.labelsHtml(row);
 
     div.innerHTML = `
       <span class="read-state-dot"></span>
@@ -129,7 +130,7 @@ class VirtualMailList {
       </button>
       ${this.avatarHtml(row, sender)}
       <span class="from"><span class="name">${this.escape(sender)}</span>${isThread ? `<span class="thread-count"><i class="fa-solid fa-comments"></i> ${count}</span>` : ''}</span>
-      <span class="subject"><span class="subj">${this.escape(subject)}</span>${snippet ? ` <span class="snippet">— ${this.escape(snippet)}</span>` : ''}</span>
+      <span class="subject"><span class="subject-text"><span class="subj">${this.escape(subject)}</span>${snippet ? ` <span class="snippet">— ${this.escape(snippet)}</span>` : ''}</span>${labelsHtml}</span>
       <span class="quick">
         <button class="iconbtn" data-action="seen" type="button"><i class="${this.isUnread(row) ? 'fa-regular fa-envelope-open' : 'fa-solid fa-envelope'}"></i></button>
         <button class="iconbtn" data-action="flag" type="button"><i class="${row.flagged ? 'fa-solid' : 'fa-regular'} fa-star"></i></button>
@@ -242,19 +243,52 @@ class VirtualMailList {
   }
 
 
+  labelsHtml(row) {
+    const allLabels = this.labelList(row);
+    const labels = allLabels.slice(0, 3);
+    if (!labels.length) return '';
+    const more = Math.max(0, allLabels.length - labels.length);
+    const chips = labels.map(label => {
+      const name = label?.name || label?.label || '';
+      if (!name) return '';
+      const color = label?.color || '#8b7dd8';
+      return `<span class="mail-label-chip" style="--label-color:${this.escapeAttr(color)}" title="${this.escapeAttr(name)}">${this.escape(name)}</span>`;
+    }).join('');
+    return `<span class="mail-labels">${chips}${more ? `<span class="mail-label-chip more">+${more}</span>` : ''}</span>`;
+  }
+
+  labelList(row) {
+    const raw = row?.labels;
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw.filter(label => label && (label.name || label.label));
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      if (!trimmed) return [];
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) return parsed.filter(label => label && (label.name || label.label));
+      } catch (_) {
+        return trimmed.split(',').map(name => ({ name: name.trim(), color: '#8b7dd8' })).filter(label => label.name);
+      }
+    }
+    return [];
+  }
+
   avatarHtml(row, sender) {
-    const icon = row?.sender_icon_url || row?.sender_icon || row?.avatar_url || row?.contact_avatar || row?.provider_icon || row?.account_icon || '';
+    const icon = row?.sender_icon_data || row?.sender_icon_url || row?.sender_icon || row?.avatar_url || row?.contact_avatar_data || row?.contact_avatar || row?.provider_icon || row?.account_icon || '';
     const label = sender || row?.from_name || row?.from_addr || row?.to_name || row?.to_addr || '?';
     const initials = this.initials(label);
     const bg = this.colorFrom(label);
+    const safeBg = this.escapeAttr(bg);
+    const safeLabel = this.escapeAttr(label);
+    const safeInitials = this.escape(initials);
 
     if (icon) {
       const safeIcon = this.escapeAttr(icon);
-      const safeLabel = this.escapeAttr(label);
-      return `<span class="avatar sender-avatar" style="--avatar-bg:${this.escapeAttr(bg)}"><img src="${safeIcon}" alt="${safeLabel}" loading="lazy" onerror="this.remove();"></span>`;
+      return `<span class="avatar sender-avatar avatar-image" style="--avatar-bg:${safeBg};background:${safeBg}" title="${safeLabel}"><img src="${safeIcon}" alt="" loading="lazy" onerror="this.hidden=true;this.nextElementSibling.hidden=false;"><span hidden>${safeInitials}</span></span>`;
     }
 
-    return `<span class="avatar sender-avatar" style="--avatar-bg:${this.escapeAttr(bg)}"><span>${this.escape(initials)}</span></span>`;
+    return `<span class="avatar sender-avatar avatar-provider" style="--avatar-bg:${safeBg};background:${safeBg}" title="${safeLabel}"><span>${safeInitials}</span></span>`;
   }
 
   escapeAttr(value) {

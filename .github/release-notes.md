@@ -1,7 +1,6 @@
-# LibraMail 0.2.22
+# LibraMail 0.2.23
 
-- Gestion améliorée des indésirables : règles d’adresses et de domaines bloqués/autorisés.
-- Collecte des expéditeurs rencontrés pour les traiter plus facilement.
-- Icônes de comptes personnalisables avec détection fournisseur enrichie.
-- Icônes d’expéditeurs façon client moderne : avatars de contacts, fournisseurs connus ou favicons de domaine en cache local.
-- Conservation des corrections Windows 0.2.21 sur import/restauration et vérification de version.
+- Restauration des étiquettes dans la liste des messages.
+- Correction du contraste des avatars/initiales et logos de comptes en thème clair.
+- Export CSV des statistiques fiabilisé avec repli par téléchargement.
+- Opérations lourdes protégées pendant la relève des messages pour éviter les ralentissements.

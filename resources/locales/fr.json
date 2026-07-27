@@ -595,5 +595,8 @@
   "update.noticeTitle": "Ouvrir les informations de version",
   "update.unavailableTitle": "Vérification indisponible",
   "update.unknownDetail": "La vérification sera faite automatiquement au démarrage ou avec le bouton ci-dessous.",
-  "update.unknownTitle": "Version non vérifiée"
+  "update.unknownTitle": "Version non vérifiée",
+  "status.syncBusyOperation": "Relève en cours : opération lourde mise en pause jusqu’à la fin de la relève.",
+  "stats.exportFallback": "Export CSV déclenché via le téléchargement intégré.",
+  "stats.exportFailed": "Échec de l’export CSV"
 }

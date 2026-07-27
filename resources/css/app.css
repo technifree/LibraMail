@@ -2933,3 +2933,87 @@ body.resizing-panes.resize-rows { cursor: row-resize; }
   .spam-rule-row,
   .spam-sender-row { grid-template-columns: 1fr; }
 }
+
+
+/* LibraMail 0.2.23 — finition liste, étiquettes et avatars */
+.mail-row .subject {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.mail-row .subject-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mail-labels {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  max-width: 46%;
+  overflow: hidden;
+}
+.mail-label-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 92px;
+  min-height: 16px;
+  padding: 0 6px;
+  border-radius: 999px;
+  color: #fff;
+  background: var(--label-color, var(--accent));
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.18);
+}
+.mail-label-chip.more {
+  color: var(--fg-muted);
+  background: var(--bg-hover);
+  box-shadow: inset 0 0 0 1px var(--border-soft);
+}
+.mail-row .sender-avatar {
+  background: var(--avatar-bg, var(--accent));
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.18), 0 1px 2px rgba(0,0,0,.12);
+  overflow: hidden;
+}
+.mail-row .sender-avatar > span {
+  color: #fff;
+  text-shadow: 0 1px 1px rgba(0,0,0,.25);
+}
+.mail-row .sender-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  background: #fff;
+}
+:root[data-theme="light"] .mail-row .sender-avatar,
+:root[data-theme="light"] .account-provider-logo {
+  border: 1px solid color-mix(in srgb, var(--border) 82%, #7b8aa7);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .12);
+}
+.account-provider-logo.provider-free,
+.account-provider-logo.provider-laposte,
+.account-provider-logo.provider-sfr,
+.account-provider-logo.provider-ovh {
+  background: color-mix(in srgb, var(--accent) 24%, var(--bg-active));
+  color: var(--accent);
+}
+:root[data-theme="light"] .account-provider-logo.provider-free,
+:root[data-theme="light"] .account-provider-logo.provider-laposte,
+:root[data-theme="light"] .account-provider-logo.provider-sfr,
+:root[data-theme="light"] .account-provider-logo.provider-ovh {
+  background: #eaf1ff;
+  color: #2f63b6;
+}
+:root[data-theme="light"] .mail-label-chip.more {
+  background: #edf2fb;
+  color: #55657f;
+}

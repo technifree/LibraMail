@@ -1,3 +1,10 @@
+## [0.2.23] - 2026-07-27
+
+- Restauration de l’affichage des étiquettes dans la liste des messages.
+- Amélioration du contraste des avatars et logos de comptes en thème clair.
+- Correction de l’export CSV des statistiques avec solution de repli par téléchargement.
+- Blocage propre des opérations lourdes pendant une relève pour éviter les ralentissements et conflits.
+
 ## [0.2.22] - 2026-07-27
 
 - Gestion enrichie des indésirables : règles d’adresses/domaines bloqués ou autorisés, expéditeurs collectés et application aux messages existants.

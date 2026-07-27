@@ -595,5 +595,8 @@
   "update.noticeTitle": "Open version information",
   "update.unavailableTitle": "Check unavailable",
   "update.unknownDetail": "The check runs automatically at startup or with the button below.",
-  "update.unknownTitle": "Version not checked"
+  "update.unknownTitle": "Version not checked",
+  "status.syncBusyOperation": "Mail sync in progress: heavy operation paused until the sync finishes.",
+  "stats.exportFallback": "CSV export started through the built-in download fallback.",
+  "stats.exportFailed": "CSV export failed"
 }
