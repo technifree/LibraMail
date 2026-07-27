@@ -195,6 +195,20 @@ let retentionTimer = null;
 let shuttingDown = false;
 let maintenanceOperation = null;
 let startupSyncTriggered = false;
+let serverReady = false;
+
+wss.on('listening', () => {
+  serverReady = true;
+  console.log(`[LibraMail ${APP_VERSION}] Moteur prêt sur ws://127.0.0.1:${PORT} — ${accounts.length} compte(s)`);
+});
+
+wss.on('error', error => {
+  console.error('[LibraMail] Impossible de démarrer le serveur local :', error);
+  if (!serverReady || error?.code === 'EADDRINUSE') {
+    try { db.close(); } catch {}
+    process.exit(error?.code === 'EADDRINUSE' ? 98 : 1);
+  }
+});
 
 function broadcast(event, data) {
   const message = JSON.stringify({ event, data });
@@ -1497,4 +1511,3 @@ process.on('uncaughtException', error => {
   console.error('[LibraMail] Erreur non interceptée :', error);
 });
 
-console.log(`[LibraMail ${APP_VERSION}] Moteur prêt sur ws://127.0.0.1:${PORT} — ${accounts.length} compte(s)`);
