@@ -1,3 +1,12 @@
+## 0.2.24 — 30 juillet 2026
+
+- Gestion locale des brouillons, y compris les réponses et transferts.
+- Programmation d’un envoi à une date et une heure définies.
+- Affichage et autorisation distincte des liens dans les contenus distants.
+- Confirmation sécurisée avant ouverture des liens autorisés.
+- Création automatique d’une règle de blocage pour les expéditeurs déclarés manuellement comme indésirables.
+- Correction de l’ouverture de la liste des adresses collectées.
+
 ## [0.2.23] - 2026-07-27
 
 - Restauration de l’affichage des étiquettes dans la liste des messages.

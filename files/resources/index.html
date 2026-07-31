@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LibraMail 0.2.23</title>
+  <title>LibraMail 0.2.24</title>
   <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
   <link rel="stylesheet" href="themes/dark.css">
   <link rel="stylesheet" href="themes/light.css">
@@ -13,13 +13,13 @@
 <div id="app" data-layout="vertical">
 
   <div id="topbar">
-    <button id="brand" class="brand-button" type="button" title="LibraMail 0.2.23" data-i18n-title="about.open">
+    <button id="brand" class="brand-button" type="button" title="LibraMail 0.2.24" data-i18n-title="about.open">
       <span class="brand-logo-box" aria-hidden="true">
         <img class="brand-logo brand-logo-light" src="assets/logo-light.png" alt="">
         <img class="brand-logo brand-logo-dark" src="assets/logo-dark.png" alt="">
       </span>
       <span class="brand-name">LibraMail</span>
-      <span class="version-badge" id="app-version">v0.2.23</span>
+      <span class="version-badge" id="app-version">v0.2.24</span>
     </button>
     <button class="btn primary" id="btn-compose">
       <i class="fa-solid fa-pen"></i><span data-i18n="compose"></span>
@@ -81,6 +81,14 @@
     <button class="side-item" data-view="trash">
       <i class="fa-solid fa-trash-can"></i><span data-i18n="trash.folder"></span>
       <span class="count" id="count-trash"></span>
+    </button>
+    <button class="side-item" type="button" data-outbox-kind="draft">
+      <i class="fa-solid fa-file-pen"></i><span data-i18n="drafts.folder"></span>
+      <span class="count hidden" id="count-drafts"></span>
+    </button>
+    <button class="side-item" type="button" data-outbox-kind="scheduled">
+      <i class="fa-solid fa-clock"></i><span data-i18n="scheduled.folder"></span>
+      <span class="count hidden" id="count-scheduled"></span>
     </button>
 
     <div class="side-section collapsible-side-section" id="accounts-section-header">
@@ -177,8 +185,11 @@
         <i class="fa-solid fa-window-restore"></i>
       </button>
     </div>
-    <div class="empty" id="reader-empty">
-      <i class="fa-regular fa-envelope-open"></i>
+    <div class="empty reader-empty-brand" id="reader-empty">
+      <span class="reader-empty-logo" aria-hidden="true">
+        <img class="reader-empty-logo-light" src="assets/logo-light.png" alt="">
+        <img class="reader-empty-logo-dark" src="assets/logo-dark.png" alt="">
+      </span>
       <span data-i18n="reader.empty"></span>
     </div>
     <div id="reader-content" class="hidden" style="display:flex;flex-direction:column;flex:1;min-height:0">
@@ -211,7 +222,7 @@
         <span><span data-i18n="remote.blocked"></span> (<span id="remote-count">0</span>)</span>
         <button id="btn-allow-remote" data-i18n="remote.inspect"></button>
       </div>
-      <div id="reader-body"><iframe id="mail-frame" sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe></div>
+      <div id="reader-body"><iframe id="mail-frame" sandbox="allow-same-origin" referrerpolicy="no-referrer"></iframe></div>
       <div id="attachments"></div>
     </div>
   </section>
@@ -269,19 +280,28 @@
       <div class="field"><label data-i18n="compose.from"></label><select id="compose-from"></select></div>
       <div class="field compose-address-field"><label data-i18n="compose.to"></label>
         <div class="compose-address-wrap">
-          <input id="compose-to" type="text" autocomplete="off">
+          <div class="compose-address-line">
+            <input id="compose-to" type="text" autocomplete="off">
+            <button type="button" class="iconbtn compose-address-book-btn" data-compose-contact-target="compose-to" data-i18n-title="compose.addressBook"><i class="fa-regular fa-address-book"></i></button>
+          </div>
           <div id="compose-to-suggestions" class="contact-suggestions hidden"></div>
         </div>
       </div>
       <div class="field compose-address-field"><label data-i18n="compose.cc"></label>
         <div class="compose-address-wrap">
-          <input id="compose-cc" type="text" autocomplete="off">
+          <div class="compose-address-line">
+            <input id="compose-cc" type="text" autocomplete="off">
+            <button type="button" class="iconbtn compose-address-book-btn" data-compose-contact-target="compose-cc" data-i18n-title="compose.addressBook"><i class="fa-regular fa-address-book"></i></button>
+          </div>
           <div id="compose-cc-suggestions" class="contact-suggestions hidden"></div>
         </div>
       </div>
       <div class="field compose-address-field"><label data-i18n="compose.bcc"></label>
         <div class="compose-address-wrap">
-          <input id="compose-bcc" type="text" autocomplete="off">
+          <div class="compose-address-line">
+            <input id="compose-bcc" type="text" autocomplete="off">
+            <button type="button" class="iconbtn compose-address-book-btn" data-compose-contact-target="compose-bcc" data-i18n-title="compose.addressBook"><i class="fa-regular fa-address-book"></i></button>
+          </div>
           <div id="compose-bcc-suggestions" class="contact-suggestions hidden"></div>
         </div>
       </div>
@@ -303,7 +323,42 @@
         </div>
         <span id="compose-signature-account-hint" class="compose-signature-account-hint"></span>
       </div>
-      <div class="field compose-editor-field"><textarea id="compose-body" data-i18n-ph="compose.bodyPlaceholder"></textarea></div>
+      <div class="compose-schedule-option">
+        <label class="compose-signature-switch">
+          <input id="compose-send-later" type="checkbox">
+          <span data-i18n="scheduled.option"></span>
+        </label>
+        <div id="compose-schedule-fields" class="compose-schedule-fields hidden">
+          <label for="compose-send-at" data-i18n="scheduled.sendAt"></label>
+          <input id="compose-send-at" type="datetime-local">
+          <small data-i18n="scheduled.runningHint"></small>
+        </div>
+      </div>
+      <div class="field compose-editor-field">
+        <div id="compose-editor-toolbar" class="compose-editor-toolbar" role="toolbar" data-i18n-label="compose.formatToolbar">
+          <button type="button" class="iconbtn" data-compose-command="bold" data-i18n-title="compose.formatBold"><i class="fa-solid fa-bold"></i></button>
+          <button type="button" class="iconbtn" data-compose-command="italic" data-i18n-title="compose.formatItalic"><i class="fa-solid fa-italic"></i></button>
+          <button type="button" class="iconbtn" data-compose-command="underline" data-i18n-title="compose.formatUnderline"><i class="fa-solid fa-underline"></i></button>
+          <span class="compose-editor-separator"></span>
+          <button type="button" class="iconbtn" data-compose-command="insertUnorderedList" data-i18n-title="compose.formatBullets"><i class="fa-solid fa-list-ul"></i></button>
+          <button type="button" class="iconbtn" data-compose-command="insertOrderedList" data-i18n-title="compose.formatNumbered"><i class="fa-solid fa-list-ol"></i></button>
+          <button type="button" class="iconbtn" id="btn-compose-link" data-i18n-title="compose.formatLink"><i class="fa-solid fa-link"></i></button>
+          <button type="button" class="iconbtn" data-compose-command="removeFormat" data-i18n-title="compose.formatClear"><i class="fa-solid fa-eraser"></i></button>
+          <span class="compose-editor-separator"></span>
+          <span class="compose-emoji-wrap">
+            <button type="button" class="iconbtn" id="btn-compose-emoji" data-i18n-title="compose.formatEmoji"><i class="fa-regular fa-face-smile"></i></button>
+            <span id="compose-emoji-picker" class="compose-emoji-picker hidden">
+              <button type="button" data-compose-emoji="😀">😀</button><button type="button" data-compose-emoji="😂">😂</button><button type="button" data-compose-emoji="😊">😊</button><button type="button" data-compose-emoji="😉">😉</button>
+              <button type="button" data-compose-emoji="😍">😍</button><button type="button" data-compose-emoji="🤔">🤔</button><button type="button" data-compose-emoji="👍">👍</button><button type="button" data-compose-emoji="👎">👎</button>
+              <button type="button" data-compose-emoji="👏">👏</button><button type="button" data-compose-emoji="🙏">🙏</button><button type="button" data-compose-emoji="🎉">🎉</button><button type="button" data-compose-emoji="✅">✅</button>
+              <button type="button" data-compose-emoji="❌">❌</button><button type="button" data-compose-emoji="⚠️">⚠️</button><button type="button" data-compose-emoji="❤️">❤️</button><button type="button" data-compose-emoji="📎">📎</button>
+            </span>
+          </span>
+        </div>
+        <div class="compose-editor-resize-shell">
+          <div id="compose-body" class="compose-rich-editor" contenteditable="true" spellcheck="true" data-i18n-ph="compose.bodyPlaceholder"></div>
+        </div>
+      </div>
       <div id="compose-render-stack" class="compose-render-stack">
         <section id="compose-signature-block" class="compose-preview-block signature hidden">
           <header><i class="fa-solid fa-signature"></i><span data-i18n="signature.previewInMessage"></span></header>
@@ -317,16 +372,70 @@
       <div class="field">
         <button class="btn" id="btn-attach" style="align-self:flex-start">
           <i class="fa-solid fa-paperclip"></i><span data-i18n="compose.attach"></span></button>
+        <input id="compose-file-picker" class="hidden" type="file" multiple>
         <div id="compose-attachments" style="display:flex;gap:6px;flex-wrap:wrap"></div>
       </div>
     </div>
-    <footer>
+    <footer class="compose-footer">
+      <button class="btn" id="btn-save-draft" type="button"><i class="fa-solid fa-file-pen"></i><span data-i18n="drafts.save"></span></button>
+      <span class="compose-footer-spacer"></span>
       <button class="btn" data-close data-i18n="cancel"></button>
       <button class="btn primary" id="btn-send"><i class="fa-solid fa-paper-plane"></i> <span data-i18n="compose.send"></span></button>
     </footer>
   </div>
 </div>
 
+
+<!-- LibraMail 0.2.24 UI v9 -->
+
+<div class="modal-veil" id="compose-contact-picker-modal">
+  <div class="modal compose-contact-picker-box">
+    <header>
+      <span><i class="fa-regular fa-address-book"></i> <span data-i18n="compose.addressBook"></span></span>
+      <button class="iconbtn" id="btn-close-compose-contact-picker" type="button"><i class="fa-solid fa-xmark"></i></button>
+    </header>
+    <div class="body compose-contact-picker-body">
+      <div class="compose-contact-picker-toolbar">
+        <div class="field">
+          <label for="compose-contact-search" data-i18n="contacts.search"></label>
+          <input id="compose-contact-search" type="search" data-i18n-ph="compose.contactSearchPlaceholder" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="compose-contact-target" data-i18n="compose.recipientTarget"></label>
+          <select id="compose-contact-target">
+            <option value="compose-to" data-i18n="compose.to"></option>
+            <option value="compose-cc" data-i18n="compose.cc"></option>
+            <option value="compose-bcc" data-i18n="compose.bcc"></option>
+          </select>
+        </div>
+      </div>
+      <div id="compose-contact-picker-list" class="compose-contact-picker-list"></div>
+      <div id="compose-contact-picker-empty" class="compose-contact-picker-empty hidden"><i class="fa-regular fa-address-book"></i><span data-i18n="compose.noContacts"></span></div>
+    </div>
+    <footer>
+      <button class="btn" id="btn-cancel-compose-contact-picker" type="button" data-i18n="cancel"></button>
+      <button class="btn primary" id="btn-add-compose-contacts" type="button"><i class="fa-solid fa-user-plus"></i><span data-i18n="compose.addRecipients"></span></button>
+    </footer>
+  </div>
+</div>
+
+<div class="modal-veil" id="outbox-modal">
+  <div class="modal outbox-modal-box">
+    <header>
+      <span><i id="outbox-modal-icon" class="fa-solid fa-file-pen"></i> <span id="outbox-modal-title" data-i18n="drafts.title"></span></span>
+      <span class="outbox-header-actions">
+        <button class="iconbtn" id="btn-outbox-refresh" type="button" data-i18n-title="refresh"><i class="fa-solid fa-rotate"></i></button>
+        <button class="iconbtn" data-close><i class="fa-solid fa-xmark"></i></button>
+      </span>
+    </header>
+    <div class="body outbox-modal-body">
+      <div id="outbox-list" class="outbox-list"></div>
+      <div id="outbox-empty" class="outbox-empty hidden"><i class="fa-regular fa-folder-open"></i><span></span></div>
+      <p class="outbox-local-note"><i class="fa-solid fa-circle-info"></i><span data-i18n="scheduled.runningHint"></span></p>
+    </div>
+    <footer><button class="btn primary" data-close data-i18n="close"></button></footer>
+  </div>
+</div>
 <div class="modal-veil" id="account-modal">
   <div class="modal account-modal-box">
     <header><span id="account-modal-title" data-i18n="account.add"></span>
@@ -882,5 +991,6 @@
 <script src="js/maillist.js"></script>
 <script src="js/viewer.js"></script>
 <script src="js/app.js"></script>
+<script src="js/outbox.js"></script>
 </body>
 </html>

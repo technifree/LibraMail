@@ -124,7 +124,7 @@ class VirtualMailList {
 
     div.innerHTML = `
       <span class="read-state-dot"></span>
-      ${isThread ? `<button class="thread-toggle" type="button"><i class="fa-solid fa-chevron-${expanded ? 'down' : 'right'}"></i></button>` : ''}
+      ${isThread ? `<button class="thread-toggle" type="button" aria-expanded="${expanded ? 'true' : 'false'}"><i class="fa-solid fa-chevron-${expanded ? 'down' : 'right'}"></i></button>` : ''}
       <button class="mail-select" type="button" title="${this.escape(window.t?.('selection.select') || 'Sélectionner')}">
         <i class="${this.selectedKeys.has(key) ? 'fa-solid fa-square-check' : 'fa-regular fa-square'}"></i>
       </button>
@@ -144,9 +144,23 @@ class VirtualMailList {
       event.stopPropagation();
       this.toggleSelection(row);
     });
-    div.querySelector('.thread-toggle')?.addEventListener('click', event => {
+    // LibraMail 0.2.24 UI v18 — la flèche est une vraie bascule.
+    // Elle ne doit jamais ouvrir la ligne, ouvrir un onglet ou laisser un
+    // double-clic remonter jusqu'au conteneur du message.
+    const threadToggle = div.querySelector('.thread-toggle');
+    threadToggle?.addEventListener('pointerdown', event => {
       event.stopPropagation();
-      this.callbacks.onOpen?.(row);
+    });
+    threadToggle?.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      this.callbacks.onQuickAction?.(row, 'toggle-thread', threadToggle);
+    });
+    threadToggle?.addEventListener('dblclick', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
     });
     div.querySelectorAll('.quick [data-action]').forEach(button => {
       button.addEventListener('click', event => {

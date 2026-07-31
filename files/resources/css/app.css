@@ -3017,3 +3017,466 @@ body.resizing-panes.resize-rows { cursor: row-resize; }
   background: #edf2fb;
   color: #55657f;
 }
+
+/* ============================================================
+   LibraMail 0.2.24 — brouillons et envois différés
+   ============================================================ */
+.compose-schedule-option {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  min-height: 38px; padding: 8px 10px;
+  border: 1px solid var(--border-soft); border-radius: var(--radius);
+  background: var(--bg-panel-2);
+}
+.compose-schedule-fields {
+  min-width: min(420px, 100%); flex: 1;
+  display: grid; grid-template-columns: auto minmax(190px, 240px) minmax(180px, 1fr);
+  align-items: center; gap: 8px;
+}
+.compose-schedule-fields label { color: var(--fg-muted); font-size: 11.5px; }
+.compose-schedule-fields small { color: var(--fg-faint); line-height: 1.35; }
+.compose-footer-spacer { flex: 1; }
+.outbox-modal-box { width: min(850px, 95vw); height: min(690px, 90vh); overflow: hidden; }
+.outbox-modal-box > header, .outbox-modal-box > footer { flex: none; }
+.outbox-header-actions { margin-left: auto; display: inline-flex; gap: 5px; }
+.outbox-modal-body { flex: 1; min-height: 0; overflow: hidden !important; }
+.outbox-list { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 7px; }
+.outbox-row {
+  display: grid; grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center; gap: 10px; min-height: 76px; padding: 10px;
+  border: 1px solid var(--border-soft); border-radius: var(--radius);
+  background: var(--bg-panel-2);
+}
+.outbox-row:hover { background: var(--bg-hover); border-color: var(--border); }
+.outbox-row.failed { border-left: 4px solid var(--danger); }
+.outbox-row.sending { border-left: 4px solid var(--accent); }
+.outbox-row-icon {
+  width: 36px; height: 36px; border-radius: 10px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--accent); background: var(--accent-soft);
+}
+.outbox-row-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.outbox-row-main strong, .outbox-row-main > span, .outbox-row-main small {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.outbox-row-main strong { color: var(--fg-strong); }
+.outbox-row-main > span { color: var(--fg-muted); font-size: 12px; }
+.outbox-row-main small { color: var(--fg-faint); font-size: 10.5px; }
+.outbox-row-actions { display: inline-flex; align-items: center; gap: 5px; }
+.outbox-row-error { margin-top: 4px; color: var(--danger); font-size: 11px; white-space: normal; }
+.outbox-row-error i { margin-right: 5px; }
+.outbox-empty, .outbox-loading {
+  min-height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 9px; color: var(--fg-faint);
+}
+.outbox-empty i { font-size: 36px; color: var(--border); }
+.outbox-local-note { display: flex; align-items: flex-start; gap: 7px; color: var(--fg-faint); font-size: 11px; line-height: 1.4; }
+.outbox-local-note i { color: var(--accent); margin-top: 2px; }
+.spam-collected-box > summary {
+  cursor: pointer; user-select: none; display: flex; align-items: center; gap: 7px;
+  min-height: 34px; padding: 6px 2px; color: var(--fg-muted);
+}
+.spam-collected-box > summary:hover { color: var(--accent); }
+@media (max-width: 760px) {
+  .compose-schedule-fields { grid-template-columns: 1fr; }
+  .compose-footer { flex-wrap: wrap; }
+  .compose-footer-spacer { display: none; }
+  .outbox-row { grid-template-columns: 34px minmax(0, 1fr); }
+  .outbox-row-actions { grid-column: 2; justify-content: flex-start; flex-wrap: wrap; }
+}
+/* ============================================================
+   LibraMail 0.2.24 UI v9 — compositeur moderne
+   ============================================================ */
+#compose-modal .compose-schedule-option {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: start;
+  gap: 8px 16px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--bg-panel-2);
+}
+#compose-modal .compose-schedule-fields {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: max-content minmax(220px, 300px);
+  align-items: center;
+  gap: 6px 10px;
+}
+#compose-modal .compose-schedule-fields > label { color: var(--fg-muted); font-size: 11.5px; }
+#compose-modal .compose-schedule-fields > input { min-width: 0; width: 100%; }
+#compose-modal .compose-schedule-fields > small {
+  grid-column: 1 / -1;
+  min-width: 0;
+  color: var(--fg-faint);
+  font-size: 10.5px;
+  line-height: 1.4;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+.compose-address-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 6px;
+}
+.compose-address-line > input { width: 100%; min-width: 0; }
+.compose-address-book-btn {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--fg-muted);
+}
+.compose-address-book-btn:hover { color: var(--accent); background: var(--accent-soft); }
+.compose-editor-field { min-height: 0 !important; gap: 0 !important; }
+.compose-editor-toolbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
+  min-height: 38px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--bg-panel-2);
+}
+.compose-editor-toolbar .iconbtn { width: 30px; height: 28px; border-radius: 6px; }
+.compose-editor-toolbar .iconbtn:hover { color: var(--accent); background: var(--accent-soft); }
+.compose-editor-separator { width: 1px; height: 22px; margin: 0 3px; background: var(--border); }
+.compose-editor-resize-shell {
+  display: flex;
+  width: 100%;
+  height: 250px;
+  min-height: 180px;
+  max-height: 62vh;
+  resize: vertical;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0 0 var(--radius) var(--radius);
+  background: var(--bg-input);
+}
+#compose-body.compose-rich-editor {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 0 !important;
+  height: auto;
+  padding: 10px;
+  border: 0;
+  outline: 0;
+  resize: none;
+  overflow: auto;
+  background: transparent;
+  color: var(--fg);
+  user-select: text;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+#compose-body.compose-rich-editor:empty::before {
+  content: attr(placeholder);
+  color: var(--fg-faint);
+  pointer-events: none;
+}
+#compose-body.compose-rich-editor p,
+#compose-body.compose-rich-editor div { margin: 0 0 4px; }
+#compose-body.compose-rich-editor ul,
+#compose-body.compose-rich-editor ol { margin: 5px 0 5px 24px; }
+#compose-body.compose-rich-editor a { color: var(--accent); text-decoration: underline; }
+.compose-emoji-wrap { position: relative; display: inline-flex; }
+.compose-emoji-picker {
+  position: absolute;
+  z-index: 120;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 210px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3px;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow);
+}
+.compose-emoji-picker button {
+  height: 36px;
+  border-radius: 6px;
+  font-size: 20px;
+}
+.compose-emoji-picker button:hover { background: var(--bg-hover); }
+#compose-contact-picker-modal { z-index: 75; }
+.compose-contact-picker-box {
+  width: min(720px, 94vw);
+  height: min(640px, 88vh);
+  max-height: 88vh;
+  overflow: hidden;
+}
+.compose-contact-picker-box > header,
+.compose-contact-picker-box > footer { flex: none; }
+.compose-contact-picker-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden !important;
+}
+.compose-contact-picker-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px;
+  gap: 10px;
+}
+.compose-contact-picker-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+}
+.compose-contact-picker-row {
+  display: grid;
+  grid-template-columns: 18px 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 52px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-soft);
+  cursor: pointer;
+}
+.compose-contact-picker-row:last-child { border-bottom: 0; }
+.compose-contact-picker-row:hover { background: var(--bg-hover); }
+.compose-contact-picker-row input { accent-color: var(--accent); }
+.compose-contact-picker-avatar {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 11px;
+  font-weight: 800;
+}
+.compose-contact-picker-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.compose-contact-picker-main strong,
+.compose-contact-picker-main span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.compose-contact-picker-main span { color: var(--fg-muted); font-size: 11.5px; }
+.compose-contact-picker-meta { display: inline-flex; gap: 6px; color: var(--accent); }
+.compose-contact-picker-empty,
+.compose-contact-picker-loading {
+  min-height: 150px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  color: var(--fg-faint);
+}
+.compose-contact-picker-loading { flex-direction: row; }
+@media (max-width: 760px) {
+  #compose-modal .compose-schedule-option,
+  #compose-modal .compose-schedule-fields,
+  .compose-contact-picker-toolbar { grid-template-columns: 1fr; }
+  #compose-modal .compose-schedule-fields > small { grid-column: auto; }
+  .compose-editor-resize-shell { height: 220px; }
+}
+
+
+/* ============================================================
+   LibraMail 0.2.24 UI v11 — édition fiable des réponses
+   ============================================================ */
+#compose-body.compose-rich-editor {
+  pointer-events: auto !important;
+  cursor: text;
+  -webkit-user-modify: read-write;
+  -webkit-user-select: text;
+  user-select: text;
+}
+#compose-body.compose-rich-editor:focus {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+#compose-quote-block {
+  cursor: text;
+}
+
+
+/* ============================================================
+   LibraMail 0.2.24 UI v12 — éditeur hors flexbox pour WebKitGTK
+   ============================================================ */
+.compose-editor-resize-shell {
+  display: block !important;
+}
+#compose-body.compose-rich-editor {
+  display: block !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 100% !important;
+  -webkit-user-modify: initial;
+}
+#compose-body [data-compose-editor-anchor] {
+  min-height: 1.45em;
+}
+
+/* ============================================================
+   LibraMail 0.2.24 UI v13 — éditeur non compressible
+   ============================================================ */
+#compose-modal .compose-editor-field {
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 0 0 auto !important;
+  flex-shrink: 0 !important;
+  min-height: 220px !important;
+  height: auto !important;
+  overflow: visible !important;
+  position: relative;
+  z-index: 2;
+}
+#compose-modal .compose-editor-toolbar {
+  flex: 0 0 40px !important;
+  flex-shrink: 0 !important;
+  position: relative;
+  z-index: 3;
+}
+#compose-modal .compose-editor-resize-shell {
+  display: block !important;
+  flex: 0 0 auto !important;
+  flex-shrink: 0 !important;
+  width: 100% !important;
+  height: 250px;
+  min-height: 180px !important;
+  max-height: 62vh;
+  resize: vertical;
+  overflow: auto !important;
+  position: relative;
+  z-index: 3;
+}
+#compose-modal #compose-body.compose-rich-editor {
+  display: block !important;
+  box-sizing: border-box !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 100% !important;
+  position: relative;
+  z-index: 4;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  -webkit-user-modify: read-write !important;
+}
+#compose-modal #compose-render-stack {
+  display: flex !important;
+  flex: 0 0 auto !important;
+  flex-shrink: 0 !important;
+  position: relative;
+  z-index: 1;
+  margin-top: 12px;
+}
+
+/* ============================================================
+   LibraMail 0.2.24 UI v14 — menu émojis fiable
+   ============================================================ */
+#compose-modal .compose-editor-toolbar,
+#compose-modal .compose-emoji-wrap {
+  overflow: visible !important;
+}
+#compose-modal .compose-emoji-wrap {
+  z-index: 40;
+}
+#compose-modal .compose-emoji-picker {
+  z-index: 1000;
+}
+#compose-modal .compose-emoji-picker.open {
+  display: grid !important;
+}
+
+/* ============================================================
+   LibraMail 0.2.24 UI v15 — sélecteur d'émojis au premier plan
+   ============================================================ */
+#compose-modal .compose-editor-toolbar {
+  position: relative !important;
+  z-index: 60 !important;
+  overflow: visible !important;
+}
+#compose-modal .compose-editor-resize-shell {
+  position: relative !important;
+  z-index: 1 !important;
+}
+#compose-modal #compose-body.compose-rich-editor {
+  position: relative !important;
+  z-index: 1 !important;
+}
+#compose-modal .compose-emoji-wrap {
+  position: relative !important;
+  z-index: 61 !important;
+  overflow: visible !important;
+}
+#compose-modal .compose-emoji-picker {
+  z-index: 62 !important;
+  pointer-events: auto !important;
+}
+#compose-modal .compose-emoji-picker.open {
+  display: grid !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+/* ============================================================
+   LibraMail 0.2.24 UI v18 — bascule de conversation fiable
+   ============================================================ */
+.mail-row.conversation-row .thread-toggle {
+  left: 0;
+  top: 0;
+  transform: none;
+  width: 31px;
+  height: 100%;
+  border-radius: 0;
+  cursor: pointer;
+  z-index: 5;
+}
+.mail-row.conversation-row .thread-toggle i {
+  pointer-events: none;
+}
+.mail-row.conversation-row .thread-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
+
+
+
+/* LibraMail 0.2.24 UI v19 — lecteur vide avec logo Libramail */
+#reader-empty.reader-empty-brand {
+  gap: 18px;
+  text-align: center;
+}
+#reader-empty.reader-empty-brand .reader-empty-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: min(42vw, 260px);
+  max-width: 260px;
+  min-width: 140px;
+  opacity: 0.16;
+  filter: saturate(0.9);
+  user-select: none;
+  pointer-events: none;
+}
+#reader-empty.reader-empty-brand .reader-empty-logo img {
+  display: none;
+  width: 100%;
+  height: auto;
+}
+html[data-theme="dark"] #reader-empty.reader-empty-brand .reader-empty-logo-dark {
+  display: block;
+}
+html[data-theme="light"] #reader-empty.reader-empty-brand .reader-empty-logo-light {
+  display: block;
+}
+#reader-empty.reader-empty-brand > span[data-i18n="reader.empty"] {
+  max-width: 24rem;
+  opacity: 0.9;
+}

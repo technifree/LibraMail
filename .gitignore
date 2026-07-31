@@ -61,3 +61,6 @@ Thumbs.db
 
 # Sauvegardes temporaires de correction
 .github-build-fix-backup-*/
+.libramail-*-backup-*/
+.tmp/
+LibraMail_hotfix_*/

@@ -500,7 +500,12 @@ function listConversations({ limit = 200, offset = 0, sortBy = 'date', sortDirec
        WHERE ${filter.where}
     ), ranked AS (
       SELECT filtered.*,
-             COUNT(*) OVER (PARTITION BY conversation_key) AS thread_count,
+             /* LibraMail 0.2.24 UI v16 — un dossier choisit les fils à afficher,
+                mais le compteur doit inclure toutes les copies du fil, notamment Envoyés. */
+             (SELECT COUNT(*)
+                FROM messages all_messages
+               WHERE COALESCE(NULLIF(all_messages.thread_key, ''), 'message:' || all_messages.id)
+                     = filtered.conversation_key) AS thread_count,
              SUM(CASE WHEN seen=0 THEN 1 ELSE 0 END)
                OVER (PARTITION BY conversation_key) AS thread_unread,
              MAX(flagged) OVER (PARTITION BY conversation_key) AS thread_flagged,

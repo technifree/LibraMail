@@ -1,4 +1,4 @@
-/* LibraMail — lecteur de message et blocage des contenus distants */
+/* LibraMail 0.2.24 — lecteur de message, contenus distants et liens sécurisés */
 'use strict';
 (function () {
   const esc = value => String(value || '').replace(/[&<>"']/g, character => ({
@@ -6,27 +6,27 @@
   }[character]));
 
   const REMOTE_ATTRS = new Set(['src', 'href', 'poster', 'background', 'xlink:href']);
-  const RESOURCE_TAGS = new Set(['img', 'image', 'source', 'link', 'script', 'iframe', 'embed', 'object', 'audio', 'video']);
-
   function isRemoteUrl(value) {
     return /^https?:\/\//i.test(String(value || '').trim());
   }
-
+  function isSafeInteractiveUrl(value) {
+    return /^(?:https?:\/\/|mailto:)/i.test(String(value || '').trim());
+  }
   function remoteDomain(url) {
     try { return new URL(url).hostname.replace(/^www\./i, ''); }
     catch { return ''; }
   }
-
   function resourceType(tag, attr, url) {
     const lowerTag = String(tag || '').toLowerCase();
     const lowerAttr = String(attr || '').toLowerCase();
+    if (lowerTag === 'a' && lowerAttr === 'href') return 'link';
     if (lowerAttr === 'href' && lowerTag === 'link') return 'stylesheet';
     if (/\.(css)(?:[?#].*)?$/i.test(url)) return 'stylesheet';
-    if (lowerTag === 'img' || lowerTag === 'image' || lowerTag === 'source' || /\.(png|jpe?g|gif|webp|svg|bmp|ico)(?:[?#].*)?$/i.test(url)) return 'image';
+    if (lowerTag === 'img' || lowerTag === 'image' || lowerTag === 'source'
+        || /\.(png|jpe?g|gif|webp|svg|bmp|ico)(?:[?#].*)?$/i.test(url)) return 'image';
     if (lowerAttr === 'style') return 'background';
     return 'resource';
   }
-
   function trackerInfo(url, element = null) {
     const lower = String(url || '').toLowerCase();
     if (/track|tracking|pixel|beacon|open|read|analytics|utm_|newsletter|mailchimp|sendgrid|brevo|sibforms|mandrill|postmark/.test(lower)) {
@@ -39,7 +39,6 @@
     }
     return { suspectedTracker: false, trackerReason: '', width, height };
   }
-
   function addResource(map, url, details = {}) {
     if (!isRemoteUrl(url)) return;
     const normalized = String(url).trim();
@@ -63,13 +62,11 @@
     if (details.height) current.height = details.height;
     map.set(normalized, current);
   }
-
   function urlsFromSrcset(value) {
     return String(value || '').split(',')
       .map(part => part.trim().split(/\s+/)[0])
       .filter(isRemoteUrl);
   }
-
   function styleUrls(value) {
     const urls = [];
     const regex = /url\(\s*(['"]?)(https?:\/\/[^)'"\s]+)\1\s*\)/gi;
@@ -100,7 +97,10 @@
     },
 
     getRemoteResources() {
-      return this.remoteResources.map(item => ({ ...item, loaded: this.allowedRemote.has(item.url) }));
+      return this.remoteResources.map(item => ({
+        ...item,
+        loaded: this.allowedRemote.has(item.url),
+      }));
     },
 
     allowRemote(urls = []) {
@@ -117,7 +117,6 @@
       const map = new Map();
       const template = document.createElement('template');
       template.innerHTML = String(html || '');
-
       template.content.querySelectorAll('*').forEach(element => {
         const tag = element.tagName.toLowerCase();
         for (const attr of [...element.attributes]) {
@@ -125,12 +124,22 @@
           const value = attr.value || '';
           if (REMOTE_ATTRS.has(name) && isRemoteUrl(value)) {
             const info = trackerInfo(value, element);
-            addResource(map, value, { ...info, type: resourceType(tag, name, value), label: element.getAttribute('alt') || element.getAttribute('title') || '' });
+            addResource(map, value, {
+              ...info,
+              type: resourceType(tag, name, value),
+              label: element.getAttribute('alt')
+                || element.getAttribute('title')
+                || (tag === 'a' ? element.textContent.trim() : ''),
+            });
           }
           if (name === 'srcset') {
             for (const url of urlsFromSrcset(value)) {
               const info = trackerInfo(url, element);
-              addResource(map, url, { ...info, type: 'image', label: element.getAttribute('alt') || '' });
+              addResource(map, url, {
+                ...info,
+                type: 'image',
+                label: element.getAttribute('alt') || '',
+              });
             }
           }
           if (name === 'style') {
@@ -141,15 +150,16 @@
           }
         }
       });
-
       for (const match of String(html || '').matchAll(/https?:\/\/[^\s"'<>)]*/gi)) {
         const url = match[0].replace(/[.,;:!?]+$/, '');
-        if (/\.(png|jpe?g|gif|webp|svg|bmp|ico|css)(?:[?#].*)?$/i.test(url) || /track|pixel|beacon|open/i.test(url)) {
+        if (/\.(png|jpe?g|gif|webp|svg|bmp|ico|css)(?:[?#].*)?$/i.test(url)
+            || /track|pixel|beacon|open/i.test(url)) {
           addResource(map, url, { ...trackerInfo(url), type: resourceType('', '', url) });
         }
       }
-
-      return [...map.values()].sort((a, b) => String(a.domain).localeCompare(String(b.domain)) || String(a.url).localeCompare(String(b.url)));
+      return [...map.values()].sort((a, b) =>
+        String(a.domain).localeCompare(String(b.domain))
+        || String(a.url).localeCompare(String(b.url)));
     },
 
     render() {
@@ -159,52 +169,100 @@
       if (!frame) return;
       const message = this.current;
       if (!message) {
+        frame.onload = null;
         frame.srcdoc = '';
         banner?.classList.remove('visible');
         return;
       }
-
       const html = this.mode === 'text' || !message.html
         ? `<pre style="white-space:pre-wrap;font:14px/1.55 system-ui,-apple-system,Segoe UI,sans-serif;margin:0">${esc(message.text || message.meta?.snippet || '')}</pre>`
         : this.prepareHtml(message.html);
-
       const safeHtml = window.DOMPurify?.sanitize ? window.DOMPurify.sanitize(html) : html;
       frame.classList.toggle('textmode', this.mode === 'text' || !message.html);
-      frame.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>
+      frame.onload = () => this.bindLinks(frame);
+      frame.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><style>
         body{margin:0;padding:16px;font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;color:#111;background:#fff;overflow-wrap:anywhere}
-        img{max-width:100%;height:auto} a{color:#2563eb} blockquote{border-left:3px solid #ddd;margin-left:0;padding-left:12px;color:#555}
+        img{max-width:100%;height:auto}
+        a{color:#2563eb;text-decoration:underline;cursor:pointer}
+        a.libramail-link-blocked{color:#7c8598;text-decoration:line-through dotted;cursor:not-allowed}
+        a.libramail-link-blocked::after{content:' 🔒';font-size:.8em}
+        blockquote{border-left:3px solid #ddd;margin-left:0;padding-left:12px;color:#555}
         pre{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
       </style></head><body>${safeHtml}</body></html>`;
-
       const blocked = this.remoteResources.filter(item => !this.allowedRemote.has(item.url));
       if (count) count.textContent = String(blocked.length);
       if (banner) banner.classList.toggle('visible', blocked.length > 0);
     },
 
+    bindLinks(frame) {
+      let documentRef;
+      try { documentRef = frame.contentDocument; } catch { return; }
+      if (!documentRef) return;
+      documentRef.querySelectorAll('a[data-libramail-link]').forEach(anchor => {
+        const url = String(anchor.dataset.libramailLink || '');
+        const blocked = anchor.dataset.libramailBlocked === '1';
+        const displayText = String(anchor.textContent || '').trim();
+        anchor.addEventListener('mouseenter', () => window.App?.previewExternalTarget?.(url));
+        anchor.addEventListener('focus', () => window.App?.previewExternalTarget?.(url));
+        anchor.addEventListener('mouseleave', () => window.App?.clearExternalTarget?.());
+        anchor.addEventListener('blur', () => window.App?.clearExternalTarget?.());
+        anchor.addEventListener('click', event => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (blocked) {
+            window.App?.status?.(
+              window.I18N?.t?.('remote.linkStillBlocked') || 'Ce lien reste bloqué tant qu’il n’est pas autorisé.',
+              'error',
+            );
+            return;
+          }
+          window.App?.openExternal?.(url, { displayText });
+        });
+      });
+    },
+
     prepareHtml(html) {
       const blockRemote = window.App?.config?.blockRemoteImages !== false;
-      if (!blockRemote) return String(html || '');
-
       const template = document.createElement('template');
       template.innerHTML = String(html || '');
       template.content.querySelectorAll('*').forEach(element => {
+        const tag = element.tagName.toLowerCase();
+
+        if (tag === 'a') {
+          const href = String(element.getAttribute('href') || '').trim();
+          if (isSafeInteractiveUrl(href)) {
+            const remote = isRemoteUrl(href);
+            const allowed = !remote || !blockRemote || this.allowedRemote.has(href);
+            element.setAttribute('data-libramail-link', href);
+            element.setAttribute('data-libramail-blocked', allowed ? '0' : '1');
+            element.setAttribute('href', '#');
+            element.removeAttribute('target');
+            element.removeAttribute('rel');
+            element.classList.add(allowed ? 'libramail-link-enabled' : 'libramail-link-blocked');
+            if (!allowed) element.setAttribute('aria-disabled', 'true');
+          } else {
+            element.removeAttribute('href');
+          }
+        }
+
         for (const attr of [...element.attributes]) {
           const name = attr.name.toLowerCase();
           const value = attr.value || '';
-          if (REMOTE_ATTRS.has(name) && isRemoteUrl(value) && !this.allowedRemote.has(value)) {
+          if (tag === 'a' && (name === 'href' || name.startsWith('data-libramail-'))) continue;
+          if (REMOTE_ATTRS.has(name) && isRemoteUrl(value) && blockRemote && !this.allowedRemote.has(value)) {
             element.setAttribute(`data-libramail-remote-${name.replace(':', '-')}`, value);
             element.removeAttribute(attr.name);
           }
           if (name === 'srcset') {
             const urls = urlsFromSrcset(value);
-            if (urls.some(url => !this.allowedRemote.has(url))) {
+            if (blockRemote && urls.some(url => !this.allowedRemote.has(url))) {
               element.setAttribute('data-libramail-remote-srcset', value);
               element.removeAttribute(attr.name);
             }
           }
           if (name === 'style') {
             const urls = styleUrls(value);
-            if (urls.some(url => !this.allowedRemote.has(url))) {
+            if (blockRemote && urls.some(url => !this.allowedRemote.has(url))) {
               let nextStyle = value;
               for (const url of urls) {
                 if (!this.allowedRemote.has(url)) nextStyle = nextStyle.replaceAll(url, '');

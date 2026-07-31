@@ -485,6 +485,7 @@ const App = (() => {
   }
 
   function onEvent(event, data) {
+    window.OutboxUI?.onEngineEvent?.(event, data);
     if (event === 'sync.started') {
       beginSyncActivity(data);
       status(t('status.syncStarting', { account: accountLabel(data.accountId) }), 'busy');
@@ -610,6 +611,7 @@ const App = (() => {
     await refresh();
     await refreshSpamStats();
     await refreshContactsCount();
+    window.OutboxUI?.refresh?.();
     status(t('status.connected'), 'success');
     checkForUpdates(false).catch(() => {});
 
@@ -640,7 +642,7 @@ const App = (() => {
   };
 
   function applyAppVersion() {
-    const rawVersion = String(window.NL_APPVERSION || '0.2.23').replace(/^v/i, '');
+    const rawVersion = String(window.NL_APPVERSION || '0.2.24').replace(/^v/i, '');
     const badge = document.getElementById('app-version');
     if (badge) {
       badge.textContent = `v${rawVersion}`;
@@ -1171,6 +1173,13 @@ const App = (() => {
   }
 
   // ---------- Lecture / conversations ----------
+  // LibraMail 0.2.24 UI v18 — bascule explicite et état demandé mémorisé.
+  // Le bouton de flèche appelle désormais uniquement toggle-thread dans
+  // maillist.js. Ces deux tables servent à conserver le dernier état demandé
+  // lorsqu'un chargement de conversation est encore en cours.
+  const threadToggleOperations = new Map();
+  const threadToggleTargets = new Map();
+
   async function openListItem(row, { fromTab = false, preferredMessageId = null } = {}) {
     if (!fromTab) {
       previewReaderRow = { ...row };
@@ -1180,15 +1189,10 @@ const App = (() => {
     if (row.is_thread_child) {
       await openConversationChild(row);
     } else if (row.is_thread && config.conversationView !== false) {
-      // Une conversation d'un seul message ne doit pas se déplier :
-      // la ligne de synthèse correspond déjà au message lui-même.
-      if (Number(row.thread_count || 1) > 1) {
-        await openConversation(row, preferredMessageId);
-      } else {
-        if (list.isThreadExpanded(row.thread_key)) list.collapseThread(row.thread_key);
-        clearConversationPanel();
-        await openMessage(row);
-      }
+      // LibraMail 0.2.24 UI v16 — le compteur de la liste peut ne contenir
+      // que les messages du dossier courant. La lecture du fil complet reste
+      // la source de vérité et gère elle-même le cas d'un message unique.
+      await openConversation(row, preferredMessageId);
     } else {
       clearConversationPanel();
       await openMessage(row);
@@ -1231,17 +1235,55 @@ const App = (() => {
   }
 
   async function toggleConversation(row) {
-    if (Number(row.thread_count || 1) <= 1) {
-      list.collapseThread(row.thread_key);
-      clearConversationPanel();
-      await openMessage(row);
-      return;
+    // LibraMail 0.2.24 UI v18 — chaque clic inverse le dernier état demandé,
+    // même si la lecture RPC précédente n'est pas encore terminée.
+    const key = String(row?.thread_key || row?.parent_thread_key || '');
+    if (!key) return;
+
+    const requestedState = threadToggleTargets.has(key)
+      ? Boolean(threadToggleTargets.get(key))
+      : list.isThreadExpanded(key);
+    threadToggleTargets.set(key, !requestedState);
+
+    if (threadToggleOperations.has(key)) {
+      return threadToggleOperations.get(key);
     }
-    if (list.isThreadExpanded(row.thread_key)) {
-      list.collapseThread(row.thread_key);
-      return;
+
+    const operation = (async () => {
+      // Quelques passages suffisent même en cas de clics rapides. La boucle
+      // converge vers le dernier état demandé au lieu d'ignorer les clics.
+      for (let pass = 0; pass < 8; pass += 1) {
+        const targetExpanded = Boolean(threadToggleTargets.get(key));
+        const currentlyExpanded = list.isThreadExpanded(key);
+        if (targetExpanded === currentlyExpanded) break;
+
+        if (!targetExpanded) {
+          list.collapseThread(key);
+          continue;
+        }
+
+        const stateBeforeLoad = list.isThreadExpanded(key);
+        await openConversation(row);
+        const stateAfterLoad = list.isThreadExpanded(key);
+
+        // Un fil réellement réduit à un seul message ne peut pas être déplié.
+        // On évite alors de relancer indéfiniment la même lecture.
+        if (stateAfterLoad === stateBeforeLoad && stateAfterLoad !== targetExpanded) {
+          threadToggleTargets.set(key, stateAfterLoad);
+          break;
+        }
+      }
+    })();
+
+    threadToggleOperations.set(key, operation);
+    try {
+      await operation;
+    } finally {
+      if (threadToggleOperations.get(key) === operation) {
+        threadToggleOperations.delete(key);
+        threadToggleTargets.delete(key);
+      }
     }
-    await openConversation(row);
   }
 
   function renderConversationPanel(messages, activeId) {
@@ -2217,6 +2259,7 @@ const App = (() => {
   async function quickAction(row, action, sourceElement = null) {
     if (action !== 'label') closeQuickLabelMenu();
     if (action === 'toggle-thread') {
+      // LibraMail 0.2.24 UI v18 — action dédiée émise par la flèche.
       await toggleConversation(row);
     } else if (action === 'seen') {
       const unread = row.is_thread ? Number(row.thread_unread) > 0 : !row.seen;
@@ -3425,6 +3468,8 @@ const App = (() => {
   let composeSource = null;
   let composeQuoteText = '';
   let composeReplyHeaders = null;
+  let composeDraftId = null;
+  let composeScheduledId = null;
 
   function defaultSignatureProfile() {
     return {
@@ -3627,16 +3672,35 @@ const App = (() => {
     }).filter(item => item.address.includes('@'));
   }
 
-  function headerAddressList(source, name, fallback = '') {
-    const rows = source?.headers?.[`${name}List`];
-    if (Array.isArray(rows) && rows.length) {
-      return rows.map(item => ({
-        name: String(item?.name || '').trim(),
-        address: String(item?.address || '').trim(),
-      })).filter(item => item.address);
+  // LibraMail 0.2.24 UI v14 — lecture tolérante des adresses
+  function coerceAddressRows(value) {
+    if (!value) return [];
+    if (Array.isArray(value)) {
+      return value.flatMap(item => {
+        if (typeof item === 'string') return parseAddressText(item);
+        const address = String(item?.address || item?.email || '').trim();
+        if (address) return [{ name: String(item?.name || item?.displayName || '').trim(), address }];
+        return coerceAddressRows(item);
+      });
     }
-    return parseAddressText(source?.headers?.[name] || fallback);
+    if (typeof value === 'object') {
+      if (Array.isArray(value.value)) return coerceAddressRows(value.value);
+      if (typeof value.text === 'string') return parseAddressText(value.text);
+      const address = String(value.address || value.email || '').trim();
+      return address ? [{ name: String(value.name || value.displayName || '').trim(), address }] : [];
+    }
+    return parseAddressText(String(value));
   }
+
+  function headerAddressList(source, name, fallback = '') {
+    const headers = source?.headers || {};
+    const structured = coerceAddressRows(headers[`${name}List`]);
+    if (structured.length) return structured;
+    const textual = coerceAddressRows(headers[name]);
+    if (textual.length) return textual;
+    return coerceAddressRows(fallback);
+  }
+
 
   function normalizeRecipientAddress(value) {
     return String(value || '').trim().toLocaleLowerCase('en-US');
@@ -3673,33 +3737,45 @@ const App = (() => {
     const meta = sourceMeta(source);
     const outgoing = meta.folder_role === 'sent';
     const own = ownAddressSet(accountId);
-    const fromList = headerAddressList(source, 'from', meta.from_addr || '');
+    const fromList = headerAddressList(source, 'from', [
+      meta.from_name && meta.from_addr
+        ? `"${String(meta.from_name).replaceAll('"', '\\"')}" <${meta.from_addr}>`
+        : meta.from_addr,
+    ].filter(Boolean).join(', '));
     const replyToList = headerAddressList(source, 'replyTo');
     const toList = headerAddressList(source, 'to', meta.to_addr || '');
     const ccList = headerAddressList(source, 'cc', meta.cc_addr || '');
-    let to = [];
+    const correspondentList = coerceAddressRows({
+      name: source?.correspondent?.name || '',
+      address: source?.correspondent?.email || '',
+    });
+
+    const choosePrimary = rows => {
+      const all = uniqueAddressList(rows);
+      const external = uniqueAddressList(all, own);
+      // Ne jamais laisser « Répondre » vide pour un message échangé entre
+      // deux comptes configurés dans LibraMail : si tout est à nous, on garde
+      // malgré tout le destinataire réel du message.
+      return external.length ? external : all;
+    };
+
+    const fallbackRows = outgoing
+      ? [...toList, ...correspondentList, ...coerceAddressRows(meta.to_addr)]
+      : [...replyToList, ...fromList, ...correspondentList, ...coerceAddressRows(meta.from_addr)];
+
+    let to = choosePrimary(outgoing
+      ? [...toList, ...correspondentList]
+      : [...(replyToList.length ? replyToList : fromList), ...correspondentList]);
+    if (!to.length) to = choosePrimary(fallbackRows);
+
     let cc = [];
-
-    if (outgoing) {
-      to = uniqueAddressList(toList, own);
-      if (mode === 'reply-all') {
-        const excluded = new Set([...own, ...to.map(item => normalizeRecipientAddress(item.address))]);
-        cc = uniqueAddressList(ccList, excluded);
-      }
-    } else {
-      const primary = replyToList.length ? replyToList : fromList;
-      to = uniqueAddressList(primary, own);
-      if (mode === 'reply-all') {
-        const excluded = new Set([...own, ...to.map(item => normalizeRecipientAddress(item.address))]);
-        cc = uniqueAddressList([...toList, ...ccList], excluded);
-      }
-    }
-
-    // Repli pour les anciens enregistrements ne disposant pas encore des
-    // listes d'adresses structurées.
-    if (!to.length) {
-      const fallback = outgoing ? meta.to_addr : (source?.headers?.replyTo || meta.from_addr);
-      to = uniqueAddressList(parseAddressText(fallback), own);
+    if (mode === 'reply-all') {
+      const excluded = new Set([
+        ...own,
+        ...to.map(item => normalizeRecipientAddress(item.address)),
+      ]);
+      const extraRows = outgoing ? ccList : [...toList, ...ccList];
+      cc = uniqueAddressList(extraRows, excluded);
     }
 
     return {
@@ -3708,7 +3784,11 @@ const App = (() => {
     };
   }
 
+
   function openCompose(source = null, mode = 'new') {
+    composeDraftId = null;
+    composeScheduledId = null;
+    window.OutboxUI?.toggleScheduleControls?.(false);
     composeMode = mode;
     composeSource = source;
     composeAttachments = [];
@@ -3734,7 +3814,7 @@ const App = (() => {
     const bodyInput = document.getElementById('compose-body');
     ccInput.value = '';
     bccInput.value = '';
-    bodyInput.value = '';
+    setComposeEditorContent();
     document.getElementById('compose-read-receipt').checked = false;
     document.getElementById('compose-delivery-receipt').checked = false;
 
@@ -3761,8 +3841,453 @@ const App = (() => {
       mode === 'forward' ? 'compose.forwardedMessage' : 'compose.quotedMessage');
     document.getElementById('compose-quote-content').textContent = composeQuoteText;
     updateComposeSignature({ resetChoice: true });
+    setComposeEmojiPickerOpen(false);
     openModal('compose-modal');
-    setTimeout(() => bodyInput.focus(), 0);
+    prepareComposeEditorForMode(mode);
+  }
+
+  // LibraMail 0.2.24 UI v14 — destinataires et édition enrichie fiables
+  // LibraMail 0.2.24 UI v9 — éditeur enrichi et carnet d'adresses
+  let composeSavedSelection = null;
+  let composeContactPickerTarget = 'compose-to';
+  let composeContactPickerRows = [];
+
+  function composeEditorElement() {
+    return document.getElementById('compose-body');
+  }
+
+  function sanitizeComposeBodyHtml(html) {
+    return DOMPurify.sanitize(String(html || ''), {
+      ALLOWED_TAGS: ['div', 'p', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'ul', 'ol', 'li', 'a', 'blockquote', 'span'],
+      ALLOWED_ATTR: ['href', 'title'],
+      ALLOW_DATA_ATTR: false,
+      FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'video', 'audio', 'img'],
+      FORBID_ATTR: ['onerror', 'onload', 'onclick', 'formaction', 'style', 'class', 'id'],
+    });
+  }
+
+  function plainTextToComposeHtml(text) {
+    const normalized = String(text || '').replace(/\r\n?/g, '\n');
+    if (!normalized) return '';
+    return normalized.split('\n').map(line => line
+      ? `<div>${esc(line)}</div>`
+      : '<div><br></div>').join('');
+  }
+
+  // LibraMail 0.2.24 UI v12 — caractère d'ancrage WebKitGTK retiré à l'envoi
+  const COMPOSE_EDITOR_ANCHOR = '\u200B';
+
+  function stripComposeEditorAnchor(value) {
+    return String(value || '').replace(/\u200B/g, '');
+  }
+
+  function composeEditorText() {
+    const editor = composeEditorElement();
+    return stripComposeEditorAnchor(editor?.innerText || '')
+      .replace(/\u00a0/g, ' ')
+      .replace(/\r\n?/g, '\n')
+      .trimEnd();
+  }
+
+  function composeEditorHtml() {
+    const editor = composeEditorElement();
+    if (!editor || !composeEditorText().trim()) return '';
+    return sanitizeComposeBodyHtml(stripComposeEditorAnchor(editor.innerHTML)).trim();
+  }
+
+  function setComposeEditorContent({ html = '', text = '' } = {}) {
+    const editor = composeEditorElement();
+    if (!editor) return;
+    const safeHtml = html ? sanitizeComposeBodyHtml(html) : plainTextToComposeHtml(text);
+    editor.innerHTML = safeHtml === '<br>' ? '' : safeHtml;
+    composeSavedSelection = null;
+    if (!stripComposeEditorAnchor(editor.innerText).trim()) ensureComposeEditorInsertionPoint();
+  }
+
+
+
+  // LibraMail 0.2.24 UI v12 — ancrage réel pour l'éditeur WebKitGTK
+  function activateComposeEditor() {
+    const editor = composeEditorElement();
+    if (!editor) return null;
+    editor.setAttribute('contenteditable', 'true');
+    editor.setAttribute('tabindex', '0');
+    editor.removeAttribute('inert');
+    editor.removeAttribute('aria-disabled');
+    editor.style.pointerEvents = 'auto';
+    editor.style.userSelect = 'text';
+    return editor;
+  }
+
+  function composeEditorHasVisibleContent(editor) {
+    return Boolean(stripComposeEditorAnchor(editor?.innerText || '').trim());
+  }
+
+  function ensureComposeEditorInsertionPoint() {
+    const editor = activateComposeEditor();
+    if (!editor) return null;
+
+    // WebKitGTK peut considérer un contenteditable vide, <br> ou <p><br></p>
+    // comme éditable dans le DOM tout en refusant toute saisie. Un vrai nœud
+    // texte invisible fournit un point d'insertion stable.
+    if (!composeEditorHasVisibleContent(editor)) {
+      let anchor = editor.querySelector('[data-compose-editor-anchor]');
+      if (!anchor) {
+        editor.innerHTML = '';
+        anchor = document.createElement('div');
+        anchor.dataset.composeEditorAnchor = 'true';
+        anchor.append(document.createTextNode(COMPOSE_EDITOR_ANCHOR));
+        editor.append(anchor);
+      } else if (!anchor.firstChild) {
+        anchor.append(document.createTextNode(COMPOSE_EDITOR_ANCHOR));
+      }
+    }
+    return editor;
+  }
+
+  function composeEditorAnchorNode(editor) {
+    const anchor = editor?.querySelector('[data-compose-editor-anchor]') || editor?.firstChild;
+    if (!anchor) return null;
+    if (anchor.nodeType === Node.TEXT_NODE) return anchor;
+    if (!anchor.firstChild) anchor.append(document.createTextNode(COMPOSE_EDITOR_ANCHOR));
+    return anchor.firstChild;
+  }
+
+  function resetComposeViewport() {
+    const modal = document.querySelector('#compose-modal .compose-modal-box');
+    const body = document.querySelector('#compose-modal .compose-modal-body');
+    if (modal) modal.scrollTop = 0;
+    if (body) body.scrollTop = 0;
+  }
+
+  function focusComposeEditorAtStart({ scroll = true } = {}) {
+    const editor = ensureComposeEditorInsertionPoint();
+    const selection = editor?.ownerDocument?.getSelection?.() || window.getSelection?.();
+    if (!editor) return;
+
+    editor.focus({ preventScroll: true });
+    try {
+      const node = composeEditorAnchorNode(editor);
+      const range = document.createRange();
+      if (node?.nodeType === Node.TEXT_NODE) {
+        // Après le caractère d'ancrage : la frappe s'insère réellement dans
+        // l'éditeur, sans que ce caractère ne soit envoyé dans le message.
+        range.setStart(node, node.nodeValue?.length || 0);
+      } else {
+        range.setStart(editor, 0);
+      }
+      range.collapse(true);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      composeSavedSelection = range.cloneRange();
+    } catch {
+      editor.focus();
+    }
+
+    if (scroll) {
+      try { editor.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'auto' }); } catch {}
+    }
+  }
+
+  function prepareComposeEditorForMode(mode = composeMode) {
+    const editor = ensureComposeEditorInsertionPoint();
+    if (!editor) return;
+    resetComposeViewport();
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => focusComposeEditorAtStart({ scroll: true }));
+    });
+    setTimeout(() => focusComposeEditorAtStart({ scroll: true }), 120);
+  }
+
+  function maintainComposeEditorInsertionPoint() {
+    const editor = composeEditorElement();
+    if (!editor) return;
+    if (!composeEditorHasVisibleContent(editor)) {
+      ensureComposeEditorInsertionPoint();
+      focusComposeEditorAtStart({ scroll: false });
+    }
+  }
+
+  function focusComposeEditorFromQuote() {
+    focusComposeEditorAtStart({ scroll: true });
+  }
+
+  function rememberComposeSelection() {
+    const editor = composeEditorElement();
+    const selection = window.getSelection?.();
+    if (!editor || !selection || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    if (editor.contains(range.commonAncestorContainer)) composeSavedSelection = range.cloneRange();
+  }
+
+  function selectionBelongsToComposeEditor(range, editor = composeEditorElement()) {
+    return Boolean(range && editor && editor.contains(range.commonAncestorContainer));
+  }
+
+  function fallbackComposeRange(editor) {
+    const range = document.createRange();
+    const node = composeEditorAnchorNode(editor);
+    if (node?.nodeType === Node.TEXT_NODE) {
+      range.setStart(node, node.nodeValue?.length || 0);
+    } else {
+      range.selectNodeContents(editor);
+      range.collapse(false);
+    }
+    range.collapse(true);
+    return range;
+  }
+
+  function restoreComposeSelection() {
+    const editor = ensureComposeEditorInsertionPoint();
+    const selection = window.getSelection?.();
+    if (!editor || !selection) return null;
+
+    let range = null;
+    try {
+      if (selectionBelongsToComposeEditor(composeSavedSelection, editor)) {
+        range = composeSavedSelection.cloneRange();
+      } else if (selection.rangeCount && selectionBelongsToComposeEditor(selection.getRangeAt(0), editor)) {
+        range = selection.getRangeAt(0).cloneRange();
+      }
+    } catch {
+      composeSavedSelection = null;
+    }
+    if (!range) range = fallbackComposeRange(editor);
+
+    editor.focus({ preventScroll: true });
+    try {
+      selection.removeAllRanges();
+      selection.addRange(range);
+      composeSavedSelection = range.cloneRange();
+    } catch {
+      range = fallbackComposeRange(editor);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      composeSavedSelection = range.cloneRange();
+    }
+    return range;
+  }
+
+  function runComposeFormatCommand(command, value = null) {
+    const range = restoreComposeSelection();
+    if (!range) return false;
+    let result = false;
+    try { result = document.execCommand(command, false, value); } catch {}
+    rememberComposeSelection();
+    composeEditorElement()?.dispatchEvent(new Event('input', { bubbles: true }));
+    return result;
+  }
+
+  function removeInlineFormattingFromFragment(fragment) {
+    const inlineTags = new Set(['A', 'B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'SPAN', 'FONT']);
+    const elements = [...fragment.querySelectorAll('*')];
+    for (const element of elements) {
+      for (const attribute of [...element.attributes]) element.removeAttribute(attribute.name);
+    }
+    for (const element of elements.reverse()) {
+      if (!inlineTags.has(element.tagName) || !element.parentNode) continue;
+      const parent = element.parentNode;
+      while (element.firstChild) parent.insertBefore(element.firstChild, element);
+      parent.removeChild(element);
+    }
+    return fragment;
+  }
+
+  function clearComposeFormatting() {
+    const editor = ensureComposeEditorInsertionPoint();
+    const range = restoreComposeSelection();
+    const selection = window.getSelection?.();
+    if (!editor || !range || !selection) return;
+
+    if (range.collapsed) {
+      try { document.execCommand('removeFormat', false, null); } catch {}
+      try { document.execCommand('unlink', false, null); } catch {}
+      rememberComposeSelection();
+      return;
+    }
+
+    const fragment = removeInlineFormattingFromFragment(range.extractContents());
+    const insertedNodes = [...fragment.childNodes];
+    range.insertNode(fragment);
+
+    if (insertedNodes.length) {
+      const cleanRange = document.createRange();
+      cleanRange.setStartBefore(insertedNodes[0]);
+      cleanRange.setEndAfter(insertedNodes[insertedNodes.length - 1]);
+      selection.removeAllRanges();
+      selection.addRange(cleanRange);
+      composeSavedSelection = cleanRange.cloneRange();
+    } else {
+      composeSavedSelection = fallbackComposeRange(editor);
+    }
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function insertComposeTextAtSelection(value) {
+    const text = String(value || '');
+    if (!text) return;
+    const editor = ensureComposeEditorInsertionPoint();
+    const range = restoreComposeSelection();
+    const selection = window.getSelection?.();
+    if (!editor || !range || !selection) return;
+
+    range.deleteContents();
+    const textNode = document.createTextNode(text);
+    range.insertNode(textNode);
+    range.setStartAfter(textNode);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    composeSavedSelection = range.cloneRange();
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function normalizeComposeLink(value) {
+    let url = String(value || '').trim();
+    if (!url) return '';
+    if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) url = `https://${url}`;
+    return /^(https?:|mailto:)/i.test(url) ? url : '';
+  }
+
+  function addComposeLink() {
+    restoreComposeSelection();
+    const selection = window.getSelection?.();
+    const selectedText = selection && !selection.isCollapsed ? selection.toString().trim() : '';
+    const proposed = selectedText.includes('@') ? `mailto:${selectedText}` : 'https://';
+    const url = normalizeComposeLink(window.prompt(t('compose.linkPrompt'), proposed));
+    if (!url) return;
+    if (selection && !selection.isCollapsed) {
+      runComposeFormatCommand('createLink', url);
+    } else {
+      runComposeFormatCommand('insertHTML', `<a href="${esc(url)}">${esc(url)}</a>`);
+    }
+  }
+
+  function setComposeEmojiPickerOpen(open) {
+    const picker = document.getElementById('compose-emoji-picker');
+    const button = document.getElementById('btn-compose-emoji');
+    if (!picker) return;
+    picker.classList.toggle('hidden', !open);
+    picker.classList.toggle('open', Boolean(open));
+    picker.setAttribute('aria-hidden', open ? 'false' : 'true');
+    button?.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  function toggleComposeEmojiPicker() {
+    const picker = document.getElementById('compose-emoji-picker');
+    setComposeEmojiPickerOpen(!picker?.classList.contains('open'));
+  }
+
+  function insertComposeEmoji(emoji) {
+    insertComposeTextAtSelection(emoji);
+    setComposeEmojiPickerOpen(false);
+  }
+  function closeComposeContactPicker() {
+    document.getElementById('compose-contact-picker-modal')?.classList.remove('open');
+  }
+
+  function contactEmailRows(contacts) {
+    const rows = [];
+    const seen = new Set();
+    for (const contact of contacts || []) {
+      const candidates = Array.isArray(contact?.emails)
+        ? contact.emails.map(item => typeof item === 'string' ? item : item?.email)
+        : [];
+      candidates.push(contact?.primaryEmail, contact?.email);
+      for (const candidate of candidates) {
+        const email = String(candidate || '').trim();
+        const key = normalizeRecipientAddress(email);
+        if (!email.includes('@') || !key || seen.has(key)) continue;
+        seen.add(key);
+        rows.push({
+          email,
+          displayName: String(contact?.displayName || contact?.firstName || contact?.lastName || '').trim(),
+          company: String(contact?.company || '').trim(),
+          avatarData: contact?.avatarData || '',
+          favorite: Boolean(contact?.favorite),
+          trusted: Boolean(contact?.trusted),
+        });
+      }
+    }
+    return rows.sort((left, right) =>
+      (left.displayName || left.email).localeCompare(right.displayName || right.email, I18N.locale));
+  }
+
+  function renderComposeContactPicker() {
+    const list = document.getElementById('compose-contact-picker-list');
+    const empty = document.getElementById('compose-contact-picker-empty');
+    if (!list || !empty) return;
+    const query = String(document.getElementById('compose-contact-search')?.value || '').trim().toLocaleLowerCase(I18N.locale);
+    const filtered = composeContactPickerRows
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => !query || [row.displayName, row.email, row.company]
+        .some(value => String(value || '').toLocaleLowerCase(I18N.locale).includes(query)));
+
+    list.innerHTML = filtered.map(({ row, index }) => `
+      <label class="compose-contact-picker-row">
+        <input type="checkbox" data-compose-contact-index="${index}">
+        <span class="compose-contact-picker-avatar">${esc(contactInitials(row))}</span>
+        <span class="compose-contact-picker-main"><strong>${esc(row.displayName || row.email)}</strong><span>${esc(row.email)}${row.company ? ` · ${esc(row.company)}` : ''}</span></span>
+        <span class="compose-contact-picker-meta">${row.favorite ? '<i class="fa-solid fa-star"></i>' : ''}${row.trusted ? '<i class="fa-solid fa-shield-halved"></i>' : ''}</span>
+      </label>`).join('');
+    empty.classList.toggle('hidden', filtered.length > 0);
+    list.classList.toggle('hidden', filtered.length === 0);
+  }
+
+  async function openComposeContactPicker(targetInputId = 'compose-to') {
+    composeContactPickerTarget = ['compose-to', 'compose-cc', 'compose-bcc'].includes(targetInputId)
+      ? targetInputId
+      : 'compose-to';
+    const target = document.getElementById('compose-contact-target');
+    const search = document.getElementById('compose-contact-search');
+    const list = document.getElementById('compose-contact-picker-list');
+    if (target) target.value = composeContactPickerTarget;
+    if (search) search.value = '';
+    if (list) list.innerHTML = `<div class="compose-contact-picker-loading"><i class="fa-solid fa-circle-notch fa-spin"></i>${esc(t('compose.addressBookLoading'))}</div>`;
+    document.getElementById('compose-contact-picker-empty')?.classList.add('hidden');
+    openModal('compose-contact-picker-modal');
+    try {
+      const result = await rpc('contacts.list', { limit: 1000 });
+      composeContactPickerRows = contactEmailRows(Array.isArray(result?.rows) ? result.rows : []);
+      renderComposeContactPicker();
+      setTimeout(() => search?.focus(), 0);
+    } catch (error) {
+      composeContactPickerRows = [];
+      renderComposeContactPicker();
+      status(`${t('error')} : ${error.message}`, 'error');
+    }
+  }
+
+  function addSelectedComposeContacts() {
+    const targetId = document.getElementById('compose-contact-target')?.value || composeContactPickerTarget;
+    const input = document.getElementById(targetId);
+    if (!input) return;
+    const selected = [...document.querySelectorAll('#compose-contact-picker-list [data-compose-contact-index]:checked')]
+      .map(checkbox => composeContactPickerRows[Number(checkbox.dataset.composeContactIndex)])
+      .filter(Boolean);
+    if (!selected.length) {
+      status(t('compose.addressBookNoneSelected'), 'info');
+      return;
+    }
+    const existingAddresses = new Set(parseAddressText(input.value)
+      .map(item => normalizeRecipientAddress(item.address))
+      .filter(Boolean));
+    const additions = [];
+    for (const row of selected) {
+      const key = normalizeRecipientAddress(row.email);
+      if (!key || existingAddresses.has(key)) continue;
+      existingAddresses.add(key);
+      additions.push(formatRecipientAddress({ name: row.displayName, address: row.email }));
+    }
+    if (!additions.length) {
+      status(t('compose.addressBookAlreadyPresent'), 'info');
+      return;
+    }
+    const current = String(input.value || '').trim().replace(/[\s,;]+$/, '');
+    input.value = [current, ...additions].filter(Boolean).join(', ') + ', ';
+    closeComposeContactPicker();
+    input.focus();
+    status(t('compose.addressBookAdded', { count: additions.length }), 'success');
   }
 
   function buildOutgoingMessage() {
@@ -3770,7 +4295,8 @@ const App = (() => {
     const profile = signatureProfile(accountId);
     const useSignature = !document.getElementById('compose-use-signature').disabled
       && document.getElementById('compose-use-signature').checked;
-    const body = document.getElementById('compose-body').value.trimEnd();
+    const body = composeEditorText();
+    const bodyHtml = composeEditorHtml();
     const signatureText = useSignature ? signaturePlainText(profile) : '';
     const position = composePosition(profile);
     const textParts = [body];
@@ -3783,67 +4309,305 @@ const App = (() => {
       textParts.push(signatureText);
     }
 
-    const text = textParts.filter(Boolean).join('\n\n');
-    let html;
-    if (useSignature && profile.format === 'html') {
-      const bodyHtml = `<div class="libramail-body" style="white-space:pre-wrap">${esc(body).replaceAll('\n', '<br>')}</div>`;
-      const quoteHtml = composeQuoteText
-        ? `<blockquote style="margin:16px 0;padding-left:12px;border-left:3px solid #bbb;white-space:pre-wrap">${esc(composeQuoteText).replaceAll('\n', '<br>')}</blockquote>`
-        : '';
-      const sigHtml = signatureHtml(profile);
-      const htmlParts = [bodyHtml];
-      if (quoteHtml) {
-        if (position === 'above') htmlParts.push(sigHtml);
-        htmlParts.push(quoteHtml);
-        if (position === 'below') htmlParts.push(sigHtml);
-      } else {
-        htmlParts.push(sigHtml);
-      }
-      html = htmlParts.filter(Boolean).join('<br>');
+    const text = textParts.filter(part => String(part || '').trim()).join('\n\n');
+    const bodyHtmlBlock = bodyHtml ? `<div class="libramail-body">${bodyHtml}</div>` : '';
+    const quoteHtml = composeQuoteText
+      ? `<blockquote style="margin:16px 0;padding-left:12px;border-left:3px solid #bbb;white-space:pre-wrap">${esc(composeQuoteText).replaceAll('\n', '<br>')}</blockquote>`
+      : '';
+    const sigHtml = useSignature ? signatureHtml(profile) : '';
+    const htmlParts = [bodyHtmlBlock];
+
+    if (quoteHtml) {
+      if (useSignature && position === 'above') htmlParts.push(sigHtml);
+      htmlParts.push(quoteHtml);
+      if (useSignature && position === 'below') htmlParts.push(sigHtml);
+    } else if (useSignature) {
+      htmlParts.push(sigHtml);
     }
 
+    const html = htmlParts.filter(Boolean).join('<br>') || undefined;
     return { text, html, accountId };
   }
 
-  async function attachFile() {
-    const paths = await Neutralino.os.showOpenDialog(t('compose.attach'), { multiSelections: true });
-    for (const filePath of paths || []) {
-      const filename = filePath.split(/[\\/]/).pop();
-      composeAttachments.push({ filename, path: filePath });
-      const chip = document.createElement('span');
-      chip.className = 'att-chip';
-      chip.innerHTML = `<i class="fa-solid fa-paperclip"></i>${esc(filename)}`;
-      document.getElementById('compose-attachments').appendChild(chip);
+  function renderComposeAttachments() {
+    const container = document.getElementById('compose-attachments');
+    if (!container) return;
+    container.innerHTML = composeAttachments.map(attachment =>
+      `<span class="att-chip"><i class="fa-solid fa-paperclip"></i>${esc(attachment.filename || attachment.path || '')}</span>`
+    ).join('');
+  }
+
+  function composeState() {
+    return {
+      accountId: document.getElementById('compose-from').value,
+      to: document.getElementById('compose-to').value,
+      cc: document.getElementById('compose-cc').value,
+      bcc: document.getElementById('compose-bcc').value,
+      subject: document.getElementById('compose-subject').value,
+      body: composeEditorText(),
+      bodyHtml: composeEditorHtml(),
+      mode: composeMode,
+      quoteText: composeQuoteText,
+      replyHeaders: composeReplyHeaders,
+      useSignature: document.getElementById('compose-use-signature').checked,
+      readReceipt: document.getElementById('compose-read-receipt').checked,
+      deliveryReceipt: document.getElementById('compose-delivery-receipt').checked,
+      attachments: composeAttachments.map(item => ({ ...item })),
+    };
+  }
+
+  function composeEnvelope() {
+    const outgoing = buildOutgoingMessage();
+    return {
+      accountId: outgoing.accountId,
+      mail: {
+        to: document.getElementById('compose-to').value,
+        cc: document.getElementById('compose-cc').value || undefined,
+        bcc: document.getElementById('compose-bcc').value || undefined,
+        subject: document.getElementById('compose-subject').value,
+        text: outgoing.text,
+        html: outgoing.html,
+        readReceipt: document.getElementById('compose-read-receipt').checked,
+        deliveryReceipt: document.getElementById('compose-delivery-receipt').checked,
+        inReplyTo: composeReplyHeaders?.inReplyTo,
+        references: composeReplyHeaders?.references,
+        attachments: composeAttachments.map(item => ({ ...item })),
+      },
+    };
+  }
+
+  function composeContext() {
+    return { draftId: composeDraftId, scheduledId: composeScheduledId };
+  }
+
+  function setComposeContext({ draftId = null, scheduledId = null } = {}) {
+    composeDraftId = draftId ? Number(draftId) : null;
+    composeScheduledId = scheduledId ? Number(scheduledId) : null;
+  }
+
+  function loadComposeState(state = {}, context = {}) {
+    openCompose(null, state.mode || 'new');
+    setComposeContext(context);
+    const from = document.getElementById('compose-from');
+    if (state.accountId && [...from.options].some(option => option.value === String(state.accountId))) {
+      from.value = String(state.accountId);
     }
+    document.getElementById('compose-to').value = state.to || '';
+    document.getElementById('compose-cc').value = state.cc || '';
+    document.getElementById('compose-bcc').value = state.bcc || '';
+    document.getElementById('compose-subject').value = state.subject || '';
+    setComposeEditorContent({ html: state.bodyHtml || '', text: state.body || '' });
+    document.getElementById('compose-read-receipt').checked = Boolean(state.readReceipt);
+    document.getElementById('compose-delivery-receipt').checked = Boolean(state.deliveryReceipt);
+    composeMode = ['new', 'reply', 'reply-all', 'forward'].includes(state.mode) ? state.mode : 'new';
+    composeQuoteText = String(state.quoteText || '');
+    composeReplyHeaders = state.replyHeaders && typeof state.replyHeaders === 'object'
+      ? { ...state.replyHeaders }
+      : null;
+    composeAttachments = Array.isArray(state.attachments)
+      ? state.attachments.map(item => ({ ...item }))
+      : [];
+    document.getElementById('compose-quote-content').textContent = composeQuoteText;
+    renderComposeAttachments();
+    updateComposeSignature({ resetChoice: false });
+    const signature = document.getElementById('compose-use-signature');
+    if (!signature.disabled) signature.checked = state.useSignature !== false;
+    updateComposeSignature({ resetChoice: false });
+    if (context.scheduledId || context.sendAt) {
+      window.OutboxUI?.toggleScheduleControls?.(true);
+      const input = document.getElementById('compose-send-at');
+      if (input) input.value = window.OutboxUI?.localDateTimeValue?.(context.sendAt) || '';
+    }
+    prepareComposeEditorForMode(composeMode);
+  }
+
+  // LibraMail 0.2.24 UI v8 — sélecteur HTML fiable pour les pièces jointes
+  function composeAttachmentPathSeparator() {
+    return String(typeof NL_OS === 'undefined' ? '' : NL_OS) === 'Windows' ? '\\' : '/';
+  }
+
+  function composeAttachmentStorageDirectory() {
+    const separator = composeAttachmentPathSeparator();
+    const base = String(typeof NL_PATH === 'undefined' ? '.' : NL_PATH).replace(/[\\/]+$/, '');
+    return `${base}${separator}data${separator}compose-attachments`;
+  }
+
+  function joinComposeAttachmentPath(directory, filename) {
+    return `${String(directory || '').replace(/[\\/]+$/, '')}${composeAttachmentPathSeparator()}${filename}`;
+  }
+
+  function safeComposeAttachmentFilename(value) {
+    let filename = String(value || 'piece-jointe')
+      .replace(/[\u0000-\u001f<>:"/\\|?*]/g, '_')
+      .replace(/[. ]+$/g, '')
+      .trim();
+    if (!filename) filename = 'piece-jointe';
+    if (filename.length <= 160) return filename;
+    const dot = filename.lastIndexOf('.');
+    const extension = dot > 0 && filename.length - dot <= 16 ? filename.slice(dot) : '';
+    return `${filename.slice(0, 160 - extension.length)}${extension}`;
+  }
+
+  function composeAttachmentSourceKey(file) {
+    return [String(file?.name || ''), Number(file?.size) || 0, Number(file?.lastModified) || 0].join('\u0000');
+  }
+
+  function readComposeAttachmentFile(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (reader.result instanceof ArrayBuffer) resolve(reader.result);
+        else reject(new Error(t('compose.attachCopyError', { name: file?.name || '' })));
+      };
+      reader.onerror = () => reject(new Error(t('compose.attachCopyError', { name: file?.name || '' })));
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
+  async function copyComposeAttachmentFile(file, directory) {
+    const originalName = String(file?.name || 'piece-jointe');
+    const safeName = safeComposeAttachmentFilename(originalName);
+    const token = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const targetPath = joinComposeAttachmentPath(directory, `${token}-${safeName}`);
+    const content = await readComposeAttachmentFile(file);
+    await Neutralino.filesystem.writeBinaryFile(targetPath, content);
+    return {
+      filename: originalName,
+      path: targetPath,
+      sourceKey: composeAttachmentSourceKey(file),
+      managedCopy: true,
+      size: Number(file?.size) || 0,
+    };
+  }
+
+  async function importComposeAttachmentFiles(files) {
+    const selectedFiles = Array.from(files || []).filter(file => file && typeof file.name === 'string');
+    if (!selectedFiles.length) return;
+
+    const button = document.getElementById('btn-attach');
+    const existingSources = new Set(composeAttachments.map(item => String(item.sourceKey || '')).filter(Boolean));
+    const directory = composeAttachmentStorageDirectory();
+    let added = 0;
+    const failures = [];
+
+    if (button) button.disabled = true;
+    status(t('compose.attachPreparing'), 'busy');
+    try {
+      try { await Neutralino.filesystem.createDirectory(directory); } catch {}
+      for (const file of selectedFiles) {
+        const sourceKey = composeAttachmentSourceKey(file);
+        if (existingSources.has(sourceKey)) continue;
+        try {
+          const attachment = await copyComposeAttachmentFile(file, directory);
+          composeAttachments.push(attachment);
+          existingSources.add(sourceKey);
+          added++;
+        } catch (error) {
+          console.error('[LibraMail] Impossible de préparer la pièce jointe :', file?.name, error);
+          failures.push(String(file?.name || ''));
+        }
+      }
+      if (added) {
+        renderComposeAttachments();
+        reportAddedComposeAttachments(added);
+      }
+      if (failures.length) {
+        status(t('compose.attachCopyError', { name: failures[0] }), 'error');
+      } else if (!added) {
+        status(t('compose.attachAlreadyAdded'), 'info');
+      }
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  function normalizeComposeAttachmentPath(value) {
+    let filePath = String(value || '').trim();
+    if (!filePath) return '';
+    if (/^file:\/\//i.test(filePath)) {
+      try {
+        const url = new URL(filePath);
+        if (url.protocol !== 'file:') return '';
+        const host = url.hostname && url.hostname !== 'localhost' ? `//${url.hostname}` : '';
+        filePath = host + decodeURIComponent(url.pathname || '');
+        if (/^\/[A-Za-z]:\//.test(filePath)) filePath = filePath.slice(1);
+      } catch {
+        return '';
+      }
+    }
+    return filePath;
+  }
+
+  function addComposeAttachmentPaths(paths = []) {
+    const existing = new Set(composeAttachments.map(item => String(item.path || '')));
+    let added = 0;
+    for (const rawPath of paths || []) {
+      const filePath = normalizeComposeAttachmentPath(rawPath);
+      if (!filePath || existing.has(filePath)) continue;
+      const filename = filePath.split(/[\\/]/).pop() || filePath;
+      composeAttachments.push({ filename, path: filePath });
+      existing.add(filePath);
+      added++;
+    }
+    if (added) renderComposeAttachments();
+    return added;
+  }
+
+  function reportAddedComposeAttachments(count) {
+    if (count > 0) status(t('compose.attachAdded', { count }), 'success');
+  }
+
+  function attachFile() {
+    const picker = document.getElementById('compose-file-picker');
+    if (!picker) {
+      status(t('compose.attachPickerMissing'), 'error');
+      return;
+    }
+    picker.value = '';
+    picker.click();
   }
 
   async function send() {
     const button = document.getElementById('btn-send');
     button.disabled = true;
     try {
-      const outgoing = buildOutgoingMessage();
+      const envelope = composeEnvelope();
+      const schedule = document.getElementById('compose-send-later')?.checked === true;
+      if (schedule) {
+        const rawDate = document.getElementById('compose-send-at')?.value || '';
+        const sendAt = new Date(rawDate).getTime();
+        if (!Number.isFinite(sendAt) || sendAt <= Date.now()) {
+          throw new Error(t('scheduled.futureDateRequired'));
+        }
+        const saved = await rpc('scheduled.save', {
+          id: composeScheduledId,
+          accountId: envelope.accountId,
+          mail: envelope.mail,
+          state: composeState(),
+          sendAt,
+          removeDraftId: composeDraftId,
+        });
+        composeScheduledId = saved?.item?.id || null;
+        composeDraftId = null;
+        closeModals();
+        status(`✓ ${t('scheduled.saved')}`, 'success');
+        window.OutboxUI?.refresh?.();
+        return;
+      }
       const result = await rpc('mail.send', {
-        accountId: outgoing.accountId,
-        mail: {
-          to: document.getElementById('compose-to').value,
-          cc: document.getElementById('compose-cc').value || undefined,
-          bcc: document.getElementById('compose-bcc').value || undefined,
-          subject: document.getElementById('compose-subject').value,
-          text: outgoing.text,
-          html: outgoing.html,
-          readReceipt: document.getElementById('compose-read-receipt').checked,
-          deliveryReceipt: document.getElementById('compose-delivery-receipt').checked,
-          inReplyTo: composeReplyHeaders?.inReplyTo,
-          references: composeReplyHeaders?.references,
-          attachments: composeAttachments,
-        },
+        ...envelope,
+        draftId: composeDraftId,
+        scheduledId: composeScheduledId,
       });
+      composeDraftId = null;
+      composeScheduledId = null;
       closeModals();
       status(result.sentCopyWarning
         ? t('compose.sentCopyWarning')
         : '✓ ' + t('compose.sent'), result.sentCopyWarning ? 'error' : 'success');
       refreshSidebarCounts().catch(() => {});
-      if (view.type === 'sent') refresh().catch(() => {});
+      window.OutboxUI?.refresh?.();
+      if (['sent', 'unified', 'account'].includes(view.type)) refresh({ preserveListState: true }).catch(() => {});
     } catch (error) {
       alert(`${t('error')} : ${error.message}`);
     } finally {
@@ -4123,12 +4887,14 @@ const App = (() => {
 
   // ---------- Contenus distants ----------
   function remoteTypeIcon(type) {
+    if (type === 'link') return 'fa-solid fa-link';
     if (type === 'background') return 'fa-solid fa-panorama';
     if (type === 'stylesheet') return 'fa-solid fa-paintbrush';
     return 'fa-regular fa-image';
   }
 
   function remoteTypeLabel(type) {
+    if (type === 'link') return t('remote.type.link');
     if (type === 'background') return t('remote.type.background');
     if (type === 'stylesheet') return t('remote.type.stylesheet');
     return t('remote.type.image');
@@ -4318,7 +5084,7 @@ const App = (() => {
 
   // ---------- Mise à jour et À propos ----------
   function appVersion() {
-    return String(window.NL_APPVERSION || '0.2.23').replace(/^v/i, '');
+    return String(window.NL_APPVERSION || '0.2.24').replace(/^v/i, '');
   }
 
   function compareVersions(a, b) {
@@ -4837,6 +5603,7 @@ const App = (() => {
       };
     });
     openModal('settings-modal');
+    refreshSpamRuleSettings().catch(error => status(error.message, 'error'));
   }
 
   async function applySetting(key, value) {
@@ -5260,6 +6027,68 @@ const App = (() => {
     document.getElementById('btn-confirm-exit').onclick = shutdownEngineAndExit;
     document.getElementById('btn-send').onclick = send;
     document.getElementById('btn-attach').onclick = attachFile;
+    document.getElementById('compose-file-picker')?.addEventListener('change', async event => {
+      const input = event.currentTarget;
+      try {
+        await importComposeAttachmentFiles(input.files);
+      } catch (error) {
+        status(`${t('error')} : ${error.message}`, 'error');
+      } finally {
+        input.value = '';
+      }
+    });
+    const composeEditor = composeEditorElement();
+    ['mouseup', 'keyup', 'focus'].forEach(eventName => {
+      composeEditor?.addEventListener(eventName, rememberComposeSelection);
+    });
+    composeEditor?.addEventListener('pointerdown', ensureComposeEditorInsertionPoint);
+    composeEditor?.addEventListener('input', () => {
+      maintainComposeEditorInsertionPoint();
+      rememberComposeSelection();
+    });
+    document.querySelector('.compose-editor-resize-shell')?.addEventListener('click', event => {
+      if (event.target === event.currentTarget) focusComposeEditorAtStart({ scroll: false });
+    });
+    // La citation est en lecture seule. Un clic dessus ramène désormais à la
+    // vraie zone de réponse, au lieu de laisser croire que le compositeur est bloqué.
+    document.getElementById('compose-quote-block')?.addEventListener('click', focusComposeEditorFromQuote);
+    document.querySelectorAll('[data-compose-command]').forEach(button => {
+      button.addEventListener('mousedown', event => {
+        rememberComposeSelection();
+        event.preventDefault();
+      });
+      button.addEventListener('click', () => {
+        if (button.dataset.composeCommand === 'removeFormat') clearComposeFormatting();
+        else runComposeFormatCommand(button.dataset.composeCommand);
+      });
+    });
+    document.getElementById('btn-compose-link')?.addEventListener('mousedown', event => {
+      rememberComposeSelection();
+      event.preventDefault();
+    });
+    document.getElementById('btn-compose-link')?.addEventListener('click', addComposeLink);
+    document.getElementById('btn-compose-emoji')?.addEventListener('mousedown', event => {
+      rememberComposeSelection();
+      event.preventDefault();
+    });
+    document.getElementById('btn-compose-emoji')?.addEventListener('click', toggleComposeEmojiPicker);
+    document.querySelectorAll('[data-compose-emoji]').forEach(button => {
+      button.addEventListener('mousedown', event => event.preventDefault());
+      button.addEventListener('click', () => insertComposeEmoji(button.dataset.composeEmoji));
+    });
+    document.querySelectorAll('[data-compose-contact-target]').forEach(button => {
+      button.addEventListener('click', () => openComposeContactPicker(button.dataset.composeContactTarget));
+    });
+    document.getElementById('compose-contact-search')?.addEventListener('input', renderComposeContactPicker);
+    document.getElementById('compose-contact-target')?.addEventListener('change', event => {
+      composeContactPickerTarget = event.target.value;
+    });
+    document.getElementById('btn-add-compose-contacts')?.addEventListener('click', addSelectedComposeContacts);
+    document.getElementById('btn-close-compose-contact-picker')?.addEventListener('click', closeComposeContactPicker);
+    document.getElementById('btn-cancel-compose-contact-picker')?.addEventListener('click', closeComposeContactPicker);
+    document.addEventListener('mousedown', event => {
+      if (!event.target.closest('.compose-emoji-wrap')) setComposeEmojiPickerOpen(false);
+    });
     document.getElementById('compose-from').onchange = () => updateComposeSignature({ resetChoice: true });
     document.getElementById('compose-use-signature').onchange = () => updateComposeSignature();
     document.getElementById('btn-toggle-accounts').onclick = () => toggleSidebarSection('accounts');
@@ -5317,6 +6146,13 @@ const App = (() => {
     document.getElementById('contacts-group-filter').onchange = () => loadContacts().catch(() => {});
     document.getElementById('btn-settings').onclick = openSettings;
     document.getElementById('btn-add-spam-rule')?.addEventListener('click', addSpamRuleFromSettings);
+    const collectedSpamDetails = document.querySelector('.spam-collected-box');
+    const collectedSpamSummary = collectedSpamDetails?.querySelector('summary');
+    collectedSpamSummary?.addEventListener('click', event => {
+      event.preventDefault();
+      collectedSpamDetails.open = !collectedSpamDetails.open;
+      if (collectedSpamDetails.open) refreshSpamRuleSettings().catch(error => status(error.message, 'error'));
+    });
     document.getElementById('btn-export-backup').onclick = exportCompleteBackup;
     document.getElementById('btn-import-backup').onclick = importCompleteBackup;
     document.getElementById('btn-allow-remote').onclick = openRemoteContentDialog;
@@ -5566,10 +6402,21 @@ const App = (() => {
   });
 
   return {
+    rpc,
+    status,
+    closeModals,
+    openCompose,
+    composeState,
+    composeEnvelope,
+    composeContext,
+    setComposeContext,
+    loadComposeState,
+    refreshSpamRuleSettings,
     openExternal,
     previewExternalTarget,
     clearExternalTarget,
     get config() { return config; },
+    get accounts() { return accounts.map(account => ({ ...account })); },
     accountColor: id => accounts.find(account => account.id === id)?.color || 'var(--fg-faint)',
     accountEmail: id => accounts.find(account => account.id === id)?.email || '',
     accountName: id => accounts.find(account => account.id === id)?.displayName || accounts.find(account => account.id === id)?.email || '',

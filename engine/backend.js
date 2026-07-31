@@ -14,12 +14,13 @@ const db = require('./lib/db');
 const imap = require('./lib/imap');
 const smtp = require('./lib/smtp');
 const spam = require('./lib/spam');
+const outbox = require('./lib/outbox');
 const backup = require('./lib/backup');
 const iconCache = require('./lib/icon_cache');
 const nativeDialog = require('./lib/native_dialog');
 
 const PORT = 47800;
-const APP_VERSION = '0.2.23';
+const APP_VERSION = '0.2.24';
 const ROOT = path.resolve(__dirname, '..');
 const DATA = path.join(ROOT, 'data');
 const ACCOUNTS_FILE = path.join(DATA, 'accounts.json');
@@ -27,6 +28,7 @@ const CONFIG_FILE = path.join(DATA, 'config.json');
 const BACKUPS_DIR = path.join(ROOT, 'backups');
 const RESTORE_STATE_FILE = path.join(ROOT, '.libramail-restore-state.json');
 const RETENTION_CHECK_MS = 6 * 60 * 60 * 1000;
+const OUTBOX_CHECK_MS = 30 * 1000;
 const RUNTIME_DATA_FILES = new Set(['engine.log', 'engine.stdout.log', 'engine.stderr.log']);
 
 function isRuntimeDataFile(name) {
@@ -68,6 +70,7 @@ function recoverInterruptedRestore() {
 
 recoverInterruptedRestore();
 db.init(DATA);
+outbox.init(db.db, DATA);
 
 function loadJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
@@ -192,6 +195,8 @@ const syncControllers = new Map();
 let activeSyncBatch = null;
 const activeCleanups = new Map();
 let retentionTimer = null;
+let scheduledSendTimer = null;
+let scheduledSendBusy = false;
 let shuttingDown = false;
 let maintenanceOperation = null;
 let startupSyncTriggered = false;
@@ -457,7 +462,7 @@ function resolveSelection(items) {
   return db.getMessagesByIds([...messageIds]);
 }
 
-async function setMessageSpamState(message, isSpam) {
+async function setMessageSpamState(message, isSpam, { persistSenderRule = false } = {}) {
   if (!message) return false;
   const decision = db.spamRuleDecision(message.from_addr);
   if (isSpam && (decision?.action === 'allow' || db.isTrustedEmail(message.from_addr))) {
@@ -482,9 +487,68 @@ async function setMessageSpamState(message, isSpam) {
       isSpam: wanted,
     });
   }
+  if (persistSenderRule && String(message.from_addr || '').trim()) {
+    const senderAddress = String(message.from_addr).trim().toLowerCase();
+    const automaticRulePrefix = 'LibraMail:manual-spam:';
+    const rules = db.listSpamRules();
+    const existingRule = rules.find(rule =>
+      rule.kind === 'email' && String(rule.value || '').toLowerCase() === senderAddress
+    );
+    if (isSpam) {
+      let rule = existingRule;
+      const isExistingAutomatic = String(existingRule?.notes || '').startsWith(automaticRulePrefix);
+      if (!existingRule || existingRule.action !== 'block' || isExistingAutomatic) {
+        const previous = existingRule && !isExistingAutomatic
+          ? {
+              action: existingRule.action,
+              label: existingRule.label || '',
+              notes: existingRule.notes || '',
+            }
+          : null;
+        const encodedPrevious = Buffer.from(JSON.stringify(previous), 'utf8').toString('base64');
+        rule = db.saveSpamRule({
+          kind: 'email',
+          value: senderAddress,
+          action: 'block',
+          label: 'Déclaration manuelle',
+          notes: automaticRulePrefix + encodedPrevious,
+        });
+      }
+      const changed = db.applySpamRuleToExistingMessages(rule);
+      broadcast('spam.rules.updated', { rule, changed, automatic: true });
+    } else {
+      const automaticRule = existingRule &&
+        existingRule.action === 'block' &&
+        String(existingRule.notes || '').startsWith(automaticRulePrefix)
+        ? existingRule
+        : null;
+      if (automaticRule) {
+        const encodedPrevious = String(automaticRule.notes).slice(automaticRulePrefix.length);
+        let previous = null;
+        try {
+          previous = JSON.parse(Buffer.from(encodedPrevious, 'base64').toString('utf8'));
+        } catch {}
+        db.removeSpamRule(automaticRule.id);
+        let restoredRule = null;
+        if (previous && ['allow', 'block'].includes(previous.action)) {
+          restoredRule = db.saveSpamRule({
+            kind: 'email',
+            value: senderAddress,
+            action: previous.action,
+            label: previous.label || '',
+            notes: previous.notes || '',
+          });
+        }
+        broadcast('spam.rules.updated', {
+          removedId: automaticRule.id,
+          restoredRule,
+          automatic: true,
+        });
+      }
+    }
+  }
   return true;
 }
-
 async function resolveSenderIconsForEmails(emails = []) {
   const unique = [...new Set((Array.isArray(emails) ? emails : [])
     .map(value => String(value || '').trim().toLowerCase())
@@ -665,6 +729,8 @@ function stopAccountRuntime() {
   syncTimers.clear();
   if (retentionTimer) clearInterval(retentionTimer);
   retentionTimer = null;
+  if (scheduledSendTimer) clearInterval(scheduledSendTimer);
+  scheduledSendTimer = null;
   imap.stopAllWatches?.();
 }
 
@@ -680,6 +746,10 @@ function startAccountRuntime({ resolveFolders = false } = {}) {
   retentionTimer = setInterval(() => cleanupAllExpiredSpam({ silent: true }).catch(() => {}), RETENTION_CHECK_MS);
   retentionTimer.unref?.();
   setTimeout(() => cleanupAllExpiredSpam({ silent: true }).catch(() => {}), 8000).unref?.();
+  if (scheduledSendTimer) clearInterval(scheduledSendTimer);
+  scheduledSendTimer = setInterval(() => processScheduledMessages().catch(() => {}), OUTBOX_CHECK_MS);
+  scheduledSendTimer.unref?.();
+  setTimeout(() => processScheduledMessages().catch(() => {}), 1500).unref?.();
 }
 
 function backupTimestamp(date = new Date()) {
@@ -822,6 +892,7 @@ async function importCompleteBackup(sourcePath) {
     moveDataContents(extracted.dataDir, DATA);
 
     db.init(DATA);
+outbox.init(db.db, DATA);
     databaseClosed = false;
     loadRuntimeState();
     broadcast('backup.progress', { kind: 'import', step: 'apply', completed: 1, total: 1, name: '' });
@@ -849,6 +920,7 @@ async function importCompleteBackup(sourcePath) {
         moveDataContents(rollbackRoot, DATA);
       }
       db.init(DATA);
+outbox.init(db.db, DATA);
       databaseClosed = false;
       loadRuntimeState();
     } catch (rollbackError) {
@@ -941,6 +1013,63 @@ async function checkLatestRelease() {
     };
   } finally {
     clearTimeout(timer);
+  }
+}
+
+async function sendMailNow(accountId, mail) {
+  const account = getAccount(accountId || config.defaultAccountId);
+  if (!account) throw new Error('Aucun compte expéditeur');
+  const sent = await smtp.send(account, mail);
+  const folders = await ensureFolderMap(account).catch(() => account.folderMap || {});
+  let savedToSent = false;
+  let sentCopyWarning = null;
+  if (folders.sent && sent.raw) {
+    try {
+      const appended = await imap.appendSentCopy(account, folders.sent, sent.raw, sent.messageId);
+      savedToSent = appended.appended || appended.reason === 'already-present';
+      await imap.syncFolder(account, folders.sent, DATA, null, { role: 'sent' });
+    } catch (error) {
+      sentCopyWarning = error.message;
+      broadcast('sent.copy.error', { accountId: account.id, error: error.message });
+    }
+  }
+  return {
+    messageId: sent.messageId,
+    accepted: sent.accepted,
+    rejected: sent.rejected,
+    savedToSent,
+    sentCopyWarning,
+  };
+}
+
+async function processScheduledMessages() {
+  if (scheduledSendBusy || maintenanceOperation || shuttingDown) return;
+  scheduledSendBusy = true;
+  try {
+    let item;
+    while ((item = outbox.claimDue(Date.now()))) {
+      try {
+        const result = await sendMailNow(item.accountId, item.mail || {});
+        outbox.remove(item.id, 'scheduled');
+        broadcast('scheduled.sent', {
+          id: item.id,
+          accountId: item.accountId,
+          subject: item.subject,
+          ...result,
+        });
+      } catch (error) {
+        outbox.markFailed(item.id, error.message);
+        broadcast('scheduled.failed', {
+          id: item.id,
+          accountId: item.accountId,
+          subject: item.subject,
+          error: error.message,
+        });
+      }
+      broadcast('outbox.updated', outbox.counts());
+    }
+  } finally {
+    scheduledSendBusy = false;
   }
 }
 
@@ -1238,7 +1367,7 @@ const methods = {
   'messages.markSpam': async ({ id, isSpam }) => {
     const message = db.getMessage(id);
     if (!message) throw new Error('Message introuvable');
-    await setMessageSpamState(message, Boolean(isSpam));
+    await setMessageSpamState(message, Boolean(isSpam), { persistSenderRule: Boolean(isSpam) });
     return spam.stats();
   },
   'messages.batchSetFlag': async ({ items, flag, value }) => {
@@ -1265,7 +1394,7 @@ const methods = {
         continue;
       }
       try {
-        await setMessageSpamState(message, Boolean(isSpam));
+        await setMessageSpamState(message, Boolean(isSpam), { persistSenderRule: Boolean(isSpam) });
         processed++;
       } catch (error) {
         errors.push({ id: message.id, error: error.message });
@@ -1418,33 +1547,58 @@ const methods = {
     return { saved: targetPath, size: attachment.size };
   },
 
-  // ---------- Envoi ----------
-  'mail.send': async ({ accountId, mail }) => {
-    const account = getAccount(accountId || config.defaultAccountId);
-    if (!account) throw new Error('Aucun compte expéditeur');
-    const sent = await smtp.send(account, mail);
-    const folders = await ensureFolderMap(account).catch(() => account.folderMap || {});
-    let savedToSent = false;
-    let sentCopyWarning = null;
-
-    if (folders.sent && sent.raw) {
-      try {
-        const appended = await imap.appendSentCopy(account, folders.sent, sent.raw, sent.messageId);
-        savedToSent = appended.appended || appended.reason === 'already-present';
-        await imap.syncFolder(account, folders.sent, DATA, null, { role: 'sent' });
-      } catch (error) {
-        sentCopyWarning = error.message;
-        broadcast('sent.copy.error', { accountId: account.id, error: error.message });
-      }
+  // ---------- Brouillons et envois différés ----------
+  'outbox.counts': async () => outbox.counts(),
+  'outbox.list': async ({ kind }) => ({ items: outbox.list(kind), counts: outbox.counts() }),
+  'outbox.get': async ({ id, kind }) => outbox.get(id, kind),
+  'outbox.remove': async ({ id, kind }) => {
+    const removed = outbox.remove(id, kind);
+    const counts = outbox.counts();
+    broadcast('outbox.updated', counts);
+    return { removed, counts };
+  },
+  'drafts.save': async ({ id = null, state, removeScheduledId = null }) => {
+    const item = outbox.saveDraft({ id, state, removeScheduledId });
+    const counts = outbox.counts();
+    broadcast('outbox.updated', counts);
+    return { item, counts };
+  },
+  'scheduled.save': async ({ id = null, accountId, state, mail, sendAt, removeDraftId = null }) => {
+    const item = outbox.saveScheduled({ id, accountId, state, mail, sendAt, removeDraftId });
+    const counts = outbox.counts();
+    broadcast('outbox.updated', counts);
+    return { item, counts };
+  },
+  'scheduled.sendNow': async ({ id }) => {
+    const item = outbox.claim(id);
+    if (!item) throw new Error('Envoi différé introuvable ou déjà traité');
+    try {
+      const result = await sendMailNow(item.accountId, item.mail || {});
+      outbox.remove(item.id, 'scheduled');
+      const counts = outbox.counts();
+      broadcast('scheduled.sent', { id: item.id, accountId: item.accountId, subject: item.subject, ...result });
+      broadcast('outbox.updated', counts);
+      return result;
+    } catch (error) {
+      outbox.markFailed(item.id, error.message);
+      broadcast('scheduled.failed', { id: item.id, accountId: item.accountId, subject: item.subject, error: error.message });
+      broadcast('outbox.updated', outbox.counts());
+      throw error;
     }
-
-    return {
-      messageId: sent.messageId,
-      accepted: sent.accepted,
-      rejected: sent.rejected,
-      savedToSent,
-      sentCopyWarning,
-    };
+  },
+  'scheduled.retry': async ({ id, sendAt }) => {
+    const item = outbox.retry(id, sendAt || Date.now() + 60000);
+    broadcast('outbox.updated', outbox.counts());
+    return item;
+  },
+  // ---------- Envoi ----------
+  'mail.send': async ({ accountId, mail, draftId = null, scheduledId = null }) => {
+    const result = await sendMailNow(accountId, mail);
+    if (draftId) outbox.remove(draftId, 'draft');
+    if (scheduledId) outbox.remove(scheduledId, 'scheduled');
+    const counts = outbox.counts();
+    broadcast('outbox.updated', counts);
+    return result;
   },
 
   // ---------- Ouverture externe sécurisée ----------
