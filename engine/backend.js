@@ -20,7 +20,7 @@ const iconCache = require('./lib/icon_cache');
 const nativeDialog = require('./lib/native_dialog');
 
 const PORT = 47800;
-const APP_VERSION = '0.2.24';
+const APP_VERSION = '0.2.25';
 const ROOT = path.resolve(__dirname, '..');
 const DATA = path.join(ROOT, 'data');
 const ACCOUNTS_FILE = path.join(DATA, 'accounts.json');
@@ -615,6 +615,100 @@ async function moveMessagesToTrash(messages, { source = 'manual', onProgress = n
   return {
     processed: removed.length,
     moved: affectedAccounts.size ? removed.length : 0,
+    errors,
+  };
+}
+
+
+
+// LibraMail 0.2.25 — restauration des messages supprimés par inadvertance.
+// Faute de métadonnée historique fiable sur le dossier d'origine, le message
+// est replacé dans la boîte de réception de son compte.
+
+
+// LibraMail 0.2.25 v2 — une restauration demandée sur un message concerne
+// tous les messages de la même conversation encore présents dans la corbeille.
+function resolveTrashRestoreSelection(items) {
+  const messageIds = new Set();
+
+  const includeRows = rows => {
+    for (const row of Array.isArray(rows) ? rows : []) {
+      if (row?.folder_role === 'trash' && Number.isInteger(Number(row.id))) {
+        messageIds.add(Number(row.id));
+      }
+    }
+  };
+
+  const includeMessageConversation = message => {
+    if (!message) return;
+    const threadKey = String(message.thread_key || '').trim();
+    if (threadKey) includeRows(db.getConversation(threadKey));
+    else includeRows([message]);
+  };
+
+  for (const item of Array.isArray(items) ? items : []) {
+    if (item?.type === 'thread' && item.threadKey) {
+      includeRows(db.getConversation(String(item.threadKey)));
+      continue;
+    }
+    const id = Number(item?.id);
+    if (Number.isInteger(id)) includeMessageConversation(db.getMessage(id));
+  }
+
+  return db.getMessagesByIds([...messageIds])
+    .filter(message => message?.folder_role === 'trash');
+}
+
+async function restoreMessagesFromTrash(messages, { source = 'manual', onProgress = null } = {}) {
+  const requested = Array.isArray(messages) ? messages : [];
+  const eligible = requested.filter(message => message?.folder_role === 'trash');
+  const total = eligible.length;
+  let completed = 0;
+  const succeededIds = [];
+  const affectedAccounts = new Set();
+  const errors = [];
+
+  for (const group of groupMessages(eligible)) {
+    const first = group[0];
+    const account = getAccount(first.account_id);
+    if (!account) {
+      errors.push({ accountId: first.account_id, error: 'Compte introuvable' });
+      completed += group.length;
+      if (typeof onProgress === 'function') onProgress({ completed, total });
+      continue;
+    }
+    try {
+      const folders = await ensureFolderMap(account);
+      const inbox = folders.inbox || 'INBOX';
+      if (!first.folder) throw new Error('Dossier de corbeille introuvable');
+      if (first.folder === inbox) throw new Error('Le message se trouve déjà dans la boîte de réception');
+      await imap.moveUids(account, first.folder, group.map(message => message.uid), inbox);
+      succeededIds.push(...group.map(message => message.id));
+      affectedAccounts.add(account.id);
+    } catch (error) {
+      errors.push({ accountId: account.id, folder: first.folder, error: error.message });
+    } finally {
+      completed += group.length;
+      if (typeof onProgress === 'function') onProgress({ completed, total });
+    }
+  }
+
+  const removed = db.deleteMessages(succeededIds);
+  removeLocalFiles(removed);
+
+  // IMAP MOVE crée normalement de nouveaux UID dans INBOX. Une relève ciblée
+  // rend donc la restauration visible sans attendre le prochain minuteur.
+  for (const accountId of affectedAccounts) {
+    const account = getAccount(accountId);
+    const inbox = account?.folderMap?.inbox || 'INBOX';
+    if (!account) continue;
+    try { await syncRole(account, inbox, 'inbox', source); } catch {}
+  }
+
+  return {
+    processed: removed.length,
+    restored: removed.length,
+    skipped: Math.max(0, requested.length - eligible.length),
     errors,
   };
 }
@@ -1382,6 +1476,15 @@ const methods = {
   'messages.batchDelete': async ({ items }) => {
     const messages = resolveSelection(items);
     return moveMessagesToTrash(messages, { source: 'batch-delete' });
+  },
+  'messages.restore': async ({ id }) => {
+    const messages = resolveTrashRestoreSelection([{ type: 'message', id }]);
+    if (!messages.length) return { processed: 0, restored: 0, errors: [] };
+    return restoreMessagesFromTrash(messages, { source: 'restore-conversation' });
+  },
+  'messages.batchRestore': async ({ items }) => {
+    const messages = resolveTrashRestoreSelection(items);
+    return restoreMessagesFromTrash(messages, { source: 'batch-restore-conversations' });
   },
   'messages.batchMarkSpam': async ({ items, isSpam }) => {
     const messages = resolveSelection(items);

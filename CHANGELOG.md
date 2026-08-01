@@ -1,5 +1,15 @@
 ## 0.2.24 — 30 juillet 2026
 
+## 0.2.25 — 1 août 2026
+
+- La restauration depuis la corbeille traite toute la conversation et est disponible directement dans la liste des messages.
+
+- Restauration d’un message ou d’une sélection depuis la corbeille vers la boîte de réception.
+- Réorganisation des règles anti-spam en groupes distincts : adresses et domaines bloqués ou autorisés.
+- Recherche dans les règles anti-spam et compteurs par catégorie.
+- Ajout de l’autorisation complète d’un domaine depuis les adresses collectées.
+- Retrait automatique des adresses collectées déjà couvertes par une règle d’adresse ou de domaine.
+
 - Gestion locale des brouillons, y compris les réponses et transferts.
 - Programmation d’un envoi à une date et une heure définies.
 - Affichage et autorisation distincte des liens dans les contenus distants.

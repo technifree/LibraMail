@@ -64,3 +64,7 @@ Thumbs.db
 .libramail-*-backup-*/
 .tmp/
 LibraMail_hotfix_*/
+LibraMail_patch_*/
+.cache/
+github-artifacts/
+listing.txt

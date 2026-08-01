@@ -642,7 +642,7 @@ const App = (() => {
   };
 
   function applyAppVersion() {
-    const rawVersion = String(window.NL_APPVERSION || '0.2.24').replace(/^v/i, '');
+    const rawVersion = String(window.NL_APPVERSION || '0.2.25').replace(/^v/i, '');
     const badge = document.getElementById('app-version');
     if (badge) {
       badge.textContent = `v${rawVersion}`;
@@ -1379,10 +1379,14 @@ const App = (() => {
     const flagIcon = document.getElementById('btn-r-flag').querySelector('i');
     flagIcon.className = message.meta.flagged ? 'fa-solid fa-star' : 'fa-regular fa-star';
     const spamButton = document.getElementById('btn-r-spam');
+    const inTrash = message.meta.folder_role === 'trash';
     spamButton.classList.toggle('hidden', ['sent', 'trash'].includes(message.meta.folder_role));
     spamButton.title = t(message.meta.is_spam ? 'action.notspam' : 'action.spam');
+    const restoreButton = document.getElementById('btn-r-restore');
+    restoreButton.classList.toggle('hidden', !inTrash);
+    restoreButton.title = t('trash.restoreConversation');
     document.getElementById('btn-r-delete').title = t(
-      message.meta.folder_role === 'trash' ? 'trash.deletePermanent' : 'trash.move'
+      inTrash ? 'trash.deletePermanent' : 'trash.move'
     );
     setReaderSeenButton(Boolean(message.meta.seen));
     updateReaderContactState(message);
@@ -2264,6 +2268,21 @@ const App = (() => {
     } else if (action === 'seen') {
       const unread = row.is_thread ? Number(row.thread_unread) > 0 : !row.seen;
       await setSeenState(row, unread);
+    } else if (action === 'restore') {
+      const restoredItems = [selectionItemFromRow(row)];
+      const result = await rpc('messages.batchRestore', { items: restoredItems });
+      const errorCount = Array.isArray(result.errors) ? result.errors.length : 0;
+      if (!Number(result.processed) && errorCount) {
+        status(`${t('error')} : ${result.errors[0].error}`, 'error');
+        return;
+      }
+      status(errorCount
+        ? t('trash.restorePartial', { count: Number(result.processed || 0), errors: errorCount })
+        : t('trash.restoreSuccess', { count: Number(result.processed || 0) }),
+      errorCount ? 'error' : 'success');
+      closeReaderTabsForItems(restoredItems);
+      clearReader();
+      await refreshVisibleList({ preserveListState: true });
     } else if (action === 'delete') {
       const permanent = row.folder_role === 'trash';
       const accepted = await confirmAction({
@@ -2499,6 +2518,12 @@ const App = (() => {
     spamButton.querySelector('i').className = removeSpam ? 'fa-solid fa-shield' : 'fa-solid fa-ban';
     spamButton.title = t(removeSpam ? 'action.notspam' : 'action.spam');
 
+    const restoreButton = document.getElementById('btn-bulk-restore');
+    const restorable = bulkSelection.length > 0 && bulkSelection.every(item => item.folderRole === 'trash');
+    restoreButton.classList.toggle('hidden', !restorable);
+    restoreButton.disabled = !restorable;
+    restoreButton.title = t('selection.restore');
+
     const deleteButton = document.getElementById('btn-bulk-delete');
     const permanent = bulkSelection.every(item => item.folderRole === 'trash');
     deleteButton.title = t(permanent ? 'trash.deletePermanent' : 'selection.delete');
@@ -2517,6 +2542,32 @@ const App = (() => {
       errorCount ? 'error' : 'success');
       clearReader();
       await refresh();
+    } catch (error) {
+      status(`${t('error')} : ${error.message}`, 'error');
+    }
+  }
+
+  async function runBulkRestore() {
+    if (!bulkSelection.length || !bulkSelection.every(item => item.folderRole === 'trash')) return;
+    const selectedCount = bulkSelection.length;
+    const accepted = await confirmAction({
+      title: t('selection.restoreTitle'),
+      message: t('selection.restoreMessage', { count: selectedCount }),
+      confirmLabel: t('trash.restore'),
+      icon: 'fa-rotate-left',
+    });
+    if (!accepted) return;
+    try {
+      const restoredItems = selectionPayload();
+      const result = await rpc('messages.batchRestore', { items: restoredItems });
+      const errorCount = Array.isArray(result.errors) ? result.errors.length : 0;
+      status(errorCount
+        ? t('trash.restorePartial', { count: Number(result.processed || 0), errors: errorCount })
+        : t('trash.restoreSuccess', { count: Number(result.processed || 0) }),
+      errorCount ? 'error' : 'success');
+      closeReaderTabsForItems(restoredItems);
+      clearReader();
+      await refreshVisibleList({ preserveListState: true });
     } catch (error) {
       status(`${t('error')} : ${error.message}`, 'error');
     }
@@ -5084,7 +5135,7 @@ const App = (() => {
 
   // ---------- Mise à jour et À propos ----------
   function appVersion() {
-    return String(window.NL_APPVERSION || '0.2.24').replace(/^v/i, '');
+    return String(window.NL_APPVERSION || '0.2.25').replace(/^v/i, '');
   }
 
   function compareVersions(a, b) {
@@ -5461,8 +5512,116 @@ const App = (() => {
 
 
   // ---------- Règles d'indésirables ----------
+  let spamRuleSettingsCache = { rules: [], senders: [] };
+
   function spamRuleBadge(action) {
     return action === 'allow' ? t('spam.ruleAllowed') : t('spam.ruleBlocked');
+  }
+
+  function spamRuleRowsHtml(rules) {
+    if (!rules.length) return `<div class="spam-rule-group-empty">${esc(t('spam.noRulesInGroup'))}</div>`;
+    return rules.map(rule => `
+      <div class="spam-rule-row ${esc(rule.action)}">
+        <span class="spam-rule-main">
+          <strong>${esc(rule.value)}</strong>
+          <small>${esc(spamRuleBadge(rule.action))}</small>
+        </span>
+        <span class="spam-rule-hits">${esc(t('spam.ruleHits', { count: Number(rule.hits || 0) }))}</span>
+        <button class="iconbtn" type="button" data-remove-spam-rule="${esc(rule.id)}" title="${esc(t('delete'))}"><i class="fa-solid fa-trash"></i></button>
+      </div>`).join('');
+  }
+
+  function spamRuleSubgroupHtml(action, kind, rules) {
+    const open = action === 'block' && rules.length ? ' open' : '';
+    const label = kind === 'domain' ? t('spam.rulesDomains') : t('spam.rulesAddresses');
+    return `<details class="spam-rule-subgroup"${open}>
+      <summary><span>${esc(label)}</span><span class="spam-rule-subgroup-count">${rules.length}</span></summary>
+      <div class="spam-rule-subgroup-list">${spamRuleRowsHtml(rules)}</div>
+    </details>`;
+  }
+
+  function renderSpamRuleSettings() {
+    const rulesBox = document.getElementById('spam-rules-list');
+    const sendersBox = document.getElementById('spam-senders-list');
+    if (!rulesBox || !sendersBox) return;
+
+    const searchValue = String(document.getElementById('spam-rule-search')?.value || '').trim().toLowerCase();
+    const allRules = Array.isArray(spamRuleSettingsCache.rules) ? spamRuleSettingsCache.rules : [];
+    const rules = searchValue
+      ? allRules.filter(rule => `${rule.value || ''} ${rule.label || ''} ${rule.notes || ''}`.toLowerCase().includes(searchValue))
+      : allRules;
+    const totalBox = document.getElementById('spam-rule-total');
+    if (totalBox) totalBox.textContent = t('spam.rulesCount', { count: allRules.length });
+
+    const section = action => {
+      const actionRules = rules.filter(rule => rule.action === action);
+      const emailRules = actionRules.filter(rule => rule.kind === 'email');
+      const domainRules = actionRules.filter(rule => rule.kind === 'domain');
+      const allowed = action === 'allow';
+      return `<section class="spam-rule-section ${action}">
+        <div class="spam-rule-section-heading">
+          <span><i class="fa-solid ${allowed ? 'fa-shield' : 'fa-ban'}"></i> ${esc(t(allowed ? 'spam.rulesAllowed' : 'spam.rulesBlocked'))}</span>
+          <span class="spam-rule-section-count">${actionRules.length}</span>
+        </div>
+        ${spamRuleSubgroupHtml(action, 'email', emailRules)}
+        ${spamRuleSubgroupHtml(action, 'domain', domainRules)}
+      </section>`;
+    };
+    rulesBox.innerHTML = section('block') + section('allow');
+
+    rulesBox.querySelectorAll('[data-remove-spam-rule]').forEach(button => {
+      button.onclick = async () => {
+        button.disabled = true;
+        try {
+          await rpc('spam.rules.remove', { id: Number(button.dataset.removeSpamRule) });
+          await refreshSpamRuleSettings();
+          await refreshVisibleList({ preserveListState: true });
+        } catch (error) {
+          status(`${t('error')} : ${error.message}`, 'error');
+        }
+      };
+    });
+
+    const allSenders = Array.isArray(spamRuleSettingsCache.senders) ? spamRuleSettingsCache.senders : [];
+    // Une adresse déjà couverte par une règle d'adresse ou de domaine n'est
+    // plus une suggestion à classer. Les règles restent consultables au-dessus.
+    const senders = allSenders.filter(sender => !sender.email_action && !sender.domain_action);
+    const collectedCount = document.getElementById('spam-collected-count');
+    if (collectedCount) collectedCount.textContent = t('spam.collectedPending', { count: senders.length });
+
+    sendersBox.innerHTML = senders.length ? senders.map(sender => `
+      <div class="spam-sender-row">
+        <span class="spam-sender-main">
+          <strong>${esc(sender.display_name || sender.value)}</strong>
+          <small>${esc(sender.value)}${sender.domain ? ` · ${esc(sender.domain)}` : ''}</small>
+        </span>
+        <span class="spam-sender-counts">${esc(t('spam.senderCounts', { spam: Number(sender.spam || 0), total: Number(sender.total || 0) }))}</span>
+        <span class="spam-sender-actions">
+          <button class="btn compact" type="button" data-rule-action="block" data-rule-kind="email" data-rule-value="${esc(sender.value)}"><i class="fa-solid fa-ban"></i>${esc(t('spam.blockAddress'))}</button>
+          <button class="btn compact" type="button" data-rule-action="block" data-rule-kind="domain" data-rule-value="${esc(sender.domain || '')}" ${sender.domain ? '' : 'disabled'}><i class="fa-solid fa-globe"></i>${esc(t('spam.blockDomain'))}</button>
+          <button class="btn compact" type="button" data-rule-action="allow" data-rule-kind="email" data-rule-value="${esc(sender.value)}"><i class="fa-solid fa-shield"></i>${esc(t('spam.allowAddress'))}</button>
+          <button class="btn compact" type="button" data-rule-action="allow" data-rule-kind="domain" data-rule-value="${esc(sender.domain || '')}" ${sender.domain ? '' : 'disabled'}><i class="fa-solid fa-earth-europe"></i>${esc(t('spam.allowDomain'))}</button>
+        </span>
+      </div>`).join('') : `<div class="empty-hint">${esc(t('spam.noCollected'))}</div>`;
+
+    sendersBox.querySelectorAll('[data-rule-action]').forEach(button => {
+      button.onclick = async () => {
+        const action = String(button.dataset.ruleAction || 'block');
+        const kind = String(button.dataset.ruleKind || 'email');
+        const value = String(button.dataset.ruleValue || '');
+        if (!value) return;
+        sendersBox.querySelectorAll('button').forEach(item => { item.disabled = true; });
+        try {
+          const result = await rpc('spam.rules.save', { action, kind, value });
+          status(t('spam.ruleSaved', { changed: Number(result.changed || 0) }), 'success');
+          await refreshSpamRuleSettings();
+          await refreshVisibleList({ preserveListState: true });
+        } catch (error) {
+          status(`${t('error')} : ${error.message}`, 'error');
+          renderSpamRuleSettings();
+        }
+      };
+    });
   }
 
   async function refreshSpamRuleSettings() {
@@ -5471,45 +5630,11 @@ const App = (() => {
     if (!rulesBox || !sendersBox || !ws || ws.readyState !== WebSocket.OPEN) return;
     try {
       const data = await rpc('spam.rules.list');
-      const rules = data.rules || [];
-      rulesBox.innerHTML = rules.length ? rules.map(rule => `
-        <div class="spam-rule-row ${esc(rule.action)}">
-          <span class="spam-rule-main">
-            <strong>${esc(rule.value)}</strong>
-            <small>${esc(t(rule.kind === 'domain' ? 'spam.ruleDomain' : 'spam.ruleEmail'))} · ${esc(spamRuleBadge(rule.action))}</small>
-          </span>
-          <span class="spam-rule-hits">${esc(t('spam.ruleHits', { count: Number(rule.hits || 0) }))}</span>
-          <button class="iconbtn" type="button" data-remove-spam-rule="${esc(rule.id)}" title="${esc(t('delete'))}"><i class="fa-solid fa-trash"></i></button>
-        </div>`).join('') : `<div class="empty-hint">${esc(t('spam.noRules'))}</div>`;
-      rulesBox.querySelectorAll('[data-remove-spam-rule]').forEach(button => {
-        button.onclick = async () => {
-          await rpc('spam.rules.remove', { id: Number(button.dataset.removeSpamRule) });
-          await refreshSpamRuleSettings();
-          await refreshVisibleList({ preserveListState: true });
-        };
-      });
-      const senders = data.senders || [];
-      sendersBox.innerHTML = senders.length ? senders.map(sender => `
-        <div class="spam-sender-row">
-          <span class="spam-sender-main">
-            <strong>${esc(sender.display_name || sender.value)}</strong>
-            <small>${esc(sender.value)}${sender.domain ? ` · ${esc(sender.domain)}` : ''}</small>
-          </span>
-          <span class="spam-sender-counts">${esc(t('spam.senderCounts', { spam: Number(sender.spam || 0), total: Number(sender.total || 0) }))}</span>
-          <button class="btn compact" type="button" data-sender-rule="block:email:${esc(sender.value)}"><i class="fa-solid fa-ban"></i>${esc(t('spam.blockAddress'))}</button>
-          <button class="btn compact" type="button" data-sender-rule="block:domain:${esc(sender.domain || '')}" ${sender.domain ? '' : 'disabled'}><i class="fa-solid fa-globe"></i>${esc(t('spam.blockDomain'))}</button>
-          <button class="btn compact" type="button" data-sender-rule="allow:email:${esc(sender.value)}"><i class="fa-solid fa-shield"></i>${esc(t('spam.allowAddress'))}</button>
-        </div>`).join('') : `<div class="empty-hint">${esc(t('spam.noCollected'))}</div>`;
-      sendersBox.querySelectorAll('[data-sender-rule]').forEach(button => {
-        button.onclick = async () => {
-          const [action, kind, ...valueParts] = String(button.dataset.senderRule || '').split(':');
-          const value = valueParts.join(':');
-          if (!value) return;
-          await rpc('spam.rules.save', { action, kind, value });
-          await refreshSpamRuleSettings();
-          await refreshVisibleList({ preserveListState: true });
-        };
-      });
+      spamRuleSettingsCache = {
+        rules: Array.isArray(data.rules) ? data.rules : [],
+        senders: Array.isArray(data.senders) ? data.senders : [],
+      };
+      renderSpamRuleSettings();
     } catch (error) {
       rulesBox.innerHTML = `<div class="error-inline">${esc(error.message)}</div>`;
     }
@@ -6016,6 +6141,7 @@ const App = (() => {
       runBulkFlag('flagged', event.currentTarget.dataset.value !== '0');
     document.getElementById('btn-bulk-label').onclick = toggleBulkLabelMenu;
     document.getElementById('btn-bulk-spam').onclick = runBulkSpam;
+    document.getElementById('btn-bulk-restore').onclick = runBulkRestore;
     document.getElementById('btn-bulk-delete').onclick = runBulkDelete;
     document.getElementById('btn-empty-folder').onclick = emptyCurrentFolder;
     document.getElementById('btn-confirm-action').onclick = () => resolveConfirmAction(true);
@@ -6146,6 +6272,7 @@ const App = (() => {
     document.getElementById('contacts-group-filter').onchange = () => loadContacts().catch(() => {});
     document.getElementById('btn-settings').onclick = openSettings;
     document.getElementById('btn-add-spam-rule')?.addEventListener('click', addSpamRuleFromSettings);
+    document.getElementById('spam-rule-search')?.addEventListener('input', renderSpamRuleSettings);
     const collectedSpamDetails = document.querySelector('.spam-collected-box');
     const collectedSpamSummary = collectedSpamDetails?.querySelector('summary');
     collectedSpamSummary?.addEventListener('click', event => {
@@ -6177,6 +6304,8 @@ const App = (() => {
         t(mode === 'html' ? 'action.viewtext' : 'action.viewhtml');
     };
 
+    document.getElementById('btn-r-restore').onclick = () =>
+      Viewer.current && quickAction(Viewer.current.meta, 'restore');
     document.getElementById('btn-r-delete').onclick = () =>
       Viewer.current && quickAction(Viewer.current.meta, 'delete');
     document.getElementById('btn-r-spam').onclick = () =>

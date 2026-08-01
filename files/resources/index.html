@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LibraMail 0.2.24</title>
+  <title>LibraMail 0.2.25</title>
   <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
   <link rel="stylesheet" href="themes/dark.css">
   <link rel="stylesheet" href="themes/light.css">
@@ -13,13 +13,13 @@
 <div id="app" data-layout="vertical">
 
   <div id="topbar">
-    <button id="brand" class="brand-button" type="button" title="LibraMail 0.2.24" data-i18n-title="about.open">
+    <button id="brand" class="brand-button" type="button" title="LibraMail 0.2.25" data-i18n-title="about.open">
       <span class="brand-logo-box" aria-hidden="true">
         <img class="brand-logo brand-logo-light" src="assets/logo-light.png" alt="">
         <img class="brand-logo brand-logo-dark" src="assets/logo-dark.png" alt="">
       </span>
       <span class="brand-name">LibraMail</span>
-      <span class="version-badge" id="app-version">v0.2.24</span>
+      <span class="version-badge" id="app-version">v0.2.25</span>
     </button>
     <button class="btn primary" id="btn-compose">
       <i class="fa-solid fa-pen"></i><span data-i18n="compose"></span>
@@ -158,6 +158,9 @@
       <button class="iconbtn" id="btn-bulk-spam" type="button" data-i18n-title="action.spam">
         <i class="fa-solid fa-ban"></i>
       </button>
+      <button class="iconbtn hidden" id="btn-bulk-restore" type="button" data-i18n-title="selection.restore">
+        <i class="fa-solid fa-rotate-left"></i>
+      </button>
       <button class="iconbtn danger-hover" id="btn-bulk-delete" type="button" data-i18n-title="action.delete">
         <i class="fa-solid fa-trash"></i>
       </button>
@@ -211,6 +214,7 @@
             <div id="label-menu" class="popover hidden"></div>
           </div>
           <button class="iconbtn" id="btn-r-spam" data-i18n-title="action.spam"><i class="fa-solid fa-ban"></i></button>
+          <button class="iconbtn hidden" id="btn-r-restore" data-i18n-title="trash.restore"><i class="fa-solid fa-rotate-left"></i></button>
           <button class="iconbtn" id="btn-r-delete" data-i18n-title="action.delete"><i class="fa-solid fa-trash"></i></button>
         </div>
       </div>
@@ -386,7 +390,7 @@
 </div>
 
 
-<!-- LibraMail 0.2.24 UI v9 -->
+<!-- LibraMail 0.2.25 UI v9 -->
 
 <div class="modal-veil" id="compose-contact-picker-modal">
   <div class="modal compose-contact-picker-box">
@@ -682,9 +686,17 @@
           </button>
         </div>
         <div class="field-hint" data-i18n="spam.rulesHint"></div>
-        <div id="spam-rules-list" class="spam-rules-list"></div>
+        <div class="spam-rule-tools">
+          <label class="spam-rule-search">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <input id="spam-rule-search" type="search" autocomplete="off" data-i18n-ph="spam.rulesSearch">
+          </label>
+          <span id="spam-rule-total" class="spam-rule-total"></span>
+        </div>
+        <div id="spam-rules-list" class="spam-rules-list spam-rules-groups"></div>
         <details class="spam-collected-box">
-          <summary><i class="fa-solid fa-address-card"></i><span data-i18n="spam.collectedSenders"></span></summary>
+          <summary><i class="fa-solid fa-address-card"></i><span data-i18n="spam.collectedSenders"></span><span id="spam-collected-count" class="spam-collected-count"></span></summary>
+          <div class="field-hint spam-collected-hint" data-i18n="spam.collectedHint"></div>
           <div id="spam-senders-list" class="spam-senders-list"></div>
         </details>
       </div>

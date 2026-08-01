@@ -1,5 +1,6 @@
 /* LibraMail — liste virtuelle de messages */
 'use strict';
+// LibraMail 0.2.25 v2 — restauration complète des conversations
 class VirtualMailList {
   constructor(element, callbacks = {}) {
     this.element = element;
@@ -132,6 +133,7 @@ class VirtualMailList {
       <span class="from"><span class="name">${this.escape(sender)}</span>${isThread ? `<span class="thread-count"><i class="fa-solid fa-comments"></i> ${count}</span>` : ''}</span>
       <span class="subject"><span class="subject-text"><span class="subj">${this.escape(subject)}</span>${snippet ? ` <span class="snippet">— ${this.escape(snippet)}</span>` : ''}</span>${labelsHtml}</span>
       <span class="quick">
+        ${row.folder_role === 'trash' ? `<button class="iconbtn restore" type="button" data-action="restore" title="${typeof window.t === 'function' ? window.t('trash.restoreConversation') : 'Restore conversation'}" aria-label="${typeof window.t === 'function' ? window.t('trash.restoreConversation') : 'Restore conversation'}"><i class="fa-solid fa-rotate-left"></i></button>` : ''}
         <button class="iconbtn" data-action="seen" type="button"><i class="${this.isUnread(row) ? 'fa-regular fa-envelope-open' : 'fa-solid fa-envelope'}"></i></button>
         <button class="iconbtn" data-action="flag" type="button"><i class="${row.flagged ? 'fa-solid' : 'fa-regular'} fa-star"></i></button>
         <button class="iconbtn" data-action="label" type="button"><i class="fa-solid fa-tag"></i></button>

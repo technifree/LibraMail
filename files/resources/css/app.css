@@ -3480,3 +3480,154 @@ html[data-theme="light"] #reader-empty.reader-empty-brand .reader-empty-logo-lig
   max-width: 24rem;
   opacity: 0.9;
 }
+
+/* LibraMail 0.2.25 — restauration corbeille et règles anti-spam */
+.spam-rule-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.spam-rule-search {
+  min-width: min(100%, 280px);
+  flex: 1 1 260px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--border-soft, var(--border));
+  border-radius: 9px;
+  background: var(--panel);
+  color: var(--fg-muted);
+}
+.spam-rule-search input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding-inline: 0;
+  box-shadow: none;
+}
+.spam-rule-total,
+.spam-collected-count,
+.spam-rule-section-count,
+.spam-rule-subgroup-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--bg-active);
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.spam-rules-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+.spam-rule-section {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-soft, var(--border));
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+}
+.spam-rule-section.block {
+  border-color: color-mix(in srgb, #cf5b78 44%, var(--border));
+}
+.spam-rule-section.allow {
+  border-color: color-mix(in srgb, #49a86b 44%, var(--border));
+}
+.spam-rule-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+  color: var(--fg-strong);
+  font-weight: 800;
+}
+.spam-rule-section.block .spam-rule-section-heading i { color: #cf5b78; }
+.spam-rule-section.allow .spam-rule-section-heading i { color: #49a86b; }
+.spam-rule-subgroup {
+  border-top: 1px solid var(--border-soft, var(--border));
+}
+.spam-rule-subgroup:first-of-type { border-top: 0; }
+.spam-rule-subgroup > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 36px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.spam-rule-subgroup-list {
+  display: grid;
+  gap: 7px;
+  max-height: 270px;
+  overflow: auto;
+  padding: 2px 2px 8px;
+}
+.spam-rule-group-empty {
+  padding: 12px 8px;
+  color: var(--fg-faint);
+  font-size: 12px;
+  text-align: center;
+}
+.spam-rule-subgroup .spam-rule-row {
+  grid-template-columns: minmax(130px, 1fr) auto auto;
+  padding: 8px 9px;
+}
+.spam-collected-box {
+  border-top: 1px solid var(--border-soft, var(--border));
+  padding-top: 4px;
+}
+.spam-collected-box > summary {
+  justify-content: flex-start;
+}
+.spam-collected-count { margin-left: auto; }
+.spam-collected-hint {
+  margin: 0 0 9px;
+  line-height: 1.45;
+}
+.spam-senders-list {
+  max-height: 420px;
+  overflow: auto;
+  padding-right: 3px;
+}
+.spam-sender-row {
+  grid-template-columns: minmax(180px, 1fr) auto minmax(260px, auto);
+}
+.spam-sender-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.spam-sender-actions .btn {
+  min-height: 32px;
+  line-height: 1.05;
+}
+@media (max-width: 980px) {
+  .spam-rules-groups { grid-template-columns: 1fr; }
+  .spam-sender-row { grid-template-columns: 1fr; }
+  .spam-sender-actions { justify-content: flex-start; }
+}
+
+/* LibraMail 0.2.25 v2 — restauration depuis la liste des messages */
+.quick .iconbtn.restore:hover {
+  color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 13%, transparent);
+}
+
