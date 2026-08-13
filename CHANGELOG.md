@@ -1,3 +1,18 @@
+## [0.3.3] - 2026-08-13
+
+### Calendrier / Planning
+- Ajout direct au planning des invitations ICS reçues par e-mail.
+- Détection des invitations `text/calendar`, même sans pièce jointe `.ics` explicite.
+- Mémorisation des invitations déjà ajoutées au planning et possibilité de les actualiser.
+- Possibilité de modifier un abonnement calendrier existant : nom, URL, calendrier associé et couleur.
+- La couleur choisie dans LibraMail devient prioritaire sur celle éventuellement fournie par le calendrier distant.
+- Réapplication de la couleur choisie aux événements déjà synchronisés.
+- Amélioration de la confirmation lors de la suppression d'un abonnement calendrier.
+- Ajout d'un indicateur visuel de la couleur de chaque abonnement.
+
+### Corrections
+- Divers ajustements de l'intégration du planning et des abonnements calendriers.
+
 ## [0.3.2] - 2026-08-13
 
 ### Ajouté

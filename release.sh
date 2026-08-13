@@ -10,7 +10,7 @@ Usage :
   ./release.sh X.Y.Z ["Notes françaises"] ["English notes"]
 
 Exemple :
-  ./release.sh 0.3.2 \
+  ./release.sh 0.3.3 \
     "Correction de la synchronisation." \
     "Synchronisation fixes."
 EOF

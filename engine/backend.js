@@ -22,7 +22,7 @@ const calendarImport = require('./lib/calendar_import');
 const calendarSubscriptions = require('./lib/calendar_subscriptions');
 
 const PORT = 47800;
-const APP_VERSION = '0.3.2';
+const APP_VERSION = '0.3.3';
 const ROOT = path.resolve(__dirname, '..');
 const DATA = path.join(ROOT, 'data');
 const ACCOUNTS_FILE = path.join(DATA, 'accounts.json');
