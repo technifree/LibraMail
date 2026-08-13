@@ -213,6 +213,13 @@ function init(dataDir) {
     PRIMARY KEY (message_id, label_id)
   );
 
+  CREATE TABLE IF NOT EXISTS message_remote_permissions (
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    url TEXT NOT NULL,
+    allowed_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (message_id, url)
+  );
+
   CREATE TABLE IF NOT EXISTS spam_tokens (
     token TEXT PRIMARY KEY,
     ham INTEGER DEFAULT 0,
@@ -307,6 +314,23 @@ function init(dataDir) {
   );
   CREATE INDEX IF NOT EXISTS idx_contact_groups_member ON contact_group_members(group_id, contact_id);
 
+  CREATE TABLE IF NOT EXISTS calendar_subscriptions (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL DEFAULT '',
+    url TEXT NOT NULL UNIQUE,
+    account_id TEXT,
+    color TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    etag TEXT NOT NULL DEFAULT '',
+    last_modified TEXT NOT NULL DEFAULT '',
+    last_sync_at INTEGER NOT NULL DEFAULT 0,
+    last_status TEXT NOT NULL DEFAULT '',
+    last_error TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_calendar_subscriptions_enabled ON calendar_subscriptions(enabled, last_sync_at);
+
   CREATE TABLE IF NOT EXISTS calendar_events (
     id INTEGER PRIMARY KEY,
     title TEXT NOT NULL,
@@ -317,6 +341,8 @@ function init(dataDir) {
     notes TEXT NOT NULL DEFAULT '',
     account_id TEXT,
     color TEXT NOT NULL DEFAULT '',
+    import_key TEXT,
+    subscription_id INTEGER,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );
@@ -328,6 +354,10 @@ function init(dataDir) {
   ensureColumn('sync_state', 'highest_modseq', 'TEXT');
   ensureColumn('sync_state', 'message_count', 'INTEGER DEFAULT 0');
   ensureColumn('sync_state', 'last_reconcile', 'INTEGER DEFAULT 0');
+  ensureColumn('calendar_events', 'import_key', 'TEXT');
+  ensureColumn('calendar_events', 'subscription_id', 'INTEGER');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_calendar_events_import_key ON calendar_events(import_key)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_calendar_events_subscription ON calendar_events(subscription_id, start_at)');
 
   migrateMessageData();
   migrateEmlPaths(dataDir);
@@ -632,6 +662,31 @@ function setConversationSeen(threadKey, value) {
 }
 
 const getMessage = id => db.prepare('SELECT * FROM messages WHERE id=?').get(id);
+
+function getMessageRemotePermissions(messageId) {
+  return db.prepare('SELECT url FROM message_remote_permissions WHERE message_id=? ORDER BY allowed_at, url')
+    .all(Number(messageId))
+    .map(row => row.url);
+}
+
+function allowMessageRemoteResources(messageId, urls) {
+  const id = Number(messageId);
+  if (!Number.isInteger(id) || id <= 0) throw new Error('Message invalide');
+  const allowed = [...new Set((Array.isArray(urls) ? urls : [])
+    .map(value => String(value || '').trim())
+    .filter(value => /^https?:\/\//i.test(value) && value.length <= 16384))];
+  if (!allowed.length) return getMessageRemotePermissions(id);
+  const insert = db.prepare(`
+    INSERT INTO message_remote_permissions(message_id, url, allowed_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(message_id, url) DO UPDATE SET allowed_at=excluded.allowed_at
+  `);
+  const now = Date.now();
+  db.transaction(values => {
+    for (const url of values) insert.run(id, url, now);
+  })(allowed);
+  return getMessageRemotePermissions(id);
+}
 
 function getMessagesByIds(ids) {
   const uniqueIds = [...new Set((ids || []).map(Number).filter(Number.isInteger))];
@@ -1573,6 +1628,8 @@ function calendarRow(row) {
     notes: row.notes || '',
     accountId: row.account_id || '',
     color: row.color || '',
+    importKey: row.import_key || '',
+    subscriptionId: Number(row.subscription_id) || null,
     createdAt: Number(row.created_at) || 0,
     updatedAt: Number(row.updated_at) || 0,
   };
@@ -1596,14 +1653,16 @@ function normalizeCalendarEvent(input = {}) {
     notes: String(input.notes || '').trim().slice(0, 20000),
     accountId: String(input.accountId || '').trim() || null,
     color,
+    importKey: String(input.importKey || '').trim().slice(0, 512) || null,
+    subscriptionId: Number(input.subscriptionId) > 0 ? Number(input.subscriptionId) : null,
   };
 }
 
 function listCalendarEvents({ from = null, to = null, accountId = null, limit = 2000 } = {}) {
   const clauses = [];
   const params = [];
-  const start = Number(from);
-  const end = Number(to);
+  const start = from === null || from === undefined || from === '' ? NaN : Number(from);
+  const end = to === null || to === undefined || to === '' ? NaN : Number(to);
   if (Number.isFinite(start)) { clauses.push('end_at > ?'); params.push(Math.round(start)); }
   if (Number.isFinite(end)) { clauses.push('start_at < ?'); params.push(Math.round(end)); }
   if (accountId) { clauses.push('account_id = ?'); params.push(String(accountId)); }
@@ -1640,13 +1699,175 @@ function saveCalendarEvent(input = {}, id = null) {
   }
   const result = db.prepare(`
     INSERT INTO calendar_events
-      (title, start_at, end_at, all_day, location, notes, account_id, color, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (title, start_at, end_at, all_day, location, notes, account_id, color, import_key, subscription_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     event.title, event.startAt, event.endAt, event.allDay, event.location, event.notes,
-    event.accountId, event.color, now, now,
+    event.accountId, event.color, event.importKey, event.subscriptionId, now, now,
   );
   return getCalendarEvent(result.lastInsertRowid);
+}
+
+function importCalendarEvents(items = []) {
+  const select = db.prepare('SELECT id FROM calendar_events WHERE import_key=?');
+  const insert = db.prepare(`
+    INSERT INTO calendar_events
+      (title, start_at, end_at, all_day, location, notes, account_id, color, import_key, subscription_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const update = db.prepare(`
+    UPDATE calendar_events
+       SET title=?, start_at=?, end_at=?, all_day=?, location=?, notes=?,
+           account_id=?, color=?, subscription_id=?, updated_at=?
+     WHERE import_key=?
+  `);
+  const now = Date.now();
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+  const transaction = db.transaction(events => {
+    for (const input of events) {
+      let event;
+      try { event = normalizeCalendarEvent(input || {}); }
+      catch { skipped += 1; continue; }
+      if (!event.importKey) { skipped += 1; continue; }
+      const existing = select.get(event.importKey);
+      if (existing) {
+        update.run(
+          event.title, event.startAt, event.endAt, event.allDay, event.location, event.notes,
+          event.accountId, event.color, event.subscriptionId, now, event.importKey,
+        );
+        updated += 1;
+      } else {
+        insert.run(
+          event.title, event.startAt, event.endAt, event.allDay, event.location, event.notes,
+          event.accountId, event.color, event.importKey, event.subscriptionId, now, now,
+        );
+        created += 1;
+      }
+    }
+  });
+  transaction(Array.isArray(items) ? items : []);
+  return { created, updated, skipped, total: created + updated };
+}
+
+function calendarSubscriptionRow(row) {
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    name: row.name || '',
+    url: row.url || '',
+    accountId: row.account_id || '',
+    color: row.color || '',
+    enabled: Boolean(row.enabled),
+    etag: row.etag || '',
+    lastModified: row.last_modified || '',
+    lastSyncAt: Number(row.last_sync_at) || 0,
+    lastStatus: row.last_status || '',
+    lastError: row.last_error || '',
+    createdAt: Number(row.created_at) || 0,
+    updatedAt: Number(row.updated_at) || 0,
+  };
+}
+
+function listCalendarSubscriptions({ enabledOnly = false } = {}) {
+  const where = enabledOnly ? 'WHERE enabled=1' : '';
+  return db.prepare(`SELECT * FROM calendar_subscriptions ${where} ORDER BY name COLLATE NOCASE, id`).all().map(calendarSubscriptionRow);
+}
+
+function getCalendarSubscription(id) {
+  return calendarSubscriptionRow(db.prepare('SELECT * FROM calendar_subscriptions WHERE id=?').get(Number(id)));
+}
+
+function saveCalendarSubscription(input = {}, id = null) {
+  const name = String(input.name || '').trim().slice(0, 240);
+  const url = String(input.url || '').trim().slice(0, 4096);
+  if (!url) throw new Error('URL du calendrier obligatoire');
+  const accountId = String(input.accountId || '').trim() || null;
+  const rawColor = String(input.color || '').trim();
+  const color = /^#[0-9a-fA-F]{6}$/.test(rawColor) ? rawColor.toUpperCase() : '';
+  const enabled = input.enabled === false ? 0 : 1;
+  const now = Date.now();
+  const numericId = Number(id || input.id || 0);
+  if (numericId > 0) {
+    const result = db.prepare(`UPDATE calendar_subscriptions
+      SET name=?, url=?, account_id=?, color=?, enabled=?, updated_at=? WHERE id=?`).run(
+      name, url, accountId, color, enabled, now, numericId,
+    );
+    if (!result.changes) throw new Error('Abonnement introuvable');
+    return getCalendarSubscription(numericId);
+  }
+  const result = db.prepare(`INSERT INTO calendar_subscriptions
+    (name,url,account_id,color,enabled,etag,last_modified,last_sync_at,last_status,last_error,created_at,updated_at)
+    VALUES (?,?,?,?,?,'','',0,'','',?,?)`).run(name, url, accountId, color, enabled, now, now);
+  return getCalendarSubscription(result.lastInsertRowid);
+}
+
+function updateCalendarSubscriptionSync(id, patch = {}) {
+  const current = getCalendarSubscription(id);
+  if (!current) throw new Error('Abonnement introuvable');
+  const values = {
+    etag: patch.etag === undefined ? current.etag : String(patch.etag || '').slice(0, 1000),
+    lastModified: patch.lastModified === undefined ? current.lastModified : String(patch.lastModified || '').slice(0, 1000),
+    lastSyncAt: patch.lastSyncAt === undefined ? current.lastSyncAt : Math.max(0, Number(patch.lastSyncAt) || 0),
+    lastStatus: patch.lastStatus === undefined ? current.lastStatus : String(patch.lastStatus || '').slice(0, 80),
+    lastError: patch.lastError === undefined ? current.lastError : String(patch.lastError || '').slice(0, 2000),
+  };
+  db.prepare(`UPDATE calendar_subscriptions SET etag=?,last_modified=?,last_sync_at=?,last_status=?,last_error=?,updated_at=? WHERE id=?`).run(
+    values.etag, values.lastModified, values.lastSyncAt, values.lastStatus, values.lastError, Date.now(), Number(id),
+  );
+  return getCalendarSubscription(id);
+}
+
+function syncCalendarSubscriptionEvents(subscriptionId, items = []) {
+  const subId = Number(subscriptionId);
+  if (!(subId > 0)) throw new Error('Abonnement invalide');
+  const existingRows = db.prepare('SELECT id,import_key FROM calendar_events WHERE subscription_id=?').all(subId);
+  const existingByKey = new Map(existingRows.filter(row => row.import_key).map(row => [row.import_key, row.id]));
+  const selectByKey = db.prepare('SELECT id FROM calendar_events WHERE import_key=?');
+  const insert = db.prepare(`INSERT INTO calendar_events
+    (title,start_at,end_at,all_day,location,notes,account_id,color,import_key,subscription_id,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
+  const update = db.prepare(`UPDATE calendar_events SET
+    title=?,start_at=?,end_at=?,all_day=?,location=?,notes=?,account_id=?,color=?,subscription_id=?,updated_at=?
+    WHERE import_key=?`);
+  const remove = db.prepare('DELETE FROM calendar_events WHERE id=?');
+  const now = Date.now();
+  let created = 0, updated = 0, skipped = 0, removed = 0;
+  const incomingKeys = new Set();
+  const transaction = db.transaction(events => {
+    for (const input of events) {
+      let event;
+      try { event = normalizeCalendarEvent({ ...(input || {}), subscriptionId: subId }); }
+      catch { skipped += 1; continue; }
+      if (!event.importKey) { skipped += 1; continue; }
+      incomingKeys.add(event.importKey);
+      const existing = selectByKey.get(event.importKey);
+      if (existing) {
+        update.run(event.title,event.startAt,event.endAt,event.allDay,event.location,event.notes,event.accountId,event.color,subId,now,event.importKey);
+        updated += 1;
+      } else {
+        insert.run(event.title,event.startAt,event.endAt,event.allDay,event.location,event.notes,event.accountId,event.color,event.importKey,subId,now,now);
+        created += 1;
+      }
+    }
+    for (const row of existingRows) {
+      if (!row.import_key || incomingKeys.has(row.import_key)) continue;
+      removed += remove.run(row.id).changes;
+    }
+  });
+  transaction(Array.isArray(items) ? items : []);
+  return { created, updated, skipped, removed, total: created + updated };
+}
+
+function removeCalendarSubscription(id) {
+  const subId = Number(id);
+  const transaction = db.transaction(() => {
+    const events = db.prepare('DELETE FROM calendar_events WHERE subscription_id=?').run(subId).changes;
+    const subscription = db.prepare('DELETE FROM calendar_subscriptions WHERE id=?').run(subId).changes;
+    return { removed: subscription > 0, removedEvents: events };
+  });
+  return transaction();
 }
 
 function removeCalendarEvent(id) {
@@ -1671,6 +1892,8 @@ module.exports = {
   setConversationSeen,
   search,
   getMessage,
+  getMessageRemotePermissions,
+  allowMessageRemoteResources,
   getMessagesByIds,
   setFlag,
   deleteMessage,
@@ -1722,5 +1945,12 @@ module.exports = {
   listCalendarEvents,
   getCalendarEvent,
   saveCalendarEvent,
+  importCalendarEvents,
   removeCalendarEvent,
+  listCalendarSubscriptions,
+  getCalendarSubscription,
+  saveCalendarSubscription,
+  updateCalendarSubscriptionSync,
+  syncCalendarSubscriptionEvents,
+  removeCalendarSubscription,
 };

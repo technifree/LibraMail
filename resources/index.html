@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LibraMail 0.3.0</title>
+  <title>LibraMail 0.3.2</title>
   <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
   <link rel="stylesheet" href="themes/dark.css">
   <link rel="stylesheet" href="themes/light.css">
@@ -13,13 +13,13 @@
 <div id="app" data-layout="vertical">
 
   <div id="topbar">
-    <button id="brand" class="brand-button" type="button" title="LibraMail 0.3.0" data-i18n-title="about.open">
+    <button id="brand" class="brand-button" type="button" title="LibraMail 0.3.2" data-i18n-title="about.open">
       <span class="brand-logo-box" aria-hidden="true">
         <img class="brand-logo brand-logo-light" src="assets/logo-light.png" alt="">
         <img class="brand-logo brand-logo-dark" src="assets/logo-dark.png" alt="">
       </span>
       <span class="brand-name">LibraMail</span>
-      <span class="version-badge" id="app-version">v0.3.0</span>
+      <span class="version-badge" id="app-version">v0.3.2</span>
     </button>
     <button class="btn primary" id="btn-compose">
       <i class="fa-solid fa-pen"></i><span data-i18n="compose"></span>
@@ -37,6 +37,7 @@
     </div>
     <button class="iconbtn" id="btn-planner" data-i18n-title="planner.title">
       <i class="fa-solid fa-calendar-days"></i>
+      <span class="topbar-count planner-topbar-badge hidden" id="planner-count" aria-hidden="true">•</span>
     </button>
     <button class="iconbtn" id="btn-contacts" data-i18n-title="contacts.title">
       <i class="fa-solid fa-address-book"></i>
@@ -233,6 +234,30 @@
       <div id="attachments"></div>
     </div>
   </section>
+
+  <aside id="planner-main-pane" aria-label="Planning">
+    <header class="planner-main-pane-header">
+      <button class="iconbtn planner-main-pane-toggle" id="btn-planner-pane-toggle" type="button" data-i18n-title="planner.collapsePane">
+        <i class="fa-solid fa-chevron-right"></i>
+      </button>
+      <button class="planner-main-pane-title" id="btn-planner-pane-open" type="button">
+        <i class="fa-solid fa-calendar-days"></i><span data-i18n="planner.title"></span>
+      </button>
+      <button class="iconbtn" id="btn-planner-pane-new" type="button" data-i18n-title="planner.newEvent"><i class="fa-solid fa-plus"></i></button>
+    </header>
+    <div class="planner-main-pane-content">
+      <section class="planner-main-section">
+        <div class="planner-main-section-title"><span data-i18n="planner.today"></span><strong id="planner-pane-today-date"></strong></div>
+        <div id="planner-pane-today" class="planner-main-events"></div>
+      </section>
+      <section class="planner-main-section planner-main-upcoming-section">
+        <div class="planner-main-section-title"><span data-i18n="planner.upcoming"></span></div>
+        <div id="planner-pane-upcoming" class="planner-main-events"></div>
+      </section>
+      <div id="planner-pane-empty" class="planner-main-empty hidden"><i class="fa-regular fa-calendar"></i><span data-i18n="planner.noUpcoming"></span></div>
+      <button class="btn planner-main-open-full" id="btn-planner-pane-open-full" type="button"><i class="fa-solid fa-up-right-from-square"></i><span data-i18n="planner.openFull"></span></button>
+    </div>
+  </aside>
 
   <div id="statusbar">
     <span class="dot" id="engine-dot"></span>
@@ -996,6 +1021,9 @@
   <div class="modal planner-modal-box">
     <header>
       <span><i class="fa-solid fa-calendar-days"></i> <span data-i18n="planner.title"></span></span>
+      <button class="btn compact" id="btn-planner-import" type="button"><i class="fa-solid fa-file-import"></i><span data-i18n="planner.import"></span></button>
+      <input id="planner-import-file" type="file" accept=".ics,.ical,.vcs,.csv,text/calendar,text/csv" multiple hidden>
+      <button class="btn compact" id="btn-planner-subscriptions" type="button"><i class="fa-solid fa-link"></i><span data-i18n="planner.subscriptions"></span></button>
       <button class="btn compact" id="btn-planner-new" type="button"><i class="fa-solid fa-plus"></i><span data-i18n="planner.newEvent"></span></button>
       <button class="iconbtn" data-close><i class="fa-solid fa-xmark"></i></button>
     </header>
@@ -1003,14 +1031,22 @@
       <section class="planner-calendar-panel">
         <div class="planner-toolbar">
           <div class="planner-nav">
-            <button class="iconbtn" id="btn-planner-prev" type="button" data-i18n-title="planner.previousMonth"><i class="fa-solid fa-chevron-left"></i></button>
+            <button class="iconbtn" id="btn-planner-prev" type="button" data-i18n-title="planner.previousPeriod"><i class="fa-solid fa-chevron-left"></i></button>
             <button class="btn compact" id="btn-planner-today" type="button" data-i18n="planner.today"></button>
-            <button class="iconbtn" id="btn-planner-next" type="button" data-i18n-title="planner.nextMonth"><i class="fa-solid fa-chevron-right"></i></button>
+            <button class="iconbtn" id="btn-planner-next" type="button" data-i18n-title="planner.nextPeriod"><i class="fa-solid fa-chevron-right"></i></button>
           </div>
-          <strong id="planner-month-title"></strong>
-          <div class="planner-account-filter">
-            <label for="planner-filter-account" data-i18n="planner.calendar"></label>
-            <select id="planner-filter-account"></select>
+          <strong id="planner-period-title"></strong>
+          <div class="planner-toolbar-options">
+            <div class="planner-view-switch" role="group" data-i18n-aria-label="planner.views">
+              <button class="btn compact" type="button" data-planner-view="month" data-i18n="planner.viewMonth"></button>
+              <button class="btn compact" type="button" data-planner-view="week" data-i18n="planner.viewWeek"></button>
+              <button class="btn compact" type="button" data-planner-view="workweek" data-i18n="planner.viewWorkWeek"></button>
+              <button class="btn compact" type="button" data-planner-view="year" data-i18n="planner.viewYear"></button>
+            </div>
+            <div class="planner-account-filter">
+              <label for="planner-filter-account" data-i18n="planner.calendar"></label>
+              <select id="planner-filter-account"></select>
+            </div>
           </div>
         </div>
         <div id="planner-weekdays" class="planner-weekdays"></div>
@@ -1049,6 +1085,33 @@
       </aside>
     </div>
     <footer><span class="planner-footer-hint"><i class="fa-solid fa-circle-info"></i> <span data-i18n="planner.localHint"></span></span><button class="btn primary" data-close data-i18n="close"></button></footer>
+  </div>
+</div>
+
+<div class="modal-veil" id="planner-subscriptions-modal">
+  <div class="modal planner-subscriptions-modal-box">
+    <header>
+      <span><i class="fa-solid fa-link"></i> <span data-i18n="planner.subscriptionsTitle"></span></span>
+      <button class="iconbtn" id="btn-close-planner-subscriptions" type="button"><i class="fa-solid fa-xmark"></i></button>
+    </header>
+    <div class="body planner-subscriptions-body">
+      <div class="planner-subscription-form">
+        <div class="field planner-subscription-url"><label for="planner-subscription-url" data-i18n="planner.subscriptionUrl"></label><input id="planner-subscription-url" type="url" autocomplete="off" placeholder="webcal://… / https://…"></div>
+        <div class="field"><label for="planner-subscription-name" data-i18n="planner.subscriptionName"></label><input id="planner-subscription-name" type="text" maxlength="240" autocomplete="off" data-i18n-ph="planner.subscriptionNamePlaceholder"></div>
+        <div class="field"><label for="planner-subscription-account" data-i18n="planner.account"></label><select id="planner-subscription-account"></select></div>
+        <div class="field planner-subscription-color-field"><label for="planner-subscription-color" data-i18n="planner.color"></label><input id="planner-subscription-color" type="color" value="#4F8BD6"></div>
+        <div class="planner-subscription-help"><i class="fa-solid fa-circle-info"></i><span data-i18n="planner.subscriptionHelp"></span></div>
+        <button class="btn primary" id="btn-planner-subscription-add" type="button"><i class="fa-solid fa-link"></i><span data-i18n="planner.subscribe"></span></button>
+      </div>
+      <div class="planner-subscriptions-list-head">
+        <strong data-i18n="planner.activeSubscriptions"></strong>
+        <button class="btn compact" id="btn-planner-subscriptions-sync" type="button"><i class="fa-solid fa-rotate"></i><span data-i18n="planner.syncAll"></span></button>
+      </div>
+      <div id="planner-subscriptions-list" class="planner-subscriptions-list"></div>
+      <div id="planner-subscriptions-empty" class="planner-subscriptions-empty hidden"><i class="fa-solid fa-link-slash"></i><span data-i18n="planner.noSubscriptions"></span></div>
+      <div id="planner-subscription-status" class="planner-subscription-status"></div>
+    </div>
+    <footer><button class="btn primary" id="btn-close-planner-subscriptions-footer" type="button" data-i18n="close"></button></footer>
   </div>
 </div>
 

@@ -45,13 +45,13 @@ then downloads both GitHub artifacts into `github-artifacts/`.
 ## Publish a release
 
 ```bash
-./github.sh release 0.3.0
+./github.sh release 0.3.2
 ```
 
 Optional bilingual notes:
 
 ```bash
-./github.sh release 0.3.0 \
+./github.sh release 0.3.2 \
   "Correction de la synchronisation et amélioration des contacts." \
   "Synchronisation fixes and improved contacts."
 ```
@@ -121,13 +121,13 @@ et Windows, puis télécharge les artefacts dans `github-artifacts/`.
 ## Publier une version
 
 ```bash
-./github.sh release 0.3.0
+./github.sh release 0.3.2
 ```
 
 Avec des notes bilingues facultatives :
 
 ```bash
-./github.sh release 0.3.0 \
+./github.sh release 0.3.2 \
   "Correction de la synchronisation et amélioration des contacts." \
   "Synchronisation fixes and improved contacts."
 ```

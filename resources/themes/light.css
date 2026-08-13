@@ -16,6 +16,10 @@
   --accent-soft: rgba(71, 130, 214, .14);
   --accent-fg: #ffffff;
 
+  /* Statistiques : séries volontairement très distinctes */
+  --stats-received: #2563eb;
+  --stats-sent: #d97706;
+
   --danger: #cf4966;
   --danger-soft: rgba(207, 73, 102, .10);
   --ok: #36a9bf;

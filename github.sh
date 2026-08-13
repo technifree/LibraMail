@@ -26,6 +26,9 @@ LibraMail — gestion GitHub
 EOF
 }
 
+NODE_BIN="./bin/node"
+[ -x "$NODE_BIN" ] || NODE_BIN="$(command -v node 2>/dev/null || true)"
+
 cmd="${1:-}"
 case "$cmd" in
   check)
@@ -33,11 +36,13 @@ case "$cmd" in
     python3 tools/check_version.py
     node_files=()
     while IFS= read -r -d '' file; do node_files+=("$file"); done < <(
-      find engine resources/js -type f -name '*.js' -print0 2>/dev/null
+      find engine resources/js tools -type f -name '*.js' -print0 2>/dev/null
     )
-    if command -v node >/dev/null 2>&1; then
-      for file in "${node_files[@]}"; do node --check "$file" >/dev/null; done
+    if [ -n "$NODE_BIN" ] && [ -x "$NODE_BIN" ]; then
+      for file in "${node_files[@]}"; do "$NODE_BIN" --check "$file" >/dev/null; done
       echo "[JAVASCRIPT] OK : ${#node_files[@]} fichier(s)"
+      "$NODE_BIN" tools/test_calendar_import.js
+      "$NODE_BIN" tools/test_calendar_subscriptions.js
     else
       echo "[JAVASCRIPT] Node absent localement : contrôle laissé à GitHub Actions."
     fi

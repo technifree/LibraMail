@@ -486,6 +486,7 @@ const App = (() => {
 
   function onEvent(event, data) {
     window.OutboxUI?.onEngineEvent?.(event, data);
+    window.PlannerUI?.onEngineEvent?.(event, data);
     if (event === 'sync.started') {
       beginSyncActivity(data);
       status(t('status.syncStarting', { account: accountLabel(data.accountId) }), 'busy');
@@ -612,6 +613,7 @@ const App = (() => {
     await refreshSpamStats();
     await refreshContactsCount();
     window.OutboxUI?.refresh?.();
+    window.PlannerUI?.refreshSummary?.();
     status(t('status.connected'), 'success');
     checkForUpdates(false).catch(() => {});
 
@@ -642,7 +644,7 @@ const App = (() => {
   };
 
   function applyAppVersion() {
-    const rawVersion = String(window.NL_APPVERSION || '0.3.0').replace(/^v/i, '');
+    const rawVersion = String(window.NL_APPVERSION || '0.3.2').replace(/^v/i, '');
     const badge = document.getElementById('app-version');
     if (badge) {
       badge.textContent = `v${rawVersion}`;
@@ -5124,18 +5126,27 @@ const App = (() => {
     document.getElementById('remote-content-modal').classList.remove('open');
   }
 
+  function persistRemotePermissions(urls) {
+    const messageId = Number(Viewer.current?.meta?.id || 0);
+    if (!messageId || !Array.isArray(urls) || !urls.length) return;
+    rpc('messages.remote.allow', { id: messageId, urls }).catch(error => {
+      status(`${t('error')} : ${error.message}`, 'error');
+    });
+  }
+
   function displaySelectedRemoteContent() {
     const selected = [...document.querySelectorAll('#remote-content-modal .remote-resource-checkbox:checked')]
       .map(input => input.dataset.remoteUrl)
       .filter(Boolean);
     if (!selected.length) return;
     Viewer.allowRemote(selected);
+    persistRemotePermissions(selected);
     closeRemoteContentDialog();
   }
 
   // ---------- Mise à jour et À propos ----------
   function appVersion() {
-    return String(window.NL_APPVERSION || '0.3.0').replace(/^v/i, '');
+    return String(window.NL_APPVERSION || '0.3.2').replace(/^v/i, '');
   }
 
   function compareVersions(a, b) {
@@ -6285,7 +6296,9 @@ const App = (() => {
     document.getElementById('btn-allow-remote').onclick = openRemoteContentDialog;
     document.getElementById('btn-display-selected-remote').onclick = displaySelectedRemoteContent;
     document.getElementById('btn-display-all-remote').onclick = () => {
+      const urls = Viewer.getRemoteResources().map(resource => resource.url).filter(Boolean);
       Viewer.allowAllRemote();
+      persistRemotePermissions(urls);
       closeRemoteContentDialog();
     };
     document.getElementById('btn-select-all-remote').onclick = () => {

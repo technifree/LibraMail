@@ -148,7 +148,11 @@
     show(message) {
       this.current = message || null;
       this.mode = message?.html ? 'html' : 'text';
-      this.allowedRemote = new Set();
+      this.allowedRemote = new Set(
+        Array.isArray(message?.remoteAllowedUrls)
+          ? message.remoteAllowedUrls.map(url => String(url || '').trim()).filter(Boolean)
+          : []
+      );
       this.remoteResources = this.extractRemoteResources(message?.html || '');
       this.render();
     },
@@ -161,10 +165,10 @@
     },
 
     getRemoteResources() {
-      return this.remoteResources.map(item => ({
-        ...item,
-        loaded: this.allowedRemote.has(item.url),
-      }));
+      return this.remoteResources.map(item => {
+        const allowed = this.allowedRemote.has(item.url);
+        return { ...item, allowed, loaded: allowed };
+      });
     },
 
     allowRemote(urls = []) {

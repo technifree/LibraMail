@@ -1,6 +1,6 @@
 # LibraMail
 
-[![Version](https://img.shields.io/badge/version-0.3.0-4f8bd8)](https://github.com/technifree/LibraMail/releases)
+[![Version](https://img.shields.io/badge/version-0.3.2-4f8bd8)](https://github.com/technifree/LibraMail/releases)
 [![Verification](https://github.com/technifree/LibraMail/actions/workflows/verify.yml/badge.svg)](https://github.com/technifree/LibraMail/actions/workflows/verify.yml)
 [![Builds](https://github.com/technifree/LibraMail/actions/workflows/build.yml/badge.svg)](https://github.com/technifree/LibraMail/actions/workflows/build.yml)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -21,7 +21,7 @@ accounts without requiring Node.js to be installed on the target computer.
 - Sent, spam and trash folders
 - Labels directly from the message list
 - Contacts, groups, avatars, trusted senders and address autocompletion
-- Local calendar with monthly view and event management
+- Calendar with month, week, work-week and year views, ICS/ICAL/VCS/CSV import, read-only Internet ICS subscriptions and a collapsible main-window agenda pane
 - Provider logos or custom account icons
 - Compose, reply, reply all, forward, Cc, Bcc and attachments
 - Per-account signatures, read receipt and delivery status requests
@@ -83,7 +83,7 @@ This repository includes one command centre:
 ./github.sh check
 ./github.sh init
 ./github.sh build
-./github.sh release 0.3.0
+./github.sh release 0.3.2
 ```
 
 - `init` creates/configures the GitHub repository and pushes the source
@@ -127,7 +127,7 @@ sans exiger l'installation de Node.js sur l'ordinateur cible.
 - Dossiers Envoyés, Indésirables et Corbeille
 - Étiquettes directement depuis la liste des messages
 - Contacts, groupes, avatars, expéditeurs de confiance et autocomplétion
-- Planning local avec vue mensuelle et gestion des rendez-vous
+- Planning avec vues mois, semaine, semaine de travail et année, import ICS/ICAL/VCS/CSV, abonnements ICS Internet en lecture seule et volet agenda rétractable dans la fenêtre principale
 - Logos de fournisseurs ou icônes de compte personnalisées
 - Rédaction, réponse, réponse à tous, transfert, Cc, Cci et pièces jointes
 - Signatures par compte, demandes d'accusé de lecture et de réception
@@ -191,7 +191,7 @@ Un seul script sert de tableau de commande :
 ./github.sh check
 ./github.sh init
 ./github.sh build
-./github.sh release 0.3.0
+./github.sh release 0.3.2
 ```
 
 - `init` crée et configure le dépôt GitHub, puis envoie les sources

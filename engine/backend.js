@@ -18,9 +18,11 @@ const outbox = require('./lib/outbox');
 const backup = require('./lib/backup');
 const iconCache = require('./lib/icon_cache');
 const nativeDialog = require('./lib/native_dialog');
+const calendarImport = require('./lib/calendar_import');
+const calendarSubscriptions = require('./lib/calendar_subscriptions');
 
 const PORT = 47800;
-const APP_VERSION = '0.3.0';
+const APP_VERSION = '0.3.2';
 const ROOT = path.resolve(__dirname, '..');
 const DATA = path.join(ROOT, 'data');
 const ACCOUNTS_FILE = path.join(DATA, 'accounts.json');
@@ -29,6 +31,7 @@ const BACKUPS_DIR = path.join(ROOT, 'backups');
 const RESTORE_STATE_FILE = path.join(ROOT, '.libramail-restore-state.json');
 const RETENTION_CHECK_MS = 6 * 60 * 60 * 1000;
 const OUTBOX_CHECK_MS = 30 * 1000;
+const CALENDAR_SUBSCRIPTION_CHECK_MS = 30 * 60 * 1000;
 const RUNTIME_DATA_FILES = new Set(['engine.log', 'engine.stdout.log', 'engine.stderr.log']);
 
 function isRuntimeDataFile(name) {
@@ -197,6 +200,8 @@ const activeCleanups = new Map();
 let retentionTimer = null;
 let scheduledSendTimer = null;
 let scheduledSendBusy = false;
+let calendarSubscriptionTimer = null;
+let calendarSubscriptionSyncBusy = false;
 let shuttingDown = false;
 let maintenanceOperation = null;
 let startupSyncTriggered = false;
@@ -816,6 +821,88 @@ function statsWithAccounts(options = {}) {
   return statistics;
 }
 
+async function syncCalendarSubscription(id, { announce = true } = {}) {
+  const subscription = db.getCalendarSubscription(id);
+  if (!subscription) throw new Error('Abonnement de calendrier introuvable');
+  if (!subscription.enabled) return { subscription, skipped: true, reason: 'disabled' };
+  try {
+    const remote = await calendarSubscriptions.fetchCalendar(subscription.url, {
+      etag: subscription.etag,
+      lastModified: subscription.lastModified,
+    });
+    if (remote.notModified) {
+      const current = db.updateCalendarSubscriptionSync(subscription.id, {
+        etag: remote.etag,
+        lastModified: remote.lastModified,
+        lastSyncAt: Date.now(),
+        lastStatus: 'ok',
+        lastError: '',
+      });
+      if (announce) broadcast('calendar.subscriptions.changed', { action: 'synced', id: subscription.id, notModified: true });
+      return { subscription: current, notModified: true, created: 0, updated: 0, removed: 0, total: 0 };
+    }
+    let fileName = 'calendar.ics';
+    try { fileName = decodeURIComponent(new URL(remote.url || subscription.url).pathname.split('/').filter(Boolean).pop() || 'calendar.ics'); } catch {}
+    const parsed = calendarImport.parseCalendarImport({
+      text: remote.text,
+      fileName,
+      accountId: subscription.accountId,
+      color: subscription.color,
+      locale: config.locale || 'fr',
+      importNamespace: `sub-${subscription.id}`,
+    });
+    const result = db.syncCalendarSubscriptionEvents(subscription.id, parsed.events);
+    let current = subscription;
+    if (!subscription.name && parsed.calendarName) {
+      current = db.saveCalendarSubscription({ ...subscription, name: parsed.calendarName }, subscription.id);
+    }
+    current = db.updateCalendarSubscriptionSync(subscription.id, {
+      etag: remote.etag,
+      lastModified: remote.lastModified,
+      lastSyncAt: Date.now(),
+      lastStatus: 'ok',
+      lastError: '',
+    });
+    if (announce) {
+      broadcast('calendar.changed', { action: 'subscription-synced', id: subscription.id, ...result });
+      broadcast('calendar.subscriptions.changed', { action: 'synced', id: subscription.id, ...result });
+    }
+    return {
+      ...result,
+      subscription: current,
+      format: parsed.format,
+      calendarName: parsed.calendarName || '',
+      recurringSeries: parsed.recurringSeries || 0,
+      cancelled: parsed.cancelled || 0,
+      truncated: Boolean(parsed.truncated),
+    };
+  } catch (error) {
+    const current = db.updateCalendarSubscriptionSync(subscription.id, {
+      lastSyncAt: Date.now(),
+      lastStatus: 'error',
+      lastError: error.message,
+    });
+    if (announce) broadcast('calendar.subscriptions.changed', { action: 'error', id: subscription.id, error: error.message });
+    error.subscription = current;
+    throw error;
+  }
+}
+
+async function syncAllCalendarSubscriptions({ announce = false } = {}) {
+  if (calendarSubscriptionSyncBusy || maintenanceOperation || shuttingDown) return [];
+  calendarSubscriptionSyncBusy = true;
+  const results = [];
+  try {
+    for (const subscription of db.listCalendarSubscriptions({ enabledOnly: true })) {
+      try { results.push(await syncCalendarSubscription(subscription.id, { announce })); }
+      catch (error) { results.push({ id: subscription.id, error: error.message }); }
+    }
+    return results;
+  } finally {
+    calendarSubscriptionSyncBusy = false;
+  }
+}
+
 
 function stopAccountRuntime() {
   cancelActiveSyncs();
@@ -825,6 +912,8 @@ function stopAccountRuntime() {
   retentionTimer = null;
   if (scheduledSendTimer) clearInterval(scheduledSendTimer);
   scheduledSendTimer = null;
+  if (calendarSubscriptionTimer) clearInterval(calendarSubscriptionTimer);
+  calendarSubscriptionTimer = null;
   imap.stopAllWatches?.();
 }
 
@@ -844,6 +933,10 @@ function startAccountRuntime({ resolveFolders = false } = {}) {
   scheduledSendTimer = setInterval(() => processScheduledMessages().catch(() => {}), OUTBOX_CHECK_MS);
   scheduledSendTimer.unref?.();
   setTimeout(() => processScheduledMessages().catch(() => {}), 1500).unref?.();
+  if (calendarSubscriptionTimer) clearInterval(calendarSubscriptionTimer);
+  calendarSubscriptionTimer = setInterval(() => syncAllCalendarSubscriptions({ announce: true }).catch(() => {}), CALENDAR_SUBSCRIPTION_CHECK_MS);
+  calendarSubscriptionTimer.unref?.();
+  setTimeout(() => syncAllCalendarSubscriptions({ announce: true }).catch(() => {}), 5000).unref?.();
 }
 
 function backupTimestamp(date = new Date()) {
@@ -1393,6 +1486,9 @@ const methods = {
   }),
   'messages.search': async ({ query, limit, sortBy, sortDirection }) =>
     db.search(query, { limit, sortBy, sortDirection }),
+  'messages.remote.allow': ({ id, urls }) => ({
+    urls: db.allowMessageRemoteResources(id, urls),
+  }),
   'messages.read': async ({ id }) => {
     const message = db.getMessage(id);
     if (!message) throw new Error('Message introuvable');
@@ -1409,6 +1505,7 @@ const methods = {
       meta: message,
       html: parsed.html || null,
       text: parsed.text || parsed.textAsHtml || '',
+      remoteAllowedUrls: db.getMessageRemotePermissions(message.id),
       correspondent: {
         name: correspondent?.name || (outgoing ? '' : message.from_name || ''),
         email: contactEmail,
@@ -1626,6 +1723,43 @@ const methods = {
     const removed = db.removeCalendarEvent(id);
     if (removed) broadcast('calendar.changed', { action: 'removed', id: Number(id) });
     return { removed };
+  },
+  'calendar.import': async ({ text = '', fileName = '', accountId = '', color = '', locale = 'fr' } = {}) => {
+    const parsed = calendarImport.parseCalendarImport({ text, fileName, accountId, color, locale });
+    const result = db.importCalendarEvents(parsed.events);
+    broadcast('calendar.changed', { action: 'imported', count: result.total });
+    return {
+      ...result,
+      format: parsed.format,
+      calendarName: parsed.calendarName || '',
+      recurringSeries: parsed.recurringSeries || 0,
+      cancelled: parsed.cancelled || 0,
+      truncated: Boolean(parsed.truncated),
+    };
+  },
+  'calendar.subscriptions.list': async () => db.listCalendarSubscriptions(),
+  'calendar.subscriptions.add': async ({ name = '', url = '', accountId = '', color = '' } = {}) => {
+    const normalizedUrl = calendarSubscriptions.normalizeSubscriptionUrl(url);
+    const subscription = db.saveCalendarSubscription({
+      name: String(name || '').trim() || calendarSubscriptions.displayNameFromUrl(normalizedUrl),
+      url: normalizedUrl, accountId, color, enabled: true,
+    });
+    broadcast('calendar.subscriptions.changed', { action: 'created', id: subscription.id });
+    try {
+      return await syncCalendarSubscription(subscription.id, { announce: true });
+    } catch (error) {
+      return { subscription: db.getCalendarSubscription(subscription.id), error: error.message };
+    }
+  },
+  'calendar.subscriptions.sync': async ({ id } = {}) => syncCalendarSubscription(id, { announce: true }),
+  'calendar.subscriptions.syncAll': async () => syncAllCalendarSubscriptions({ announce: true }),
+  'calendar.subscriptions.remove': async ({ id } = {}) => {
+    const result = db.removeCalendarSubscription(id);
+    if (result.removed) {
+      broadcast('calendar.changed', { action: 'subscription-removed', id: Number(id), removed: result.removedEvents });
+      broadcast('calendar.subscriptions.changed', { action: 'removed', id: Number(id) });
+    }
+    return result;
   },
 
   // ---------- Étiquettes ----------

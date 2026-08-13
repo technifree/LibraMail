@@ -1,3 +1,26 @@
+## [0.3.2] - 2026-08-13
+
+### Ajouté
+- abonnements de calendriers Internet via URL `https://` ou `webcal://`, synchronisés en lecture seule au démarrage puis périodiquement ;
+- gestion des abonnements (ajout, actualisation, suppression) depuis le planning ;
+- volet planning rétractable sur la page principale avec rendez-vous du jour et prochains événements ;
+- indicateur sur l’icône Planning lorsqu’un prochain rendez-vous existe.
+
+### Amélioré
+- les événements supprimés d’un calendrier Internet disparaissent lors de la synchronisation ;
+- les abonnements utilisent ETag/Last-Modified lorsqu’ils sont fournis par le serveur distant ;
+- les calendriers `webcal://` sont normalisés automatiquement en HTTPS.
+
+## [0.3.1] - 2026-08-13
+
+- Import de calendriers iCalendar (`.ics`, `.ical`, `.vcs`) et CSV depuis le planning.
+- Prise en charge des rendez-vous récurrents iCalendar usuels, des journées entières, fuseaux horaires et exceptions courantes.
+- Réimport sans doublon des événements identifiés : les occurrences déjà importées sont mises à jour.
+- Ajout des vues Mois, Semaine, Semaine de travail (lundi à vendredi) et Année.
+- Vue semaine horaire avec création rapide d’un rendez-vous par double-clic dans une tranche.
+- Cohérence automatique entre début et fin : la date de fin ne peut plus précéder la date de début et l’heure de fin est recalée si nécessaire.
+- Possibilité de déposer directement un fichier de calendrier sur le planning pour l’importer.
+
 ## [0.3.0] - 2026-08-13
 
 - Ajout d’un planning local intégré à LibraMail.

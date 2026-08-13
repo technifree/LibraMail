@@ -22,6 +22,10 @@
   --accent-soft: rgba(168, 121, 218, .18);
   --accent-fg: #160d20;
 
+  /* Statistiques : séries volontairement très distinctes */
+  --stats-received: #60a5fa;
+  --stats-sent: #fb923c;
+
   /* Sémantique */
   --danger: #f06f98;
   --danger-soft: rgba(240, 111, 152, .14);

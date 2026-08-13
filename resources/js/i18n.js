@@ -79,6 +79,9 @@
       scope.querySelectorAll?.('[data-i18n-ph]').forEach(element => {
         element.setAttribute('placeholder', this.translate(element.dataset.i18nPh));
       });
+      scope.querySelectorAll?.('[data-i18n-aria-label]').forEach(element => {
+        element.setAttribute('aria-label', this.translate(element.dataset.i18nAriaLabel));
+      });
     },
   };
 
