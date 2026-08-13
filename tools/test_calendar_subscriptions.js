@@ -39,17 +39,21 @@ async function main() {
   try {
     db.init(tmp);
     assert.equal(subscriptions.normalizeSubscriptionUrl('webcal://example.test/calendar.ics'), 'https://example.test/calendar.ics');
-    const sub = db.saveCalendarSubscription({ name: 'Agenda test', url: 'https://example.test/calendar.ics', color: '#4f8bd6' });
+    const sub = db.saveCalendarSubscription({ name: 'Agenda test', url: 'https://example.test/calendar.ics', color: '#e65c00' });
     assert.ok(sub.id > 0);
     const ics1 = `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:a@example.test\r\nDTSTART:20260814T100000Z\r\nDTEND:20260814T110000Z\r\nSUMMARY:A\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:b@example.test\r\nDTSTART:20260815T100000Z\r\nDTEND:20260815T110000Z\r\nSUMMARY:B\r\nEND:VEVENT\r\nEND:VCALENDAR`;
-    const parsed1 = parseCalendarImport({ text: ics1, fileName: 'calendar.ics', importNamespace: `sub-${sub.id}` });
+    const parsed1 = parseCalendarImport({ text: ics1, fileName: 'calendar.ics', color: sub.color, importNamespace: `sub-${sub.id}` });
     const first = db.syncCalendarSubscriptionEvents(sub.id, parsed1.events);
     assert.equal(first.created, 2);
     assert.equal(db.listCalendarEvents({}).length, 2);
     assert.ok(db.listCalendarEvents({}).every(event => event.subscriptionId === sub.id));
+    assert.ok(db.listCalendarEvents({}).every(event => event.color === '#E65C00'));
+    const changed = db.saveCalendarSubscription({ ...sub, color: '#7b61d1', accountId: 'account-test' }, sub.id);
+    db.updateCalendarSubscriptionEventsPresentation(sub.id, { color: changed.color, accountId: changed.accountId });
+    assert.ok(db.listCalendarEvents({}).every(event => event.color === '#7B61D1' && event.accountId === 'account-test'));
 
     const ics2 = `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:a@example.test\r\nDTSTART:20260814T120000Z\r\nDTEND:20260814T130000Z\r\nSUMMARY:A déplacé\r\nEND:VEVENT\r\nEND:VCALENDAR`;
-    const parsed2 = parseCalendarImport({ text: ics2, fileName: 'calendar.ics', importNamespace: `sub-${sub.id}` });
+    const parsed2 = parseCalendarImport({ text: ics2, fileName: 'calendar.ics', color: changed.color, accountId: changed.accountId, importNamespace: `sub-${sub.id}` });
     const second = db.syncCalendarSubscriptionEvents(sub.id, parsed2.events);
     assert.equal(second.updated, 1);
     assert.equal(second.removed, 1);

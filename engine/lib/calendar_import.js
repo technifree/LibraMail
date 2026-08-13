@@ -382,7 +382,9 @@ function normalizeIcsEvent(rawEvent, calendar, sourceName, accountId, fallbackCo
       if (parsed) exdates.push(parsed.timestamp);
     }
   }
-  const colorRaw = String(firstProp(props, 'COLOR')?.value || calendar.color || fallbackColor || '').trim();
+  // Une couleur choisie dans LibraMail est prioritaire sur la couleur embarquée
+  // dans le fichier ICS. Sans choix local, on conserve la couleur du calendrier.
+  const colorRaw = String(fallbackColor || firstProp(props, 'COLOR')?.value || calendar.color || '').trim();
   const color = /^#[0-9a-fA-F]{6}$/.test(colorRaw) ? colorRaw.toUpperCase() : '';
   let allDayDurationDays = 1;
   if (startSpec.allDay && endSpec?.allDay) {

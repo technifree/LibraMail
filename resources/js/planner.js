@@ -12,6 +12,7 @@
     importing: false,
     filterAccountId: '',
     subscriptions: [],
+    editingSubscriptionId: null,
     summaryTimer: null,
   };
 
@@ -685,18 +686,21 @@
     root.innerHTML = state.subscriptions.map(subscription => {
       const error = subscription.lastStatus === 'error';
       const statusText = error ? subscription.lastError : t('planner.lastSync', { date: formatLastSync(subscription.lastSyncAt) });
-      return `<div class="planner-subscription-row" data-subscription-id="${Number(subscription.id)}">
+      const displayColor = /^#[0-9a-fA-F]{6}$/.test(String(subscription.color || '')) ? subscription.color : '#4F8BD6';
+      return `<div class="planner-subscription-row ${Number(state.editingSubscriptionId) === Number(subscription.id) ? 'editing' : ''}" data-subscription-id="${Number(subscription.id)}">
         <div class="planner-subscription-main">
-          <strong>${esc(subscription.name || subscriptionHost(subscription.url))}</strong>
+          <strong class="planner-subscription-title"><i class="planner-subscription-swatch" style="--subscription-color:${esc(displayColor)}"></i><span>${esc(subscription.name || subscriptionHost(subscription.url))}</span></strong>
           <small>${esc(subscriptionHost(subscription.url))}</small>
           <span class="planner-subscription-meta"><i class="fa-solid ${error ? 'fa-circle-exclamation error' : 'fa-circle-check ok'}"></i><span title="${esc(statusText)}">${esc(statusText)}</span></span>
         </div>
         <div class="planner-subscription-actions">
+          <button class="iconbtn" type="button" data-subscription-edit="${Number(subscription.id)}" title="${esc(t('planner.editSubscription'))}"><i class="fa-solid fa-pen"></i></button>
           <button class="iconbtn" type="button" data-subscription-sync="${Number(subscription.id)}" title="${esc(t('planner.syncSubscription'))}"><i class="fa-solid fa-rotate"></i></button>
           <button class="iconbtn danger-hover" type="button" data-subscription-remove="${Number(subscription.id)}" title="${esc(t('planner.removeSubscription'))}"><i class="fa-solid fa-trash"></i></button>
         </div>
       </div>`;
     }).join('');
+    root.querySelectorAll('[data-subscription-edit]').forEach(button => button.addEventListener('click', () => editSubscription(Number(button.dataset.subscriptionEdit))));
     root.querySelectorAll('[data-subscription-sync]').forEach(button => button.addEventListener('click', () => syncSubscription(Number(button.dataset.subscriptionSync), button)));
     root.querySelectorAll('[data-subscription-remove]').forEach(button => button.addEventListener('click', () => removeSubscription(Number(button.dataset.subscriptionRemove))));
   }
@@ -710,35 +714,77 @@
     }
   }
 
+  function resetSubscriptionEditor() {
+    state.editingSubscriptionId = null;
+    const url = document.getElementById('planner-subscription-url');
+    const name = document.getElementById('planner-subscription-name');
+    const account = document.getElementById('planner-subscription-account');
+    const color = document.getElementById('planner-subscription-color');
+    const button = document.getElementById('btn-planner-subscription-add');
+    const cancel = document.getElementById('btn-planner-subscription-cancel-edit');
+    if (url) url.value = '';
+    if (name) name.value = '';
+    if (account) account.innerHTML = subscriptionAccountOptions(state.filterAccountId || '');
+    if (color) color.value = '#4F8BD6';
+    if (button) button.innerHTML = `<i class="fa-solid fa-link"></i><span>${esc(t('planner.subscribe'))}</span>`;
+    cancel?.classList.add('hidden');
+    renderSubscriptions();
+  }
+
+  function editSubscription(id) {
+    const subscription = state.subscriptions.find(item => Number(item.id) === Number(id));
+    if (!subscription) return;
+    state.editingSubscriptionId = Number(subscription.id);
+    const url = document.getElementById('planner-subscription-url');
+    const name = document.getElementById('planner-subscription-name');
+    const account = document.getElementById('planner-subscription-account');
+    const color = document.getElementById('planner-subscription-color');
+    const button = document.getElementById('btn-planner-subscription-add');
+    const cancel = document.getElementById('btn-planner-subscription-cancel-edit');
+    if (url) url.value = subscription.url || '';
+    if (name) name.value = subscription.name || '';
+    if (account) account.innerHTML = subscriptionAccountOptions(subscription.accountId || '');
+    if (color) color.value = /^#[0-9a-fA-F]{6}$/.test(String(subscription.color || '')) ? subscription.color : '#4F8BD6';
+    if (button) button.innerHTML = `<i class="fa-solid fa-floppy-disk"></i><span>${esc(t('planner.saveSubscription'))}</span>`;
+    cancel?.classList.remove('hidden');
+    subscriptionStatus(t('planner.editingSubscription', { name: subscription.name || subscriptionHost(subscription.url) }));
+    renderSubscriptions();
+    url?.focus();
+  }
+
   function closeSubscriptions() {
+    resetSubscriptionEditor();
     document.getElementById('planner-subscriptions-modal')?.classList.remove('open');
   }
 
   async function openSubscriptions() {
-    const account = document.getElementById('planner-subscription-account');
-    if (account) account.innerHTML = subscriptionAccountOptions(state.filterAccountId || '');
+    resetSubscriptionEditor();
     document.getElementById('planner-subscriptions-modal')?.classList.add('open');
     subscriptionStatus('');
     await loadSubscriptions();
   }
 
-  async function addSubscription() {
+  async function saveSubscription() {
     const url = document.getElementById('planner-subscription-url')?.value.trim() || '';
     const name = document.getElementById('planner-subscription-name')?.value.trim() || '';
     const accountId = document.getElementById('planner-subscription-account')?.value || '';
     const color = document.getElementById('planner-subscription-color')?.value || '';
     if (!url) { subscriptionStatus(t('planner.subscriptionUrlRequired'), 'error'); return; }
     const button = document.getElementById('btn-planner-subscription-add');
+    const editingId = Number(state.editingSubscriptionId) || null;
     button.disabled = true;
-    subscriptionStatus(t('planner.subscriptionAdding'));
+    subscriptionStatus(t(editingId ? 'planner.subscriptionUpdating' : 'planner.subscriptionAdding'));
     try {
-      const result = await App.rpc('calendar.subscriptions.add', { url, name, accountId, color });
-      document.getElementById('planner-subscription-url').value = '';
-      document.getElementById('planner-subscription-name').value = '';
+      const result = editingId
+        ? await App.rpc('calendar.subscriptions.update', { id: editingId, url, name, accountId, color })
+        : await App.rpc('calendar.subscriptions.add', { url, name, accountId, color });
+      resetSubscriptionEditor();
       await loadSubscriptions();
       await refreshSummary();
       if (document.getElementById('planner-modal')?.classList.contains('open')) await loadEvents();
-      subscriptionStatus(result?.error ? t('planner.subscriptionAddedWithError', { error: result.error }) : t('planner.subscriptionAdded'), result?.error ? 'error' : 'success');
+      const successKey = editingId ? 'planner.subscriptionUpdated' : 'planner.subscriptionAdded';
+      const errorKey = editingId ? 'planner.subscriptionUpdatedWithError' : 'planner.subscriptionAddedWithError';
+      subscriptionStatus(result?.error ? t(errorKey, { error: result.error }) : t(successKey), result?.error ? 'error' : 'success');
     } catch (error) {
       subscriptionStatus(`${t('planner.subscriptionError')} : ${error.message}`, 'error');
     } finally { button.disabled = false; }
@@ -776,9 +822,22 @@
 
   async function removeSubscription(id) {
     const subscription = state.subscriptions.find(item => Number(item.id) === Number(id));
-    if (!subscription || !window.confirm(t('planner.removeSubscriptionConfirm', { name: subscription.name || subscriptionHost(subscription.url) }))) return;
+    if (!subscription) return;
+    const name = subscription.name || subscriptionHost(subscription.url);
+    const accepted = App.confirmAction
+      ? await App.confirmAction({
+          title: t('planner.removeSubscriptionTitle', { name }),
+          message: t('planner.removeSubscriptionConfirm', { name }),
+          confirmLabel: t('planner.removeSubscriptionAction'),
+          icon: 'fa-link-slash',
+          danger: true,
+          note: t('planner.removeSubscriptionNote'),
+        })
+      : window.confirm(t('planner.removeSubscriptionConfirm', { name }));
+    if (!accepted) return;
     try {
       await App.rpc('calendar.subscriptions.remove', { id });
+      if (Number(state.editingSubscriptionId) === Number(id)) resetSubscriptionEditor();
       await loadSubscriptions();
       await refreshSummary();
       if (document.getElementById('planner-modal')?.classList.contains('open')) await loadEvents();
@@ -892,7 +951,8 @@
     document.getElementById('btn-close-planner-subscriptions')?.addEventListener('click', closeSubscriptions);
     document.getElementById('btn-close-planner-subscriptions-footer')?.addEventListener('click', closeSubscriptions);
     document.getElementById('planner-import-file')?.addEventListener('change', event => importFiles(event.target.files));
-    document.getElementById('btn-planner-subscription-add')?.addEventListener('click', addSubscription);
+    document.getElementById('btn-planner-subscription-add')?.addEventListener('click', saveSubscription);
+    document.getElementById('btn-planner-subscription-cancel-edit')?.addEventListener('click', () => { resetSubscriptionEditor(); subscriptionStatus(''); });
     document.getElementById('btn-planner-subscriptions-sync')?.addEventListener('click', syncAllSubscriptions);
     document.getElementById('btn-planner-add-day')?.addEventListener('click', () => openNewEvent(state.selected));
     document.getElementById('btn-planner-close-editor')?.addEventListener('click', closeEditor);

@@ -296,6 +296,21 @@ function validateAccountInput(input, existingId = null) {
   if (!String(input.smtp?.host || '').trim()) throw new Error('Serveur SMTP obligatoire');
 }
 
+function isCalendarAttachment(attachment = {}) {
+  const contentType = String(attachment.contentType || '').toLowerCase();
+  const filename = String(attachment.filename || '').toLowerCase();
+  return contentType === 'text/calendar'
+    || contentType === 'text/x-vcalendar'
+    || contentType === 'application/ics'
+    || /\.(ics|ical|vcs)$/.test(filename);
+}
+
+function calendarAttachmentFilename(attachment = {}, index = 0) {
+  const filename = String(attachment.filename || '').trim();
+  if (filename) return filename;
+  return `invitation-${Number(index) + 1}.ics`;
+}
+
 function localMessagePath(message, { mustExist = true } = {}) {
   if (!message) throw new Error('Message introuvable');
   const resolved = db.resolveEmlPath(DATA, message);
@@ -825,6 +840,12 @@ async function syncCalendarSubscription(id, { announce = true } = {}) {
   const subscription = db.getCalendarSubscription(id);
   if (!subscription) throw new Error('Abonnement de calendrier introuvable');
   if (!subscription.enabled) return { subscription, skipped: true, reason: 'disabled' };
+  // Le choix effectué dans LibraMail (couleur / compte associé) reste
+  // prioritaire, même si le serveur répond 304 Not Modified.
+  db.updateCalendarSubscriptionEventsPresentation(subscription.id, {
+    accountId: subscription.accountId,
+    color: subscription.color,
+  });
   try {
     const remote = await calendarSubscriptions.fetchCalendar(subscription.url, {
       etag: subscription.etag,
@@ -1526,12 +1547,19 @@ const methods = {
         inReplyTo: parsed.inReplyTo,
         references: parsed.references,
       },
-      attachments: (parsed.attachments || []).map((attachment, index) => ({
-        index,
-        filename: attachment.filename || `piece-jointe-${index + 1}`,
-        contentType: attachment.contentType,
-        size: attachment.size,
-      })),
+      attachments: (parsed.attachments || []).map((attachment, index) => {
+        const calendarInvite = isCalendarAttachment(attachment);
+        const calendarImportState = calendarInvite ? db.getCalendarMailImport(message.id, index) : null;
+        return {
+          index,
+          filename: attachment.filename || (calendarInvite ? calendarAttachmentFilename(attachment, index) : `piece-jointe-${index + 1}`),
+          contentType: attachment.contentType,
+          size: attachment.size,
+          calendarInvite,
+          calendarImportedAt: calendarImportState?.importedAt || 0,
+          calendarEventCount: calendarImportState?.eventCount || 0,
+        };
+      }),
     };
   },
 
@@ -1737,6 +1765,39 @@ const methods = {
       truncated: Boolean(parsed.truncated),
     };
   },
+  'calendar.importAttachment': async ({ messageId, index } = {}) => {
+    const message = db.getMessage(messageId);
+    if (!message) throw new Error('Message introuvable');
+    const parsedMessage = await simpleParser(fs.readFileSync(localMessagePath(message)));
+    const attachmentIndex = Number(index);
+    const attachment = (parsedMessage.attachments || [])[attachmentIndex];
+    if (!attachment) throw new Error('Pièce jointe introuvable');
+    if (!isCalendarAttachment(attachment)) throw new Error('Cette pièce jointe n’est pas un calendrier compatible');
+
+    const text = Buffer.isBuffer(attachment.content)
+      ? attachment.content.toString('utf8')
+      : String(attachment.content || '');
+    const fileName = calendarAttachmentFilename(attachment, attachmentIndex);
+    const accountId = String(message.account_id || '');
+    const parsed = calendarImport.parseCalendarImport({
+      text, fileName, accountId, color: '', locale: config.locale || 'fr',
+    });
+    const result = db.importCalendarEvents(parsed.events);
+    const importState = db.markCalendarMailImport(message.id, attachmentIndex, result.total);
+    broadcast('calendar.changed', {
+      action: 'mail-invite-imported',
+      messageId: Number(message.id),
+      count: result.total,
+    });
+    return {
+      ...result,
+      importedAt: importState?.importedAt || Date.now(),
+      eventCount: importState?.eventCount || result.total,
+      calendarName: parsed.calendarName || '',
+      recurringSeries: parsed.recurringSeries || 0,
+      truncated: Boolean(parsed.truncated),
+    };
+  },
   'calendar.subscriptions.list': async () => db.listCalendarSubscriptions(),
   'calendar.subscriptions.add': async ({ name = '', url = '', accountId = '', color = '' } = {}) => {
     const normalizedUrl = calendarSubscriptions.normalizeSubscriptionUrl(url);
@@ -1749,6 +1810,38 @@ const methods = {
       return await syncCalendarSubscription(subscription.id, { announce: true });
     } catch (error) {
       return { subscription: db.getCalendarSubscription(subscription.id), error: error.message };
+    }
+  },
+  'calendar.subscriptions.update': async ({ id, name = '', url = '', accountId = '', color = '' } = {}) => {
+    const current = db.getCalendarSubscription(id);
+    if (!current) throw new Error('Abonnement de calendrier introuvable');
+    const normalizedUrl = calendarSubscriptions.normalizeSubscriptionUrl(url);
+    const urlChanged = normalizedUrl !== current.url;
+    let subscription = db.saveCalendarSubscription({
+      ...current,
+      name: String(name || '').trim() || calendarSubscriptions.displayNameFromUrl(normalizedUrl),
+      url: normalizedUrl,
+      accountId,
+      color,
+      enabled: true,
+    }, id);
+    db.updateCalendarSubscriptionEventsPresentation(subscription.id, {
+      accountId: subscription.accountId,
+      color: subscription.color,
+    });
+    if (urlChanged) {
+      subscription = db.updateCalendarSubscriptionSync(subscription.id, {
+        etag: '', lastModified: '', lastStatus: '', lastError: '',
+      });
+    }
+    broadcast('calendar.changed', { action: 'subscription-updated', id: subscription.id });
+    broadcast('calendar.subscriptions.changed', { action: 'updated', id: subscription.id });
+    if (!urlChanged) return { subscription, updated: true, synced: false };
+    try {
+      const result = await syncCalendarSubscription(subscription.id, { announce: true });
+      return { ...result, updated: true, synced: true };
+    } catch (error) {
+      return { subscription: db.getCalendarSubscription(subscription.id), updated: true, synced: false, error: error.message };
     }
   },
   'calendar.subscriptions.sync': async ({ id } = {}) => syncCalendarSubscription(id, { announce: true }),

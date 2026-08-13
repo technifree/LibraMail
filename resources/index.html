@@ -1101,7 +1101,10 @@
         <div class="field"><label for="planner-subscription-account" data-i18n="planner.account"></label><select id="planner-subscription-account"></select></div>
         <div class="field planner-subscription-color-field"><label for="planner-subscription-color" data-i18n="planner.color"></label><input id="planner-subscription-color" type="color" value="#4F8BD6"></div>
         <div class="planner-subscription-help"><i class="fa-solid fa-circle-info"></i><span data-i18n="planner.subscriptionHelp"></span></div>
-        <button class="btn primary" id="btn-planner-subscription-add" type="button"><i class="fa-solid fa-link"></i><span data-i18n="planner.subscribe"></span></button>
+        <div class="planner-subscription-form-actions">
+          <button class="btn hidden" id="btn-planner-subscription-cancel-edit" type="button"><i class="fa-solid fa-xmark"></i><span data-i18n="planner.cancelSubscriptionEdit"></span></button>
+          <button class="btn primary" id="btn-planner-subscription-add" type="button"><i class="fa-solid fa-link"></i><span data-i18n="planner.subscribe"></span></button>
+        </div>
       </div>
       <div class="planner-subscriptions-list-head">
         <strong data-i18n="planner.activeSubscriptions"></strong>

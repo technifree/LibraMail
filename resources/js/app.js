@@ -1397,12 +1397,31 @@ const App = (() => {
     attachments.innerHTML = '';
     attachments.classList.toggle('visible', message.attachments.length > 0);
     for (const attachment of message.attachments) {
+      const wrapper = document.createElement('div');
+      wrapper.className = attachment.calendarInvite ? 'att-calendar-item' : 'att-item';
+
       const chip = document.createElement('button');
       chip.className = 'att-chip';
-      chip.innerHTML = `<i class="fa-solid fa-paperclip"></i>${esc(attachment.filename)}
+      chip.innerHTML = `<i class="fa-solid ${attachment.calendarInvite ? 'fa-calendar-days' : 'fa-paperclip'}"></i>${esc(attachment.filename)}
         <span class="size">${fmtSize(attachment.size)}</span>`;
+      chip.title = t('attachment.download');
       chip.onclick = () => saveAttachment(message.meta.id, attachment);
-      attachments.appendChild(chip);
+      wrapper.appendChild(chip);
+
+      if (attachment.calendarInvite) {
+        const addButton = document.createElement('button');
+        addButton.className = 'btn compact att-calendar-add';
+        addButton.innerHTML = `<i class="fa-solid ${attachment.calendarImportedAt ? 'fa-arrows-rotate' : 'fa-calendar-plus'}"></i><span>${esc(t(attachment.calendarImportedAt ? 'attachment.updatePlanner' : 'attachment.addToPlanner'))}</span>`;
+        addButton.onclick = () => importCalendarAttachment(message.meta.id, attachment, addButton);
+        wrapper.appendChild(addButton);
+        if (attachment.calendarImportedAt) {
+          const imported = document.createElement('span');
+          imported.className = 'att-calendar-state';
+          imported.innerHTML = `<i class="fa-solid fa-circle-check"></i>${esc(t('attachment.inPlanner'))}`;
+          wrapper.appendChild(imported);
+        }
+      }
+      attachments.appendChild(wrapper);
     }
     Viewer.show({ ...message, meta: message.meta });
     scheduleAutoMarkRead(message.meta, token);
@@ -1491,6 +1510,33 @@ const App = (() => {
     if (!target) return;
     await rpc('attachments.save', { messageId, index: attachment.index, targetPath: target });
     status('✓ ' + attachment.filename);
+  }
+
+  async function importCalendarAttachment(messageId, attachment, button) {
+    if (!attachment?.calendarInvite || !button) return;
+    const originalHtml = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i><span>${esc(t('attachment.addingToPlanner'))}</span>`;
+    try {
+      const result = await rpc('calendar.importAttachment', { messageId, index: attachment.index });
+      attachment.calendarImportedAt = Number(result.importedAt) || Date.now();
+      attachment.calendarEventCount = Number(result.eventCount) || Number(result.total) || 0;
+      button.innerHTML = `<i class="fa-solid fa-arrows-rotate"></i><span>${esc(t('attachment.updatePlanner'))}</span>`;
+      const wrapper = button.closest('.att-calendar-item');
+      if (wrapper && !wrapper.querySelector('.att-calendar-state')) {
+        const imported = document.createElement('span');
+        imported.className = 'att-calendar-state';
+        imported.innerHTML = `<i class="fa-solid fa-circle-check"></i>${esc(t('attachment.inPlanner'))}`;
+        wrapper.appendChild(imported);
+      }
+      status(t(Number(result.created) > 0 ? 'attachment.addedToPlanner' : 'attachment.updatedInPlanner', { count: attachment.calendarEventCount }), 'success');
+      window.PlannerUI?.refreshSummary?.();
+    } catch (error) {
+      button.innerHTML = originalHtml;
+      status(`${t('attachment.calendarImportFailed')} : ${error.message}`, 'error');
+    } finally {
+      button.disabled = false;
+    }
   }
 
   // ---------- Carnet d'adresses ----------
@@ -6555,6 +6601,7 @@ const App = (() => {
     loadComposeState,
     refreshSpamRuleSettings,
     openExternal,
+    confirmAction,
     previewExternalTarget,
     clearExternalTarget,
     get config() { return config; },

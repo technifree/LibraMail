@@ -348,6 +348,15 @@ function init(dataDir) {
   );
   CREATE INDEX IF NOT EXISTS idx_calendar_events_range ON calendar_events(start_at, end_at);
   CREATE INDEX IF NOT EXISTS idx_calendar_events_account ON calendar_events(account_id, start_at);
+
+  CREATE TABLE IF NOT EXISTS calendar_mail_imports (
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    attachment_index INTEGER NOT NULL,
+    imported_at INTEGER NOT NULL,
+    event_count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (message_id, attachment_index)
+  );
+  CREATE INDEX IF NOT EXISTS idx_calendar_mail_imports_message ON calendar_mail_imports(message_id);
   `);
 
   ensureColumn('contacts', 'avatar_data', "TEXT NOT NULL DEFAULT ''");
@@ -370,6 +379,8 @@ function init(dataDir) {
     DELETE FROM message_labels
      WHERE message_id NOT IN (SELECT id FROM messages)
         OR label_id NOT IN (SELECT id FROM labels);
+    DELETE FROM calendar_mail_imports
+     WHERE message_id NOT IN (SELECT id FROM messages);
   `);
   return db;
 }
@@ -1751,6 +1762,32 @@ function importCalendarEvents(items = []) {
   return { created, updated, skipped, total: created + updated };
 }
 
+function getCalendarMailImport(messageId, attachmentIndex) {
+  const row = db.prepare(`
+    SELECT message_id, attachment_index, imported_at, event_count
+      FROM calendar_mail_imports
+     WHERE message_id=? AND attachment_index=?
+  `).get(Number(messageId), Number(attachmentIndex));
+  if (!row) return null;
+  return {
+    messageId: Number(row.message_id),
+    attachmentIndex: Number(row.attachment_index),
+    importedAt: Number(row.imported_at) || 0,
+    eventCount: Number(row.event_count) || 0,
+  };
+}
+
+function markCalendarMailImport(messageId, attachmentIndex, eventCount = 0) {
+  const importedAt = Date.now();
+  db.prepare(`
+    INSERT INTO calendar_mail_imports (message_id, attachment_index, imported_at, event_count)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(message_id, attachment_index) DO UPDATE SET
+      imported_at=excluded.imported_at, event_count=excluded.event_count
+  `).run(Number(messageId), Number(attachmentIndex), importedAt, Math.max(0, Number(eventCount) || 0));
+  return getCalendarMailImport(messageId, attachmentIndex);
+}
+
 function calendarSubscriptionRow(row) {
   if (!row) return null;
   return {
@@ -1817,6 +1854,17 @@ function updateCalendarSubscriptionSync(id, patch = {}) {
     values.etag, values.lastModified, values.lastSyncAt, values.lastStatus, values.lastError, Date.now(), Number(id),
   );
   return getCalendarSubscription(id);
+}
+
+function updateCalendarSubscriptionEventsPresentation(subscriptionId, { accountId = '', color = '' } = {}) {
+  const subId = Number(subscriptionId);
+  if (!(subId > 0)) throw new Error('Abonnement invalide');
+  const normalizedAccountId = String(accountId || '').trim() || null;
+  const rawColor = String(color || '').trim();
+  const normalizedColor = /^#[0-9a-fA-F]{6}$/.test(rawColor) ? rawColor.toUpperCase() : '';
+  return db.prepare(`UPDATE calendar_events
+    SET account_id=?, color=?, updated_at=?
+    WHERE subscription_id=?`).run(normalizedAccountId, normalizedColor, Date.now(), subId).changes;
 }
 
 function syncCalendarSubscriptionEvents(subscriptionId, items = []) {
@@ -1946,11 +1994,14 @@ module.exports = {
   getCalendarEvent,
   saveCalendarEvent,
   importCalendarEvents,
+  getCalendarMailImport,
+  markCalendarMailImport,
   removeCalendarEvent,
   listCalendarSubscriptions,
   getCalendarSubscription,
   saveCalendarSubscription,
   updateCalendarSubscriptionSync,
+  updateCalendarSubscriptionEventsPresentation,
   syncCalendarSubscriptionEvents,
   removeCalendarSubscription,
 };
