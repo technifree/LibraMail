@@ -1,12 +1,12 @@
-# LibraMail 0.3.2
+# LibraMail 0.3.3
 
 ## Français
 
-Ajout des abonnements calendriers, du volet planning, des notifications de rendez-vous et diverses améliorations d'interface.
+Amélioration de l'intégration des calendriers : modification des abonnements, gestion cohérente de leurs couleurs, confirmations plus explicites et ajout direct au planning des invitations ICS reçues par e-mail.
 
 ## English
 
-Added calendar subscriptions, planner sidebar, appointment notifications and various interface improvements.
+Improved calendar integration: editable subscriptions, consistent calendar colors, clearer confirmations, and direct addition of ICS email invitations to the planner.
 
 ### Downloads / Téléchargements
 
