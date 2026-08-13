@@ -20,7 +20,7 @@ const iconCache = require('./lib/icon_cache');
 const nativeDialog = require('./lib/native_dialog');
 
 const PORT = 47800;
-const APP_VERSION = '0.2.25';
+const APP_VERSION = '0.3.0';
 const ROOT = path.resolve(__dirname, '..');
 const DATA = path.join(ROOT, 'data');
 const ACCOUNTS_FILE = path.join(DATA, 'accounts.json');
@@ -1613,6 +1613,20 @@ const methods = {
 
   // ---------- Statistiques ----------
   'stats.get': async params => statsWithAccounts(params || {}),
+
+  // ---------- Planning / calendrier ----------
+  'calendar.list': async params => db.listCalendarEvents(params || {}),
+  'calendar.get': async ({ id }) => db.getCalendarEvent(id),
+  'calendar.save': async ({ id = null, event } = {}) => {
+    const saved = db.saveCalendarEvent(event || {}, id);
+    broadcast('calendar.changed', { action: id ? 'updated' : 'created', id: saved.id });
+    return saved;
+  },
+  'calendar.remove': async ({ id } = {}) => {
+    const removed = db.removeCalendarEvent(id);
+    if (removed) broadcast('calendar.changed', { action: 'removed', id: Number(id) });
+    return { removed };
+  },
 
   // ---------- Étiquettes ----------
   'labels.list': async () => db.listLabels(),

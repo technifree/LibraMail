@@ -1,6 +1,6 @@
 # LibraMail
 
-[![Version](https://img.shields.io/badge/version-0.2.25-4f8bd8)](https://github.com/technifree/LibraMail/releases)
+[![Version](https://img.shields.io/badge/version-0.3.0-4f8bd8)](https://github.com/technifree/LibraMail/releases)
 [![Verification](https://github.com/technifree/LibraMail/actions/workflows/verify.yml/badge.svg)](https://github.com/technifree/LibraMail/actions/workflows/verify.yml)
 [![Builds](https://github.com/technifree/LibraMail/actions/workflows/build.yml/badge.svg)](https://github.com/technifree/LibraMail/actions/workflows/build.yml)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -21,12 +21,13 @@ accounts without requiring Node.js to be installed on the target computer.
 - Sent, spam and trash folders
 - Labels directly from the message list
 - Contacts, groups, avatars, trusted senders and address autocompletion
+- Local calendar with monthly view and event management
 - Provider logos or custom account icons
 - Compose, reply, reply all, forward, Cc, Bcc and attachments
 - Per-account signatures, read receipt and delivery status requests
 - Remote-content blocking and confirmation before opening external links
 - Light and dark themes, French and English interfaces
-- Complete ZIP backup and restore of settings, accounts, contacts and local mail
+- Complete ZIP backup and restore of settings, accounts, contacts, calendar and local mail
 - Portable Linux and Windows packages with an embedded Node.js runtime
 
 ## Privacy
@@ -82,7 +83,7 @@ This repository includes one command centre:
 ./github.sh check
 ./github.sh init
 ./github.sh build
-./github.sh release 0.2.25
+./github.sh release 0.3.0
 ```
 
 - `init` creates/configures the GitHub repository and pushes the source
@@ -126,12 +127,13 @@ sans exiger l'installation de Node.js sur l'ordinateur cible.
 - Dossiers Envoyés, Indésirables et Corbeille
 - Étiquettes directement depuis la liste des messages
 - Contacts, groupes, avatars, expéditeurs de confiance et autocomplétion
+- Planning local avec vue mensuelle et gestion des rendez-vous
 - Logos de fournisseurs ou icônes de compte personnalisées
 - Rédaction, réponse, réponse à tous, transfert, Cc, Cci et pièces jointes
 - Signatures par compte, demandes d'accusé de lecture et de réception
 - Blocage des contenus distants et confirmation avant ouverture des liens
 - Thèmes clair et sombre, interfaces française et anglaise
-- Sauvegarde et restauration ZIP des paramètres, comptes, contacts et messages
+- Sauvegarde et restauration ZIP des paramètres, comptes, contacts, planning et messages
 - Paquets portables Linux et Windows avec Node.js embarqué
 
 ## Confidentialité
@@ -189,7 +191,7 @@ Un seul script sert de tableau de commande :
 ./github.sh check
 ./github.sh init
 ./github.sh build
-./github.sh release 0.2.25
+./github.sh release 0.3.0
 ```
 
 - `init` crée et configure le dépôt GitHub, puis envoie les sources
@@ -204,4 +206,4 @@ Le mode d'emploi détaillé se trouve dans
 
 LibraMail est distribué sous [licence MIT](LICENSE).
 
-_Last documentation update / Dernière mise à jour : 25 July 2026 / 25 juillet 2026._
+_Last documentation update / Dernière mise à jour : 13 August 2026 / 13 août 2026._

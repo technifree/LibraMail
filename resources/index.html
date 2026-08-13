@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LibraMail 0.2.25</title>
+  <title>LibraMail 0.3.0</title>
   <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
   <link rel="stylesheet" href="themes/dark.css">
   <link rel="stylesheet" href="themes/light.css">
@@ -13,13 +13,13 @@
 <div id="app" data-layout="vertical">
 
   <div id="topbar">
-    <button id="brand" class="brand-button" type="button" title="LibraMail 0.2.25" data-i18n-title="about.open">
+    <button id="brand" class="brand-button" type="button" title="LibraMail 0.3.0" data-i18n-title="about.open">
       <span class="brand-logo-box" aria-hidden="true">
         <img class="brand-logo brand-logo-light" src="assets/logo-light.png" alt="">
         <img class="brand-logo brand-logo-dark" src="assets/logo-dark.png" alt="">
       </span>
       <span class="brand-name">LibraMail</span>
-      <span class="version-badge" id="app-version">v0.2.25</span>
+      <span class="version-badge" id="app-version">v0.3.0</span>
     </button>
     <button class="btn primary" id="btn-compose">
       <i class="fa-solid fa-pen"></i><span data-i18n="compose"></span>
@@ -35,6 +35,9 @@
         <i class="fa-solid fa-xmark"></i>
       </button>
     </div>
+    <button class="iconbtn" id="btn-planner" data-i18n-title="planner.title">
+      <i class="fa-solid fa-calendar-days"></i>
+    </button>
     <button class="iconbtn" id="btn-contacts" data-i18n-title="contacts.title">
       <i class="fa-solid fa-address-book"></i>
       <span class="topbar-count hidden" id="contacts-count">0</span>
@@ -988,6 +991,67 @@
   </div>
 </div>
 
+
+<div class="modal-veil" id="planner-modal">
+  <div class="modal planner-modal-box">
+    <header>
+      <span><i class="fa-solid fa-calendar-days"></i> <span data-i18n="planner.title"></span></span>
+      <button class="btn compact" id="btn-planner-new" type="button"><i class="fa-solid fa-plus"></i><span data-i18n="planner.newEvent"></span></button>
+      <button class="iconbtn" data-close><i class="fa-solid fa-xmark"></i></button>
+    </header>
+    <div class="body planner-body">
+      <section class="planner-calendar-panel">
+        <div class="planner-toolbar">
+          <div class="planner-nav">
+            <button class="iconbtn" id="btn-planner-prev" type="button" data-i18n-title="planner.previousMonth"><i class="fa-solid fa-chevron-left"></i></button>
+            <button class="btn compact" id="btn-planner-today" type="button" data-i18n="planner.today"></button>
+            <button class="iconbtn" id="btn-planner-next" type="button" data-i18n-title="planner.nextMonth"><i class="fa-solid fa-chevron-right"></i></button>
+          </div>
+          <strong id="planner-month-title"></strong>
+          <div class="planner-account-filter">
+            <label for="planner-filter-account" data-i18n="planner.calendar"></label>
+            <select id="planner-filter-account"></select>
+          </div>
+        </div>
+        <div id="planner-weekdays" class="planner-weekdays"></div>
+        <div id="planner-grid" class="planner-grid" role="grid"></div>
+      </section>
+      <aside class="planner-side-panel">
+        <section class="planner-day-section">
+          <div class="planner-day-heading">
+            <div><span data-i18n="planner.selectedDay"></span><strong id="planner-selected-date"></strong></div>
+            <button class="iconbtn" id="btn-planner-add-day" type="button" data-i18n-title="planner.addOnDay"><i class="fa-solid fa-plus"></i></button>
+          </div>
+          <div id="planner-day-events" class="planner-day-events"></div>
+          <div id="planner-day-empty" class="planner-day-empty"><i class="fa-regular fa-calendar"></i><span data-i18n="planner.noEvents"></span></div>
+        </section>
+        <section id="planner-editor" class="planner-editor hidden">
+          <div class="planner-editor-heading"><strong id="planner-editor-title" data-i18n="planner.newEvent"></strong><button class="iconbtn" id="btn-planner-close-editor" type="button" data-i18n-title="close"><i class="fa-solid fa-xmark"></i></button></div>
+          <input id="planner-event-id" type="hidden">
+          <div class="field"><label for="planner-title" data-i18n="planner.eventTitle"></label><input id="planner-title" type="text" maxlength="240" autocomplete="off" data-i18n-ph="planner.eventTitlePlaceholder"></div>
+          <div class="field"><label for="planner-account" data-i18n="planner.account"></label><select id="planner-account"></select></div>
+          <label class="planner-all-day"><input id="planner-all-day" type="checkbox"><span data-i18n="planner.allDay"></span></label>
+          <div class="planner-date-grid">
+            <div class="field"><label for="planner-start-date" data-i18n="planner.startDate"></label><input id="planner-start-date" type="date"></div>
+            <div class="field planner-time-field"><label for="planner-start-time" data-i18n="planner.startTime"></label><input id="planner-start-time" type="time" value="09:00"></div>
+            <div class="field"><label for="planner-end-date" data-i18n="planner.endDate"></label><input id="planner-end-date" type="date"></div>
+            <div class="field planner-time-field"><label for="planner-end-time" data-i18n="planner.endTime"></label><input id="planner-end-time" type="time" value="10:00"></div>
+          </div>
+          <div class="field"><label for="planner-location" data-i18n="planner.location"></label><input id="planner-location" type="text" maxlength="500" data-i18n-ph="planner.locationPlaceholder"></div>
+          <div class="field"><label for="planner-notes" data-i18n="planner.notes"></label><textarea id="planner-notes" rows="5" data-i18n-ph="planner.notesPlaceholder"></textarea></div>
+          <div id="planner-form-error" class="planner-form-error" role="alert"></div>
+          <div class="planner-editor-actions">
+            <button class="btn danger hidden" id="btn-planner-delete" type="button"><i class="fa-solid fa-trash"></i><span data-i18n="planner.delete"></span></button><span></span>
+            <button class="btn" id="btn-planner-cancel" type="button" data-i18n="cancel"></button>
+            <button class="btn primary" id="btn-planner-save" type="button"><i class="fa-solid fa-floppy-disk"></i><span data-i18n="save"></span></button>
+          </div>
+        </section>
+      </aside>
+    </div>
+    <footer><span class="planner-footer-hint"><i class="fa-solid fa-circle-info"></i> <span data-i18n="planner.localHint"></span></span><button class="btn primary" data-close data-i18n="close"></button></footer>
+  </div>
+</div>
+
 <div class="modal-veil" id="stats-modal">
   <div class="modal stats-modal-box">
     <header><span><i class="fa-solid fa-chart-column"></i> <span data-i18n="stats.title"></span></span>
@@ -1004,5 +1068,6 @@
 <script src="js/viewer.js"></script>
 <script src="js/app.js"></script>
 <script src="js/outbox.js"></script>
+<script src="js/planner.js"></script>
 </body>
 </html>

@@ -1,3 +1,12 @@
+## [0.3.0] - 2026-08-13
+
+- Ajout d’un planning local intégré à LibraMail.
+- Vue mensuelle avec navigation, sélection d’une journée et affichage des rendez-vous.
+- Création, modification et suppression des rendez-vous, avec journée entière ou horaires, lieu et notes.
+- Association facultative d’un rendez-vous à un compte mail et reprise de sa couleur.
+- Stockage des rendez-vous dans SQLite : ils sont inclus dans la sauvegarde complète LibraMail.
+- Interface du planning disponible en français et en anglais.
+
 ## 0.2.24 — 30 juillet 2026
 
 ## 0.2.25 — 1 août 2026

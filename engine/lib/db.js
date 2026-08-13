@@ -306,6 +306,22 @@ function init(dataDir) {
     PRIMARY KEY (contact_id, group_id)
   );
   CREATE INDEX IF NOT EXISTS idx_contact_groups_member ON contact_group_members(group_id, contact_id);
+
+  CREATE TABLE IF NOT EXISTS calendar_events (
+    id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    start_at INTEGER NOT NULL,
+    end_at INTEGER NOT NULL,
+    all_day INTEGER NOT NULL DEFAULT 0,
+    location TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    account_id TEXT,
+    color TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_calendar_events_range ON calendar_events(start_at, end_at);
+  CREATE INDEX IF NOT EXISTS idx_calendar_events_account ON calendar_events(account_id, start_at);
   `);
 
   ensureColumn('contacts', 'avatar_data', "TEXT NOT NULL DEFAULT ''");
@@ -1544,6 +1560,99 @@ const clearSyncState = (accountId, folder) => db.prepare(
   'DELETE FROM sync_state WHERE account_id=? AND folder=?'
 ).run(accountId, folder);
 
+// ---------- Planning / calendrier ----------
+function calendarRow(row) {
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    title: row.title || '',
+    startAt: Number(row.start_at) || 0,
+    endAt: Number(row.end_at) || 0,
+    allDay: Boolean(row.all_day),
+    location: row.location || '',
+    notes: row.notes || '',
+    accountId: row.account_id || '',
+    color: row.color || '',
+    createdAt: Number(row.created_at) || 0,
+    updatedAt: Number(row.updated_at) || 0,
+  };
+}
+
+function normalizeCalendarEvent(input = {}) {
+  const title = String(input.title || '').trim().slice(0, 240);
+  if (!title) throw new Error('Le titre du rendez-vous est obligatoire');
+  const startAt = Number(input.startAt);
+  let endAt = Number(input.endAt);
+  if (!Number.isFinite(startAt) || startAt <= 0) throw new Error('Date de début invalide');
+  if (!Number.isFinite(endAt) || endAt <= startAt) endAt = startAt + 60 * 60 * 1000;
+  const rawColor = String(input.color || '').trim();
+  const color = /^#[0-9a-fA-F]{6}$/.test(rawColor) ? rawColor.toUpperCase() : '';
+  return {
+    title,
+    startAt: Math.round(startAt),
+    endAt: Math.round(endAt),
+    allDay: input.allDay ? 1 : 0,
+    location: String(input.location || '').trim().slice(0, 500),
+    notes: String(input.notes || '').trim().slice(0, 20000),
+    accountId: String(input.accountId || '').trim() || null,
+    color,
+  };
+}
+
+function listCalendarEvents({ from = null, to = null, accountId = null, limit = 2000 } = {}) {
+  const clauses = [];
+  const params = [];
+  const start = Number(from);
+  const end = Number(to);
+  if (Number.isFinite(start)) { clauses.push('end_at > ?'); params.push(Math.round(start)); }
+  if (Number.isFinite(end)) { clauses.push('start_at < ?'); params.push(Math.round(end)); }
+  if (accountId) { clauses.push('account_id = ?'); params.push(String(accountId)); }
+  const safeLimit = Math.max(1, Math.min(10000, Math.round(Number(limit) || 2000)));
+  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+  return db.prepare(`
+    SELECT * FROM calendar_events
+    ${where}
+    ORDER BY start_at ASC, all_day DESC, title COLLATE NOCASE ASC
+    LIMIT ${safeLimit}
+  `).all(...params).map(calendarRow);
+}
+
+function getCalendarEvent(id) {
+  return calendarRow(db.prepare('SELECT * FROM calendar_events WHERE id=?').get(Number(id)));
+}
+
+function saveCalendarEvent(input = {}, id = null) {
+  const event = normalizeCalendarEvent(input);
+  const now = Date.now();
+  const numericId = Number(id || input.id || 0);
+  if (numericId > 0) {
+    const result = db.prepare(`
+      UPDATE calendar_events
+         SET title=?, start_at=?, end_at=?, all_day=?, location=?, notes=?,
+             account_id=?, color=?, updated_at=?
+       WHERE id=?
+    `).run(
+      event.title, event.startAt, event.endAt, event.allDay, event.location, event.notes,
+      event.accountId, event.color, now, numericId,
+    );
+    if (!result.changes) throw new Error('Rendez-vous introuvable');
+    return getCalendarEvent(numericId);
+  }
+  const result = db.prepare(`
+    INSERT INTO calendar_events
+      (title, start_at, end_at, all_day, location, notes, account_id, color, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    event.title, event.startAt, event.endAt, event.allDay, event.location, event.notes,
+    event.accountId, event.color, now, now,
+  );
+  return getCalendarEvent(result.lastInsertRowid);
+}
+
+function removeCalendarEvent(id) {
+  return db.prepare('DELETE FROM calendar_events WHERE id=?').run(Number(id)).changes > 0;
+}
+
 module.exports = {
   init,
   close,
@@ -1610,4 +1719,8 @@ module.exports = {
   updateRemoteFlags,
   removeMissingFolderUids,
   clearSyncState,
+  listCalendarEvents,
+  getCalendarEvent,
+  saveCalendarEvent,
+  removeCalendarEvent,
 };
