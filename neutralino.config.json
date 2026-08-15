@@ -1,6 +1,6 @@
 {
   "applicationId": "eu.libramail.app",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "defaultMode": "window",
   "port": 0,
   "documentRoot": "/resources/",
@@ -30,7 +30,7 @@
   ],
   "modes": {
     "window": {
-      "title": "LibraMail 0.3.7",
+      "title": "LibraMail 0.3.8",
       "width": 1440,
       "height": 900,
       "minWidth": 1000,

@@ -1646,6 +1646,7 @@ function calendarRow(row) {
     color: row.color || '',
     importKey: row.import_key || '',
     subscriptionId: Number(row.subscription_id) || null,
+    subscriptionName: row.subscription_name || '',
     createdAt: Number(row.created_at) || 0,
     updatedAt: Number(row.updated_at) || 0,
   };
@@ -1679,15 +1680,17 @@ function listCalendarEvents({ from = null, to = null, accountId = null, limit = 
   const params = [];
   const start = from === null || from === undefined || from === '' ? NaN : Number(from);
   const end = to === null || to === undefined || to === '' ? NaN : Number(to);
-  if (Number.isFinite(start)) { clauses.push('end_at > ?'); params.push(Math.round(start)); }
-  if (Number.isFinite(end)) { clauses.push('start_at < ?'); params.push(Math.round(end)); }
-  if (accountId) { clauses.push('account_id = ?'); params.push(String(accountId)); }
+  if (Number.isFinite(start)) { clauses.push('ce.end_at > ?'); params.push(Math.round(start)); }
+  if (Number.isFinite(end)) { clauses.push('ce.start_at < ?'); params.push(Math.round(end)); }
+  if (accountId) { clauses.push('ce.account_id = ?'); params.push(String(accountId)); }
   const safeLimit = Math.max(1, Math.min(10000, Math.round(Number(limit) || 2000)));
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   return db.prepare(`
-    SELECT * FROM calendar_events
+    SELECT ce.*, COALESCE(cs.name, '') AS subscription_name
+      FROM calendar_events ce
+      LEFT JOIN calendar_subscriptions cs ON cs.id = ce.subscription_id
     ${where}
-    ORDER BY start_at ASC, all_day DESC, title COLLATE NOCASE ASC
+    ORDER BY ce.start_at ASC, ce.all_day DESC, ce.title COLLATE NOCASE ASC
     LIMIT ${safeLimit}
   `).all(...params).map(calendarRow);
 }

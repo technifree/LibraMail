@@ -582,7 +582,8 @@
   }
 
   function paneEventHtml(event) {
-    const source = event.location || accountLabel(event.accountId);
+    const calendarSource = event.subscriptionName || accountLabel(event.accountId);
+    const source = event.location ? `${calendarSource} · ${event.location}` : calendarSource;
     return `<button class="planner-main-event" type="button" data-planner-summary-event="${Number(event.id)}" style="--event-color:${esc(eventColor(event))}" title="${esc(event.title)}">
       <span class="planner-main-event-time">${esc(event.allDay ? t('planner.allDayShort') : formatTime(event.startAt))}</span>
       <span class="planner-main-event-main"><strong>${esc(event.title)}</strong><small>${esc(source)}</small></span>
@@ -608,7 +609,15 @@
 
   function renderPlannerSummary(events = []) {
     const now = Date.now();
-    const upcoming = sortedEvents(events.filter(event => Number(event.endAt) > now));
+    // Le volet doit rester strictement chronologique. sortedEvents() privilégie les
+    // événements sur toute la journée, ce qui est utile dans une case du calendrier
+    // mais ferait passer tous les jours fériés futurs avant les rendez-vous horaires.
+    const upcoming = events
+      .filter(event => Number(event.endAt) > now)
+      .slice()
+      .sort((a, b) => Number(a.startAt) - Number(b.startAt)
+        || Number(b.allDay) - Number(a.allDay)
+        || String(a.title).localeCompare(String(b.title), locale()));
     const today = startOfDay(new Date());
     const todayEvents = upcoming.filter(event => eventOverlapsDay(event, today));
     const laterEvents = upcoming.filter(event => !eventOverlapsDay(event, today)).slice(0, 14);
