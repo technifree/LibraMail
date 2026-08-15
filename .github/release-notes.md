@@ -1,12 +1,12 @@
-# LibraMail 0.3.7
+# LibraMail 0.3.8
 
 ## Français
 
-Correction du démarrage du moteur sous Windows et amélioration de la compatibilité avec les certificats système. Les identifiants IMAP et SMTP sont désormais stockés dans le coffre-fort sécurisé du système lorsqu'il est disponible, au lieu d'être conservés en clair dans accounts.json. Les nouvelles sauvegardes LibraMail n'incluent plus les mots de passe.
+Amélioration du planning et diverses corrections de stabilité. Le volet Planning affiche désormais correctement les rendez-vous provenant de l'ensemble des calendriers, y compris les calendriers Internet et importés, avec un tri chronologique cohérent et une identification plus claire de leur origine.
 
 ## English
 
-Fixed Windows engine startup and improved system certificate compatibility. IMAP and SMTP credentials are now stored in the operating system secure credential store when available instead of being kept in plain text in accounts.json. New LibraMail backups no longer include passwords.
+Improved calendar integration and various stability fixes. The Planner sidebar now correctly displays appointments from all calendars, including Internet and imported calendars, with consistent chronological ordering and clearer calendar identification.
 
 ### Downloads / Téléchargements
 
