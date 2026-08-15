@@ -1,12 +1,12 @@
-# LibraMail 0.3.3
+# LibraMail 0.3.4
 
 ## Français
 
-Amélioration de l'intégration des calendriers : modification des abonnements, gestion cohérente de leurs couleurs, confirmations plus explicites et ajout direct au planning des invitations ICS reçues par e-mail.
+Amélioration de la rédaction des réponses avec citations modifiables, actualisation manuelle et périodique configurable des calendriers Internet, mise en évidence du message sélectionné et compte-rendu détaillé des synchronisations de planning. Amélioration également de l'arrêt et des performances de la relève IMAP, avec une gestion plus robuste des interruptions de connexion.
 
 ## English
 
-Improved calendar integration: editable subscriptions, consistent calendar colors, clearer confirmations, and direct addition of ICS email invitations to the planner.
+Improved reply composition with editable quoted messages, manual and configurable periodic refresh of Internet calendars, clearer highlighting of the selected message, and detailed calendar synchronization summaries. Also improved IMAP synchronization cancellation, performance, and connection interruption handling.
 
 ### Downloads / Téléchargements
 
