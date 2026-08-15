@@ -28,6 +28,7 @@ const RUNTIME_DATA_FILES = new Set([
   'engine.log',
   'engine.stdout.log',
   'engine.stderr.log',
+  'engine-startup.log',
   'index.db-wal',
   'index.db-shm',
 ]);
@@ -619,6 +620,19 @@ async function exportArchive({ dataDir, database, targetPath, appVersion, onProg
     if (!fs.existsSync(accountsPath)) await fsp.writeFile(accountsPath, '[]\n', { mode: 0o600 });
     if (!fs.existsSync(configPath)) await fsp.writeFile(configPath, '{}\n', { mode: 0o600 });
     const dataFiles = await walkFiles(resolvedData);
+    const safeAccountsPath = path.join(tempDir, 'accounts.json');
+    let safeAccounts = [];
+    try {
+      safeAccounts = JSON.parse(await fsp.readFile(accountsPath, 'utf8'));
+      if (!Array.isArray(safeAccounts)) safeAccounts = [];
+    } catch { safeAccounts = []; }
+    safeAccounts = safeAccounts.map(account => {
+      const copy = JSON.parse(JSON.stringify(account || {}));
+      if (copy.imap) delete copy.imap.pass;
+      if (copy.smtp) delete copy.smtp.pass;
+      return copy;
+    });
+    await fsp.writeFile(safeAccountsPath, JSON.stringify(safeAccounts, null, 2) + '\n', { mode: 0o600 });
 
     const summary = summaryFromDatabase(database, dataFiles);
     try {
@@ -634,7 +648,7 @@ async function exportArchive({ dataDir, database, targetPath, appVersion, onProg
       createdAt: new Date().toISOString(),
       platform: process.platform,
       architecture: process.arch,
-      includesCredentials: true,
+      includesCredentials: false,
       summary,
     };
     await fsp.writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n', { mode: 0o600 });
@@ -642,11 +656,14 @@ async function exportArchive({ dataDir, database, targetPath, appVersion, onProg
     const entries = [
       { name: 'manifest.json', path: manifestPath },
       { name: 'data/index.db', path: snapshotPath },
-      ...dataFiles.map(file => ({
-        name: `data/${file.relative.replace(/\\/g, '/')}`,
-        path: file.path,
-        stat: file.stat,
-      })),
+      { name: 'data/accounts.json', path: safeAccountsPath },
+      ...dataFiles
+        .filter(file => file.relative.replace(/\\/g, '/') !== 'accounts.json')
+        .map(file => ({
+          name: `data/${file.relative.replace(/\\/g, '/')}`,
+          path: file.path,
+          stat: file.stat,
+        })),
     ];
     onProgress?.({ step: 'prepare', completed: 1, total: 1, name: '' });
     const result = await createZip(temporaryTarget, entries, {

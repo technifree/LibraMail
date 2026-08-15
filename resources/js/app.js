@@ -11,6 +11,7 @@ const App = (() => {
   let bundledEngineOwned = false;
   let bundledEngineLastError = '';
   let bundledEngineEventsWired = false;
+  let bundledEngineStartupLog = [];
   const pending = new Map();
 
   let config = {};
@@ -68,7 +69,21 @@ const App = (() => {
 
   // ---------- Moteur embarqué Windows ----------
   function usesBundledWindowsEngine() {
-    return window.NL_OS === 'Windows' && (window.NL_BUNDLED_ENGINE === true || String(window.NL_BUNDLED_ENGINE || '') === 'true');
+    return window.NL_OS === 'Windows';
+  }
+
+  async function writeEngineStartupLog(message, { reset = false } = {}) {
+    if (window.NL_OS !== 'Windows') return;
+    try {
+      const appDir = String(window.NL_PATH || '').replace(/[\\/]+$/, '');
+      if (!appDir) return;
+      await Neutralino.filesystem.createDirectory(`${appDir}\\data`).catch(() => {});
+      if (reset) bundledEngineStartupLog = [];
+      const stamp = new Date().toISOString();
+      bundledEngineStartupLog.push(`[${stamp}] ${String(message || '')}`);
+      if (bundledEngineStartupLog.length > 80) bundledEngineStartupLog = bundledEngineStartupLog.slice(-80);
+      await Neutralino.filesystem.writeFile(`${appDir}\\data\\engine-startup.log`, `${bundledEngineStartupLog.join('\n')}\n`);
+    } catch {}
   }
 
   function probeEngine(timeout = 300) {
@@ -104,8 +119,10 @@ const App = (() => {
         if (detail.action === 'stdErr' && detail.data) {
           bundledEngineLastError = String(detail.data).trim().slice(-4000);
           console.error('[LibraMail moteur]', detail.data);
+          writeEngineStartupLog(`STDERR : ${String(detail.data).trim()}`);
         } else if (detail.action === 'stdOut' && detail.data) {
           console.info('[LibraMail moteur]', detail.data);
+          writeEngineStartupLog(`STDOUT : ${String(detail.data).trim()}`);
         } else if (detail.action === 'exit') {
           const wasOwned = bundledEngineOwned;
           bundledEngineProcess = null;
@@ -133,21 +150,24 @@ const App = (() => {
     if (!appDir || appDir.includes('"')) throw new Error('Chemin d’installation LibraMail invalide.');
     const nodeExe = `${appDir}\\runtime\\node\\node.exe`;
     const engineFile = `${appDir}\\engine\\backend.js`;
+    try {
+      const nodeStats = await Neutralino.filesystem.getStats(nodeExe);
+      const engineStats = await Neutralino.filesystem.getStats(engineFile);
+      if (!nodeStats?.isFile || !engineStats?.isFile) throw new Error('Runtime incomplet');
+    } catch {
+      throw new Error(`Runtime Windows LibraMail incomplet. Vérifiez ${nodeExe} et ${engineFile}.`);
+    }
     const parentPid = Number(window.NL_PID || 0);
     const parentArgument = Number.isInteger(parentPid) && parentPid > 0
       ? ` --libramail-parent-pid=${parentPid}`
       : '';
-    const command = `"${nodeExe}" "${engineFile}"${parentArgument}`;
+    const command = `"${nodeExe}" --use-system-ca "${engineFile}"${parentArgument}`;
 
     bundledEngineLastError = '';
-    // Sous Windows, Node.js utilise par défaut son propre jeu de CA. En ajoutant
-    // le magasin système, LibraMail respecte aussi les autorités approuvées par
-    // Windows (antivirus avec inspection TLS, proxy d'entreprise, PKI locale),
-    // sans désactiver la validation des certificats.
-    bundledEngineProcess = await Neutralino.os.spawnProcess(command, {
-      cwd: appDir,
-      envs: { NODE_USE_SYSTEM_CA: '1' },
-    });
+    await writeEngineStartupLog(`Démarrage : ${command}`, { reset: true });
+    // --use-system-ca ajoute le magasin de certificats Windows aux CA de Node
+    // sans désactiver la validation TLS.
+    bundledEngineProcess = await Neutralino.os.spawnProcess(command, { cwd: appDir });
     bundledEngineOwned = true;
 
     const deadline = Date.now() + 12000;
@@ -158,7 +178,8 @@ const App = (() => {
     }
 
     const detail = bundledEngineLastError ? `\n\n${bundledEngineLastError}` : '';
-    throw new Error(`Le moteur LibraMail n’a pas pu démarrer.${detail}`);
+    await writeEngineStartupLog(`ÉCHEC : Le moteur n’a pas répondu dans le délai imparti.${bundledEngineLastError ? ` ${bundledEngineLastError}` : ''}`);
+    throw new Error(`Le moteur LibraMail n’a pas pu démarrer.${detail}\n\nConsultez data\\engine-startup.log.`);
   }
 
   async function stopBundledWindowsEngine() {
@@ -764,7 +785,7 @@ const App = (() => {
   };
 
   function applyAppVersion() {
-    const rawVersion = String(window.NL_APPVERSION || '0.3.6').replace(/^v/i, '');
+    const rawVersion = String(window.NL_APPVERSION || '0.3.7').replace(/^v/i, '');
     const badge = document.getElementById('app-version');
     if (badge) {
       badge.textContent = `v${rawVersion}`;
@@ -5336,7 +5357,7 @@ const App = (() => {
 
   // ---------- Mise à jour et À propos ----------
   function appVersion() {
-    return String(window.NL_APPVERSION || '0.3.6').replace(/^v/i, '');
+    return String(window.NL_APPVERSION || '0.3.7').replace(/^v/i, '');
   }
 
   function compareVersions(a, b) {

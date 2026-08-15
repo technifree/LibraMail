@@ -1,6 +1,6 @@
 {
   "applicationId": "eu.libramail.app",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "defaultMode": "window",
   "port": 0,
   "documentRoot": "/resources/",
@@ -25,11 +25,12 @@
     "filesystem.readBinaryFile",
     "filesystem.writeFile",
     "filesystem.createDirectory",
-    "filesystem.writeBinaryFile"
+    "filesystem.writeBinaryFile",
+    "filesystem.getStats"
   ],
   "modes": {
     "window": {
-      "title": "LibraMail 0.3.6",
+      "title": "LibraMail 0.3.7",
       "width": 1440,
       "height": 900,
       "minWidth": 1000,

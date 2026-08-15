@@ -1,3 +1,12 @@
+## [0.3.7] - 2026-08-15
+
+### Sécurité et Windows
+- Correction du démarrage du moteur embarqué sous Windows avec `--use-system-ca` et détection explicite du runtime.
+- Ajout de `data/engine-startup.log` pour diagnostiquer un moteur Windows qui ne démarre pas.
+- Les mots de passe IMAP/SMTP sont désormais stockés dans le coffre-fort système via `@napi-rs/keyring` et ne sont plus conservés en clair dans `accounts.json` après migration réussie.
+- Migration automatique et prudente des anciens mots de passe : le texte en clair n’est supprimé qu’après écriture et relecture réussies dans le coffre-fort.
+- Les nouvelles sauvegardes LibraMail excluent les mots de passe des comptes.
+
 ## [0.3.6] - 2026-08-15
 
 ### Windows / TLS

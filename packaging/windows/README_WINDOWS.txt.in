@@ -28,5 +28,6 @@ doivent pas être déplacés séparément.
 Les ressources de l'interface sont intégrées directement dans LibraMail.exe :
 il n'y a plus de fichier resources.neu séparé dans le paquet Windows.
 
-Avec --with-data, le paquet contient les comptes, mots de passe et messages.
-Il doit être traité comme une sauvegarde confidentielle.
+Avec --with-data, le paquet contient les comptes et messages. Les mots de passe
+ayant été migrés vers le coffre-fort système ne sont pas copiés dans le paquet.
+Le contenu reste néanmoins confidentiel et doit être protégé.

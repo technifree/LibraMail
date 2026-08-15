@@ -20,9 +20,10 @@ const iconCache = require('./lib/icon_cache');
 const nativeDialog = require('./lib/native_dialog');
 const calendarImport = require('./lib/calendar_import');
 const calendarSubscriptions = require('./lib/calendar_subscriptions');
+const credentialStore = require('./lib/credential_store');
 
 const PORT = 47800;
-const APP_VERSION = '0.3.6';
+const APP_VERSION = '0.3.7';
 const ROOT = path.resolve(__dirname, '..');
 const DATA = path.join(ROOT, 'data');
 const ACCOUNTS_FILE = path.join(DATA, 'accounts.json');
@@ -32,7 +33,7 @@ const RESTORE_STATE_FILE = path.join(ROOT, '.libramail-restore-state.json');
 const RETENTION_CHECK_MS = 6 * 60 * 60 * 1000;
 const OUTBOX_CHECK_MS = 30 * 1000;
 const CALENDAR_SUBSCRIPTION_CHECK_MS = 60 * 1000;
-const RUNTIME_DATA_FILES = new Set(['engine.log', 'engine.stdout.log', 'engine.stderr.log']);
+const RUNTIME_DATA_FILES = new Set(['engine.log', 'engine.stdout.log', 'engine.stderr.log', 'engine-startup.log']);
 
 function isRuntimeDataFile(name) {
   return RUNTIME_DATA_FILES.has(String(name || '').replace(/\\/g, '/'));
@@ -79,6 +80,7 @@ function loadJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
 }
 const saveJson = (file, object) => fs.writeFileSync(file, JSON.stringify(object, null, 2));
+const saveAccounts = () => saveJson(ACCOUNTS_FILE, accounts.map(credentialStore.serialize));
 
 function serializeAddressList(addressObject) {
   return (addressObject?.value || [])
@@ -183,7 +185,24 @@ function migrateTrustedSenders() {
 }
 
 function loadRuntimeState() {
-  accounts = loadJson(ACCOUNTS_FILE, []).map(normalizeAccount);
+  const rawAccounts = loadJson(ACCOUNTS_FILE, []).map(normalizeAccount);
+  let migrated = false;
+  accounts = rawAccounts.map(account => {
+    try {
+      if (account.credentials?.store === 'system') return credentialStore.hydrate(account);
+      const result = credentialStore.migrateLegacy(account);
+      migrated = migrated || result.migrated;
+      return result.account;
+    } catch (error) {
+      account._credentialWarning = error.message;
+      console.warn(`[LibraMail] Compte ${account.email || account.id} : ${error.message}. Le mot de passe existant n'a pas été supprimé.`);
+      return account;
+    }
+  });
+  if (migrated) {
+    saveAccounts();
+    console.log('[LibraMail] Les mots de passe existants ont été migrés vers le coffre-fort système.');
+  }
   config = { ...defaultConfig, ...loadJson(CONFIG_FILE, {}) };
   migrateTrustedSenders();
 }
@@ -242,7 +261,7 @@ async function ensureFolderMap(account, { force = false, signal = null } = {}) {
   const map = await imap.resolveFolderMap(account, { signal });
   if (accountFoldersChanged(account, map)) {
     account.folderMap = map;
-    saveJson(ACCOUNTS_FILE, accounts);
+    saveAccounts();
   }
   return account.folderMap;
 }
@@ -1388,12 +1407,19 @@ const methods = {
     account.folderMap = await imap.resolveFolderMap(account)
       .catch(error => { throw new Error('IMAP : ' + error.message); });
 
+    try {
+      credentialStore.storePair(account.id, imapPassword, smtpPassword);
+      account.credentials = { store: 'system', version: 1, imap: true, smtp: true };
+    } catch (error) {
+      throw new Error(`Stockage sécurisé des mots de passe impossible : ${error.message}`);
+    }
+
     accounts.push(account);
     if (!config.defaultAccountId) {
       config.defaultAccountId = account.id;
       saveJson(CONFIG_FILE, config);
     }
-    saveJson(ACCOUNTS_FILE, accounts);
+    saveAccounts();
     startWatch(account);
     scheduleAccount(account);
     return publicAccount(account);
@@ -1435,13 +1461,20 @@ const methods = {
     candidate.folderMap = await imap.resolveFolderMap(candidate)
       .catch(error => { throw new Error('IMAP : ' + error.message); });
 
+    try {
+      credentialStore.storePair(candidate.id, candidate.imap.pass, candidate.smtp.pass || candidate.imap.pass);
+      candidate.credentials = { store: 'system', version: 1, imap: true, smtp: true };
+    } catch (error) {
+      throw new Error(`Stockage sécurisé des mots de passe impossible : ${error.message}`);
+    }
+
     imap.stopWatch(current.id);
     const timer = syncTimers.get(current.id);
     if (timer) clearInterval(timer);
     syncTimers.delete(current.id);
     const index = accounts.findIndex(account => account.id === current.id);
     accounts[index] = candidate;
-    saveJson(ACCOUNTS_FILE, accounts);
+    saveAccounts();
     startWatch(candidate);
     scheduleAccount(candidate);
     cleanupExpiredSpamForAccount(candidate, { source: 'settings', silent: true }).catch(() => {});
@@ -1460,6 +1493,7 @@ const methods = {
     const localMessages = db.deleteAccountData(id);
     removeLocalFiles(localMessages);
     fs.rm(path.join(DATA, 'mail', id), { recursive: true, force: true }, () => {});
+    credentialStore.removePair(id);
 
     accounts = accounts.filter(item => item.id !== id);
     if (config.signatureProfiles?.[id]) {
@@ -1468,7 +1502,7 @@ const methods = {
       config.signatureProfiles = signatureProfiles;
     }
     if (config.defaultAccountId === id) config.defaultAccountId = accounts[0]?.id || null;
-    saveJson(ACCOUNTS_FILE, accounts);
+    saveAccounts();
     saveJson(CONFIG_FILE, config);
     return { accounts: accounts.map(publicAccount), defaultAccountId: config.defaultAccountId };
   },
@@ -1483,7 +1517,7 @@ const methods = {
     const account = getAccount(id);
     if (!account) throw new Error('Compte introuvable');
     account.syncIntervalMinutes = Math.max(0, Math.min(1440, Math.round(Number(minutes) || 0)));
-    saveJson(ACCOUNTS_FILE, accounts);
+    saveAccounts();
     scheduleAccount(account);
     return publicAccount(account);
   },
@@ -1492,7 +1526,7 @@ const methods = {
     const account = getAccount(id);
     if (!account) throw new Error('Compte introuvable');
     account.spamRetentionDays = Math.max(0, Math.min(3650, Math.round(Number(days) || 0)));
-    saveJson(ACCOUNTS_FILE, accounts);
+    saveAccounts();
     cleanupExpiredSpamForAccount(account, { source: 'settings', silent: true }).catch(() => {});
     return publicAccount(account);
   },
