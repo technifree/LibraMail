@@ -1,12 +1,12 @@
-# LibraMail 0.3.6
+# LibraMail 0.3.7
 
 ## Français
 
-Amélioration de la compatibilité TLS sous Windows : LibraMail utilise désormais également le magasin de certificats système Windows pour les connexions IMAP et SMTP. Cette évolution améliore notamment la compatibilité avec les antivirus, proxys d'entreprise et autorités de certification locales, sans désactiver la validation TLS.
+Correction du démarrage du moteur sous Windows et amélioration de la compatibilité avec les certificats système. Les identifiants IMAP et SMTP sont désormais stockés dans le coffre-fort sécurisé du système lorsqu'il est disponible, au lieu d'être conservés en clair dans accounts.json. Les nouvelles sauvegardes LibraMail n'incluent plus les mots de passe.
 
 ## English
 
-Improved TLS compatibility on Windows: LibraMail now also uses the Windows system certificate store for IMAP and SMTP connections. This improves compatibility with antivirus software, enterprise proxies and local certificate authorities without disabling TLS certificate validation.
+Fixed Windows engine startup and improved system certificate compatibility. IMAP and SMTP credentials are now stored in the operating system secure credential store when available instead of being kept in plain text in accounts.json. New LibraMail backups no longer include passwords.
 
 ### Downloads / Téléchargements
 
