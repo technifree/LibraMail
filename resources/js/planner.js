@@ -14,6 +14,7 @@
     subscriptions: [],
     editingSubscriptionId: null,
     summaryTimer: null,
+    refreshNoticeTimer: null,
   };
 
   const esc = value => String(value ?? '').replace(/[&<>"']/g, character => ({
@@ -668,6 +669,70 @@
     element.className = `planner-subscription-status ${type || ''}`.trim();
   }
 
+  function plannerRefreshStatus(message = '', type = 'info', { sticky = false } = {}) {
+    const element = document.getElementById('planner-refresh-summary');
+    if (!element) return;
+    if (state.refreshNoticeTimer) { clearTimeout(state.refreshNoticeTimer); state.refreshNoticeTimer = null; }
+    if (!message) { element.className = 'planner-refresh-summary hidden'; return; }
+    const icon = element.querySelector('i');
+    const text = element.querySelector('span');
+    if (text) text.textContent = message;
+    if (icon) icon.className = type === 'busy'
+      ? 'fa-solid fa-rotate'
+      : type === 'success'
+        ? 'fa-solid fa-circle-check'
+        : type === 'error'
+          ? 'fa-solid fa-triangle-exclamation'
+          : 'fa-solid fa-circle-info';
+    element.className = `planner-refresh-summary ${type || 'info'}`.trim();
+    if (!sticky) state.refreshNoticeTimer = setTimeout(() => {
+      element.className = 'planner-refresh-summary hidden';
+      state.refreshNoticeTimer = null;
+    }, 10000);
+  }
+
+  function subscriptionSyncSummary(resultOrResults, { name = '' } = {}) {
+    const results = (Array.isArray(resultOrResults) ? resultOrResults : [resultOrResults]).filter(Boolean);
+    if (!results.length) return { text: t('planner.syncSummaryNoSubscriptions'), type: 'info' };
+    let created = 0;
+    let updated = 0;
+    let removed = 0;
+    let unchangedCalendars = 0;
+    let errors = 0;
+    let successes = 0;
+    for (const result of results) {
+      if (result?.error) { errors += 1; continue; }
+      successes += 1;
+      const itemCreated = Math.max(0, Number(result?.created) || 0);
+      const itemUpdated = Math.max(0, Number(result?.updated) || 0);
+      const itemRemoved = Math.max(0, Number(result?.removed) || 0);
+      created += itemCreated;
+      updated += itemUpdated;
+      removed += itemRemoved;
+      if (result?.notModified || (itemCreated + itemUpdated + itemRemoved) === 0) unchangedCalendars += 1;
+    }
+    const quantityText = (count, singularKey, pluralKey) => t(count === 1 ? singularKey : pluralKey, { count });
+    const parts = [];
+    if (created) parts.push(quantityText(created, 'planner.syncSummaryAddedOne', 'planner.syncSummaryAddedMany'));
+    if (updated) parts.push(quantityText(updated, 'planner.syncSummaryUpdatedOne', 'planner.syncSummaryUpdatedMany'));
+    if (removed) parts.push(quantityText(removed, 'planner.syncSummaryRemovedOne', 'planner.syncSummaryRemovedMany'));
+    if (results.length > 1 && unchangedCalendars && unchangedCalendars < results.length) {
+      parts.push(quantityText(unchangedCalendars, 'planner.syncSummaryUnchangedOne', 'planner.syncSummaryUnchangedMany'));
+    }
+    if (errors) parts.push(quantityText(errors, 'planner.syncSummaryErrorsOne', 'planner.syncSummaryErrorsMany'));
+
+    let body;
+    if (parts.length) body = parts.join(' · ');
+    else if (results.length > 1 && unchangedCalendars === results.length) {
+      body = t('planner.syncSummaryNoChangesMany', { count: results.length });
+    } else body = t('planner.syncSummaryNoChanges');
+
+    const text = name
+      ? t('planner.syncSummaryNamed', { name, summary: body })
+      : t(errors ? 'planner.syncSummaryAllWithErrors' : 'planner.syncSummaryAll', { summary: body });
+    return { text, type: errors && !successes ? 'error' : errors ? 'info' : 'success' };
+  }
+
   function subscriptionHost(value) {
     try { return new URL(value).hostname; } catch { return value; }
   }
@@ -675,6 +740,15 @@
   function formatLastSync(timestamp) {
     if (!Number(timestamp)) return t('planner.neverSynced');
     return new Date(Number(timestamp)).toLocaleString(locale(), { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  }
+
+  function formatRefreshInterval(minutes) {
+    const value = Math.max(0, Number(minutes) || 0);
+    if (!value) return t('planner.refreshManualShort');
+    if (value < 60) return t('planner.refreshEveryMinutes', { count: value });
+    if (value % 1440 === 0) return t('planner.refreshEveryDays', { count: value / 1440 });
+    if (value % 60 === 0) return t('planner.refreshEveryHours', { count: value / 60 });
+    return t('planner.refreshEveryMinutes', { count: value });
   }
 
   function renderSubscriptions() {
@@ -685,7 +759,8 @@
     root.classList.toggle('hidden', state.subscriptions.length === 0);
     root.innerHTML = state.subscriptions.map(subscription => {
       const error = subscription.lastStatus === 'error';
-      const statusText = error ? subscription.lastError : t('planner.lastSync', { date: formatLastSync(subscription.lastSyncAt) });
+      const syncText = t('planner.lastSync', { date: formatLastSync(subscription.lastSyncAt) });
+      const statusText = `${error ? subscription.lastError : syncText} · ${formatRefreshInterval(subscription.refreshMinutes)}`;
       const displayColor = /^#[0-9a-fA-F]{6}$/.test(String(subscription.color || '')) ? subscription.color : '#4F8BD6';
       return `<div class="planner-subscription-row ${Number(state.editingSubscriptionId) === Number(subscription.id) ? 'editing' : ''}" data-subscription-id="${Number(subscription.id)}">
         <div class="planner-subscription-main">
@@ -720,12 +795,14 @@
     const name = document.getElementById('planner-subscription-name');
     const account = document.getElementById('planner-subscription-account');
     const color = document.getElementById('planner-subscription-color');
+    const refresh = document.getElementById('planner-subscription-refresh');
     const button = document.getElementById('btn-planner-subscription-add');
     const cancel = document.getElementById('btn-planner-subscription-cancel-edit');
     if (url) url.value = '';
     if (name) name.value = '';
     if (account) account.innerHTML = subscriptionAccountOptions(state.filterAccountId || '');
     if (color) color.value = '#4F8BD6';
+    if (refresh) refresh.value = '30';
     if (button) button.innerHTML = `<i class="fa-solid fa-link"></i><span>${esc(t('planner.subscribe'))}</span>`;
     cancel?.classList.add('hidden');
     renderSubscriptions();
@@ -739,12 +816,14 @@
     const name = document.getElementById('planner-subscription-name');
     const account = document.getElementById('planner-subscription-account');
     const color = document.getElementById('planner-subscription-color');
+    const refresh = document.getElementById('planner-subscription-refresh');
     const button = document.getElementById('btn-planner-subscription-add');
     const cancel = document.getElementById('btn-planner-subscription-cancel-edit');
     if (url) url.value = subscription.url || '';
     if (name) name.value = subscription.name || '';
     if (account) account.innerHTML = subscriptionAccountOptions(subscription.accountId || '');
     if (color) color.value = /^#[0-9a-fA-F]{6}$/.test(String(subscription.color || '')) ? subscription.color : '#4F8BD6';
+    if (refresh) refresh.value = String(Math.max(0, Number(subscription.refreshMinutes) || 0));
     if (button) button.innerHTML = `<i class="fa-solid fa-floppy-disk"></i><span>${esc(t('planner.saveSubscription'))}</span>`;
     cancel?.classList.remove('hidden');
     subscriptionStatus(t('planner.editingSubscription', { name: subscription.name || subscriptionHost(subscription.url) }));
@@ -769,6 +848,7 @@
     const name = document.getElementById('planner-subscription-name')?.value.trim() || '';
     const accountId = document.getElementById('planner-subscription-account')?.value || '';
     const color = document.getElementById('planner-subscription-color')?.value || '';
+    const refreshMinutes = Math.max(0, Number(document.getElementById('planner-subscription-refresh')?.value) || 0);
     if (!url) { subscriptionStatus(t('planner.subscriptionUrlRequired'), 'error'); return; }
     const button = document.getElementById('btn-planner-subscription-add');
     const editingId = Number(state.editingSubscriptionId) || null;
@@ -776,8 +856,8 @@
     subscriptionStatus(t(editingId ? 'planner.subscriptionUpdating' : 'planner.subscriptionAdding'));
     try {
       const result = editingId
-        ? await App.rpc('calendar.subscriptions.update', { id: editingId, url, name, accountId, color })
-        : await App.rpc('calendar.subscriptions.add', { url, name, accountId, color });
+        ? await App.rpc('calendar.subscriptions.update', { id: editingId, url, name, accountId, color, refreshMinutes })
+        : await App.rpc('calendar.subscriptions.add', { url, name, accountId, color, refreshMinutes });
       resetSubscriptionEditor();
       await loadSubscriptions();
       await refreshSummary();
@@ -793,31 +873,48 @@
   async function syncSubscription(id, button = null) {
     if (button) button.disabled = true;
     subscriptionStatus(t('planner.subscriptionSyncing'));
+    plannerRefreshStatus(t('planner.subscriptionSyncing'), 'busy', { sticky: true });
+    const current = state.subscriptions.find(item => Number(item.id) === Number(id));
+    const name = current?.name || subscriptionHost(current?.url || '');
     try {
-      await App.rpc('calendar.subscriptions.sync', { id });
+      const result = await App.rpc('calendar.subscriptions.sync', { id });
       await loadSubscriptions();
       await refreshSummary();
       if (document.getElementById('planner-modal')?.classList.contains('open')) await loadEvents();
-      subscriptionStatus(t('planner.subscriptionSynced'), 'success');
+      const summary = subscriptionSyncSummary(result, { name });
+      subscriptionStatus(summary.text, summary.type);
+      plannerRefreshStatus(summary.text, summary.type);
+      App.status(summary.text, summary.type);
     } catch (error) {
       await loadSubscriptions();
       subscriptionStatus(`${t('planner.subscriptionError')} : ${error.message}`, 'error');
+      plannerRefreshStatus(`${t('planner.subscriptionError')} : ${error.message}`, 'error');
+      App.status(`${t('planner.subscriptionError')} : ${error.message}`, 'error');
     } finally { if (button) button.disabled = false; }
   }
 
   async function syncAllSubscriptions() {
-    const button = document.getElementById('btn-planner-subscriptions-sync');
-    button.disabled = true;
+    const buttons = [
+      document.getElementById('btn-planner-subscriptions-sync'),
+      document.getElementById('btn-planner-refresh'),
+    ].filter(Boolean);
+    buttons.forEach(button => { button.disabled = true; });
     subscriptionStatus(t('planner.subscriptionSyncing'));
+    plannerRefreshStatus(t('planner.subscriptionSyncing'), 'busy', { sticky: true });
     try {
-      await App.rpc('calendar.subscriptions.syncAll');
+      const results = await App.rpc('calendar.subscriptions.syncAll');
       await loadSubscriptions();
       await refreshSummary();
       if (document.getElementById('planner-modal')?.classList.contains('open')) await loadEvents();
-      subscriptionStatus(t('planner.subscriptionSynced'), 'success');
+      const summary = subscriptionSyncSummary(results);
+      subscriptionStatus(summary.text, summary.type);
+      plannerRefreshStatus(summary.text, summary.type);
+      App.status(summary.text, summary.type);
     } catch (error) {
       subscriptionStatus(`${t('planner.subscriptionError')} : ${error.message}`, 'error');
-    } finally { button.disabled = false; }
+      plannerRefreshStatus(`${t('planner.subscriptionError')} : ${error.message}`, 'error');
+      App.status(`${t('planner.subscriptionError')} : ${error.message}`, 'error');
+    } finally { buttons.forEach(button => { button.disabled = false; }); }
   }
 
   async function removeSubscription(id) {
@@ -932,6 +1029,7 @@
   }
 
   async function openPlanner() {
+    plannerRefreshStatus('');
     populateAccountSelects();
     state.anchor = startOfDay(state.selected || new Date());
     document.getElementById('planner-modal')?.classList.add('open');
@@ -948,6 +1046,7 @@
     document.getElementById('btn-planner-pane-new')?.addEventListener('click', async () => { await openPlanner(); openNewEvent(new Date()); });
     document.getElementById('btn-planner-import')?.addEventListener('click', () => document.getElementById('planner-import-file')?.click());
     document.getElementById('btn-planner-subscriptions')?.addEventListener('click', openSubscriptions);
+    document.getElementById('btn-planner-refresh')?.addEventListener('click', syncAllSubscriptions);
     document.getElementById('btn-close-planner-subscriptions')?.addEventListener('click', closeSubscriptions);
     document.getElementById('btn-close-planner-subscriptions-footer')?.addEventListener('click', closeSubscriptions);
     document.getElementById('planner-import-file')?.addEventListener('change', event => importFiles(event.target.files));

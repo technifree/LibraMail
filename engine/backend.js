@@ -22,7 +22,7 @@ const calendarImport = require('./lib/calendar_import');
 const calendarSubscriptions = require('./lib/calendar_subscriptions');
 
 const PORT = 47800;
-const APP_VERSION = '0.3.3';
+const APP_VERSION = '0.3.4';
 const ROOT = path.resolve(__dirname, '..');
 const DATA = path.join(ROOT, 'data');
 const ACCOUNTS_FILE = path.join(DATA, 'accounts.json');
@@ -31,7 +31,7 @@ const BACKUPS_DIR = path.join(ROOT, 'backups');
 const RESTORE_STATE_FILE = path.join(ROOT, '.libramail-restore-state.json');
 const RETENTION_CHECK_MS = 6 * 60 * 60 * 1000;
 const OUTBOX_CHECK_MS = 30 * 1000;
-const CALENDAR_SUBSCRIPTION_CHECK_MS = 30 * 60 * 1000;
+const CALENDAR_SUBSCRIPTION_CHECK_MS = 60 * 1000;
 const RUNTIME_DATA_FILES = new Set(['engine.log', 'engine.stdout.log', 'engine.stderr.log']);
 
 function isRuntimeDataFile(name) {
@@ -195,6 +195,8 @@ const sockets = new Set();
 const syncTimers = new Map();
 const activeSyncs = new Map();
 const syncControllers = new Map();
+const syncCooldownUntil = new Map();
+const SYNC_CANCEL_COOLDOWN_MS = 60 * 1000;
 let activeSyncBatch = null;
 const activeCleanups = new Map();
 let retentionTimer = null;
@@ -350,7 +352,14 @@ async function syncRole(account, folder, role, source, signal = null) {
 
 function cancelActiveSyncs(accountId = null) {
   if (!accountId && activeSyncBatch) activeSyncBatch.cancelled = true;
-  const ids = accountId ? [accountId] : [...syncControllers.keys()];
+  const ids = accountId ? [accountId] : [...new Set([
+    ...syncControllers.keys(),
+    ...activeSyncs.keys(),
+  ])];
+  const cooldownUntil = Date.now() + SYNC_CANCEL_COOLDOWN_MS;
+  if (accountId) syncCooldownUntil.set(accountId, cooldownUntil);
+  else for (const account of accounts) syncCooldownUntil.set(account.id, cooldownUntil);
+
   let cancelled = 0;
   for (const id of ids) {
     const controller = syncControllers.get(id);
@@ -359,13 +368,29 @@ function cancelActiveSyncs(accountId = null) {
     cancelled++;
   }
   // Fermer immédiatement la socket débloque aussi un FETCH ou une connexion
-  // réseau qui ne répond plus.
+  // réseau qui ne répond plus. Le court délai anti-redémarrage ci-dessus évite
+  // qu'IDLE ou le minuteur relancent aussitôt la relève que l'utilisateur vient
+  // volontairement d'interrompre.
   cancelled = Math.max(cancelled, imap.cancelSync(accountId));
   return cancelled;
 }
 
+function automaticSyncCoolingDown(accountId) {
+  const until = Number(syncCooldownUntil.get(accountId)) || 0;
+  if (!until) return false;
+  if (Date.now() >= until) {
+    syncCooldownUntil.delete(accountId);
+    return false;
+  }
+  return true;
+}
+
 async function syncAccount(account, source = 'manual') {
   if (!account) throw new Error('Compte introuvable');
+  if (source === 'manual') syncCooldownUntil.delete(account.id);
+  else if (automaticSyncCoolingDown(account.id)) {
+    return { skipped: true, cooldown: true, added: 0, indexed: 0, changed: 0, removed: 0 };
+  }
   if (activeSyncs.has(account.id)) return activeSyncs.get(account.id);
 
   const controller = new AbortController();
@@ -373,7 +398,7 @@ async function syncAccount(account, source = 'manual') {
   const task = (async () => {
     broadcast('sync.started', { accountId: account.id, source, folder: 'all' });
     try {
-      const folders = await ensureFolderMap(account, { force: source === 'manual', signal: controller.signal });
+      const folders = await ensureFolderMap(account, { force: false, signal: controller.signal });
       if (controller.signal.aborted) throw Object.assign(new Error('Relève interrompue'), { code: 'SYNC_CANCELLED' });
       const jobs = [
         ['inbox', folders.inbox || 'INBOX'],
@@ -860,7 +885,7 @@ async function syncCalendarSubscription(id, { announce = true } = {}) {
         lastError: '',
       });
       if (announce) broadcast('calendar.subscriptions.changed', { action: 'synced', id: subscription.id, notModified: true });
-      return { subscription: current, notModified: true, created: 0, updated: 0, removed: 0, total: 0 };
+      return { subscription: current, notModified: true, created: 0, updated: 0, unchanged: 0, removed: 0, total: 0 };
     }
     let fileName = 'calendar.ics';
     try { fileName = decodeURIComponent(new URL(remote.url || subscription.url).pathname.split('/').filter(Boolean).pop() || 'calendar.ics'); } catch {}
@@ -909,14 +934,23 @@ async function syncCalendarSubscription(id, { announce = true } = {}) {
   }
 }
 
-async function syncAllCalendarSubscriptions({ announce = false } = {}) {
+function calendarSubscriptionIsDue(subscription, now = Date.now()) {
+  const refreshMinutes = Math.max(0, Number(subscription?.refreshMinutes) || 0);
+  if (!refreshMinutes) return false;
+  const lastSyncAt = Math.max(0, Number(subscription?.lastSyncAt) || 0);
+  return !lastSyncAt || (now - lastSyncAt) >= refreshMinutes * 60 * 1000;
+}
+
+async function syncAllCalendarSubscriptions({ announce = false, dueOnly = false } = {}) {
   if (calendarSubscriptionSyncBusy || maintenanceOperation || shuttingDown) return [];
   calendarSubscriptionSyncBusy = true;
   const results = [];
   try {
+    const now = Date.now();
     for (const subscription of db.listCalendarSubscriptions({ enabledOnly: true })) {
+      if (dueOnly && !calendarSubscriptionIsDue(subscription, now)) continue;
       try { results.push(await syncCalendarSubscription(subscription.id, { announce })); }
-      catch (error) { results.push({ id: subscription.id, error: error.message }); }
+      catch (error) { results.push({ id: subscription.id, subscription, error: error.message }); }
     }
     return results;
   } finally {
@@ -955,9 +989,9 @@ function startAccountRuntime({ resolveFolders = false } = {}) {
   scheduledSendTimer.unref?.();
   setTimeout(() => processScheduledMessages().catch(() => {}), 1500).unref?.();
   if (calendarSubscriptionTimer) clearInterval(calendarSubscriptionTimer);
-  calendarSubscriptionTimer = setInterval(() => syncAllCalendarSubscriptions({ announce: true }).catch(() => {}), CALENDAR_SUBSCRIPTION_CHECK_MS);
+  calendarSubscriptionTimer = setInterval(() => syncAllCalendarSubscriptions({ announce: true, dueOnly: true }).catch(() => {}), CALENDAR_SUBSCRIPTION_CHECK_MS);
   calendarSubscriptionTimer.unref?.();
-  setTimeout(() => syncAllCalendarSubscriptions({ announce: true }).catch(() => {}), 5000).unref?.();
+  setTimeout(() => syncAllCalendarSubscriptions({ announce: true, dueOnly: true }).catch(() => {}), 5000).unref?.();
 }
 
 function backupTimestamp(date = new Date()) {
@@ -1799,11 +1833,11 @@ const methods = {
     };
   },
   'calendar.subscriptions.list': async () => db.listCalendarSubscriptions(),
-  'calendar.subscriptions.add': async ({ name = '', url = '', accountId = '', color = '' } = {}) => {
+  'calendar.subscriptions.add': async ({ name = '', url = '', accountId = '', color = '', refreshMinutes = 30 } = {}) => {
     const normalizedUrl = calendarSubscriptions.normalizeSubscriptionUrl(url);
     const subscription = db.saveCalendarSubscription({
       name: String(name || '').trim() || calendarSubscriptions.displayNameFromUrl(normalizedUrl),
-      url: normalizedUrl, accountId, color, enabled: true,
+      url: normalizedUrl, accountId, color, refreshMinutes, enabled: true,
     });
     broadcast('calendar.subscriptions.changed', { action: 'created', id: subscription.id });
     try {
@@ -1812,7 +1846,7 @@ const methods = {
       return { subscription: db.getCalendarSubscription(subscription.id), error: error.message };
     }
   },
-  'calendar.subscriptions.update': async ({ id, name = '', url = '', accountId = '', color = '' } = {}) => {
+  'calendar.subscriptions.update': async ({ id, name = '', url = '', accountId = '', color = '', refreshMinutes = 30 } = {}) => {
     const current = db.getCalendarSubscription(id);
     if (!current) throw new Error('Abonnement de calendrier introuvable');
     const normalizedUrl = calendarSubscriptions.normalizeSubscriptionUrl(url);
@@ -1823,6 +1857,7 @@ const methods = {
       url: normalizedUrl,
       accountId,
       color,
+      refreshMinutes,
       enabled: true,
     }, id);
     db.updateCalendarSubscriptionEventsPresentation(subscription.id, {
@@ -2001,11 +2036,20 @@ async function initializeAccount(account) {
   scheduleAccount(account);
 }
 
+process.on('unhandledRejection', error => {
+  // ImapFlow rejette les commandes encore en attente lorsqu'une relève est
+  // interrompue volontairement. Ces NoConnection sont attendus uniquement
+  // pour les connexions que LibraMail vient explicitement de couper.
+  if (imap.isExpectedCancellationError?.(error)) return;
+  console.error('[LibraMail] Promesse non interceptée :', error);
+});
+process.on('uncaughtException', error => {
+  if (imap.isExpectedCancellationError?.(error)) return;
+  console.error('[LibraMail] Erreur non interceptée :', error);
+});
+
 startAccountRuntime({ resolveFolders: true });
 
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
-process.on('uncaughtException', error => {
-  console.error('[LibraMail] Erreur non interceptée :', error);
-});
 

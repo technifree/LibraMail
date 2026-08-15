@@ -154,6 +154,7 @@ const App = (() => {
     if (entry.state === 'running') return 'fa-solid fa-rotate fa-spin';
     if (entry.state === 'error') return 'fa-solid fa-triangle-exclamation';
     if (entry.state === 'cancelled') return 'fa-solid fa-ban';
+    if (entry.state === 'stopping') return 'fa-solid fa-circle-notch fa-spin';
     return 'fa-solid fa-check';
   }
 
@@ -300,10 +301,20 @@ const App = (() => {
   }
 
   async function stopSync(accountId = null) {
+    const ids = accountId
+      ? [activeSyncActivities.get(accountId)].filter(Boolean)
+      : [...activeSyncActivities.values()];
+    for (const id of ids) {
+      updateActivity(id, {
+        state: 'stopping',
+        detail: t('status.syncStopping'),
+      });
+    }
+    renderActivity();
+    status(t('status.syncStopping'), 'busy');
     try {
       const result = await rpc('sync.cancel', accountId ? { accountId } : {});
-      status(t(Number(result?.cancelled) > 0 ? 'status.syncStopping' : 'status.noSyncToStop'),
-             Number(result?.cancelled) > 0 ? 'busy' : 'info');
+      if (Number(result?.cancelled) <= 0) status(t('status.noSyncToStop'), 'info');
     } catch (error) {
       status(error.message, 'error');
     }
@@ -644,7 +655,7 @@ const App = (() => {
   };
 
   function applyAppVersion() {
-    const rawVersion = String(window.NL_APPVERSION || '0.3.3').replace(/^v/i, '');
+    const rawVersion = String(window.NL_APPVERSION || '0.3.4').replace(/^v/i, '');
     const badge = document.getElementById('app-version');
     if (badge) {
       badge.textContent = `v${rawVersion}`;
@@ -1183,6 +1194,10 @@ const App = (() => {
   const threadToggleTargets = new Map();
 
   async function openListItem(row, { fromTab = false, preferredMessageId = null } = {}) {
+    // Le message affiché dans l'aperçu doit rester identifiable dans la liste.
+    // Pour un fil, openConversation()/expandThread() affinera ensuite l'état
+    // actif vers le message réellement présenté dans le lecteur.
+    list?.setActiveMessage(row.id);
     if (!fromTab) {
       previewReaderRow = { ...row };
       activeReaderTabKey = 'preview';
@@ -3683,6 +3698,24 @@ const App = (() => {
     return `${heading}\n${quoted}`.trim();
   }
 
+  function composeQuoteElement() {
+    return document.getElementById('compose-quote-content');
+  }
+
+  function composeQuoteEditorText() {
+    const element = composeQuoteElement();
+    if (!element) return composeQuoteText;
+    return String(element.innerText ?? element.textContent ?? '')
+      .replace(/\r\n?/g, '\n')
+      .replace(/\u00a0/g, ' ');
+  }
+
+  function syncComposeQuoteText() {
+    if (composeMode === 'new') return composeQuoteText;
+    composeQuoteText = composeQuoteEditorText();
+    return composeQuoteText;
+  }
+
   function composePosition(profile) {
     if (isReplyMode()) return profile.replyPosition;
     if (composeMode === 'forward') return profile.forwardPosition;
@@ -4390,6 +4423,7 @@ const App = (() => {
   }
 
   function buildOutgoingMessage() {
+    syncComposeQuoteText();
     const accountId = document.getElementById('compose-from').value;
     const profile = signatureProfile(accountId);
     const useSignature = !document.getElementById('compose-use-signature').disabled
@@ -4437,6 +4471,7 @@ const App = (() => {
   }
 
   function composeState() {
+    syncComposeQuoteText();
     return {
       accountId: document.getElementById('compose-from').value,
       to: document.getElementById('compose-to').value,
@@ -5192,7 +5227,7 @@ const App = (() => {
 
   // ---------- Mise à jour et À propos ----------
   function appVersion() {
-    return String(window.NL_APPVERSION || '0.3.3').replace(/^v/i, '');
+    return String(window.NL_APPVERSION || '0.3.4').replace(/^v/i, '');
   }
 
   function compareVersions(a, b) {
@@ -6232,9 +6267,11 @@ const App = (() => {
     document.querySelector('.compose-editor-resize-shell')?.addEventListener('click', event => {
       if (event.target === event.currentTarget) focusComposeEditorAtStart({ scroll: false });
     });
-    // La citation est en lecture seule. Un clic dessus ramène désormais à la
-    // vraie zone de réponse, au lieu de laisser croire que le compositeur est bloqué.
-    document.getElementById('compose-quote-block')?.addEventListener('click', focusComposeEditorFromQuote);
+    // La citation reste séparée du corps principal mais devient éditable :
+    // les coupes, corrections et copier/coller sont répercutés dans le message envoyé.
+    const composeQuote = document.getElementById('compose-quote-content');
+    composeQuote?.addEventListener('input', syncComposeQuoteText);
+    composeQuote?.addEventListener('blur', syncComposeQuoteText);
     document.querySelectorAll('[data-compose-command]').forEach(button => {
       button.addEventListener('mousedown', event => {
         rememberComposeSelection();

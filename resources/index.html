@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LibraMail 0.3.3</title>
+  <title>LibraMail 0.3.4</title>
   <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
   <link rel="stylesheet" href="themes/dark.css">
   <link rel="stylesheet" href="themes/light.css">
@@ -13,13 +13,13 @@
 <div id="app" data-layout="vertical">
 
   <div id="topbar">
-    <button id="brand" class="brand-button" type="button" title="LibraMail 0.3.3" data-i18n-title="about.open">
+    <button id="brand" class="brand-button" type="button" title="LibraMail 0.3.4" data-i18n-title="about.open">
       <span class="brand-logo-box" aria-hidden="true">
         <img class="brand-logo brand-logo-light" src="assets/logo-light.png" alt="">
         <img class="brand-logo brand-logo-dark" src="assets/logo-dark.png" alt="">
       </span>
       <span class="brand-name">LibraMail</span>
-      <span class="version-badge" id="app-version">v0.3.3</span>
+      <span class="version-badge" id="app-version">v0.3.4</span>
     </button>
     <button class="btn primary" id="btn-compose">
       <i class="fa-solid fa-pen"></i><span data-i18n="compose"></span>
@@ -398,7 +398,7 @@
         </section>
         <section id="compose-quote-block" class="compose-preview-block quote hidden">
           <header><i class="fa-solid fa-quote-left"></i><span id="compose-quote-title" data-i18n="compose.quotedMessage"></span></header>
-          <pre id="compose-quote-content"></pre>
+          <pre id="compose-quote-content" contenteditable="true" spellcheck="true" role="textbox" aria-multiline="true"></pre>
         </section>
       </div>
       <div class="field">
@@ -1024,9 +1024,13 @@
       <button class="btn compact" id="btn-planner-import" type="button"><i class="fa-solid fa-file-import"></i><span data-i18n="planner.import"></span></button>
       <input id="planner-import-file" type="file" accept=".ics,.ical,.vcs,.csv,text/calendar,text/csv" multiple hidden>
       <button class="btn compact" id="btn-planner-subscriptions" type="button"><i class="fa-solid fa-link"></i><span data-i18n="planner.subscriptions"></span></button>
+      <button class="btn compact" id="btn-planner-refresh" type="button" data-i18n-title="planner.refreshInternetCalendars"><i class="fa-solid fa-rotate"></i><span data-i18n="planner.refresh"></span></button>
       <button class="btn compact" id="btn-planner-new" type="button"><i class="fa-solid fa-plus"></i><span data-i18n="planner.newEvent"></span></button>
       <button class="iconbtn" data-close><i class="fa-solid fa-xmark"></i></button>
     </header>
+    <div id="planner-refresh-summary" class="planner-refresh-summary hidden" role="status" aria-live="polite">
+      <i class="fa-solid fa-circle-info"></i><span></span>
+    </div>
     <div class="body planner-body">
       <section class="planner-calendar-panel">
         <div class="planner-toolbar">
@@ -1099,6 +1103,17 @@
         <div class="field planner-subscription-url"><label for="planner-subscription-url" data-i18n="planner.subscriptionUrl"></label><input id="planner-subscription-url" type="url" autocomplete="off" placeholder="webcal://… / https://…"></div>
         <div class="field"><label for="planner-subscription-name" data-i18n="planner.subscriptionName"></label><input id="planner-subscription-name" type="text" maxlength="240" autocomplete="off" data-i18n-ph="planner.subscriptionNamePlaceholder"></div>
         <div class="field"><label for="planner-subscription-account" data-i18n="planner.account"></label><select id="planner-subscription-account"></select></div>
+        <div class="field"><label for="planner-subscription-refresh" data-i18n="planner.refreshInterval"></label><select id="planner-subscription-refresh">
+          <option value="0" data-i18n="planner.refreshManual"></option>
+          <option value="5" data-i18n="planner.refresh5m"></option>
+          <option value="15" data-i18n="planner.refresh15m"></option>
+          <option value="30" data-i18n="planner.refresh30m" selected></option>
+          <option value="60" data-i18n="planner.refresh1h"></option>
+          <option value="120" data-i18n="planner.refresh2h"></option>
+          <option value="360" data-i18n="planner.refresh6h"></option>
+          <option value="720" data-i18n="planner.refresh12h"></option>
+          <option value="1440" data-i18n="planner.refresh24h"></option>
+        </select></div>
         <div class="field planner-subscription-color-field"><label for="planner-subscription-color" data-i18n="planner.color"></label><input id="planner-subscription-color" type="color" value="#4F8BD6"></div>
         <div class="planner-subscription-help"><i class="fa-solid fa-circle-info"></i><span data-i18n="planner.subscriptionHelp"></span></div>
         <div class="planner-subscription-form-actions">

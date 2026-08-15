@@ -12,6 +12,8 @@ const spam = require('./spam');
 
 const clients = new Map();
 const syncClients = new Map();
+const closingClients = new WeakSet();
+const interruptedConnections = new Map();
 
 class SyncCancelledError extends Error {
   constructor(message = 'Relève interrompue par l’utilisateur') {
@@ -27,6 +29,47 @@ function throwIfAborted(signal) {
 
 function isSyncCancelled(error) {
   return error?.code === 'SYNC_CANCELLED' || error?.name === 'SyncCancelledError';
+}
+
+function isExpectedCancellationError(error) {
+  if (!error) return false;
+  const now = Date.now();
+  for (const [id, expiresAt] of interruptedConnections) {
+    if (expiresAt <= now) interruptedConnections.delete(id);
+  }
+  const connectionId = error?._connId ? String(error._connId) : '';
+  return error?.code === 'NoConnection'
+    && connectionId
+    && interruptedConnections.has(connectionId);
+}
+
+/**
+ * Coupe une connexion IMAP au prochain tour de boucle.
+ *
+ * ImapFlow rejette synchroniquement les commandes/locks en attente lors de
+ * close(). Si close() est lancé directement depuis l'événement AbortSignal,
+ * cette rejection peut devancer le catch de l'opération async qui est en train
+ * d'être interrompue et finir en unhandledRejection/uncaughtException.
+ * Le setImmediate laisse d'abord l'appel controller.abort() se terminer, puis
+ * la promesse de synchronisation reprend normalement la main et transforme le
+ * NoConnection en SyncCancelledError. Le WeakSet évite aussi deux close()
+ * concurrents (AbortSignal + cancelSync).
+ */
+function interruptClient(client) {
+  if (!client || closingClients.has(client)) return false;
+  closingClients.add(client);
+  if (client.id) interruptedConnections.set(String(client.id), Date.now() + 10000);
+  setImmediate(() => {
+    try {
+      if (client.usable !== false) client.close();
+    } catch (error) {
+      // Une connexion déjà tombée est équivalente à une annulation réussie.
+      if (!isExpectedCancellationError(error)) {
+        console.warn('[LibraMail] Fermeture IMAP interrompue :', error?.message || error);
+      }
+    }
+  });
+  return true;
 }
 
 function mailDir(dataDir, accountId, folder) {
@@ -269,11 +312,19 @@ async function storeNewMessages(client, account, folder, dataDir, firstUid, last
   return { added, maxUid };
 }
 
-async function reconcileFolder(client, account, folder, state, serverCount, signal, onProgress, role) {
-  const localCount = db.countFolderMessages(account.id, folder);
+async function reconcileFolder(client, account, folder, state, serverCount, addedCount, signal, onProgress, role) {
   const lastReconcile = Number(state?.last_reconcile) || 0;
+  const previousServerCount = state?.server_count == null ? null : Math.max(0, Number(state.server_count) || 0);
   const due = Date.now() - lastReconcile > 24 * 60 * 60 * 1000;
-  const mustReconcile = !state || localCount !== serverCount || due;
+
+  // Une différence permanente entre le cache local et le nombre annoncé par
+  // le serveur (par exemple après une migration ancienne ou un cache partiel)
+  // ne doit pas provoquer SEARCH ALL à chaque relève. On compare désormais
+  // l'évolution du compteur serveur : les nouveaux UID déjà téléchargés sont
+  // pris en compte et une différence restante suggère une suppression distante.
+  const unexpectedCountChange = previousServerCount != null
+    && serverCount !== previousServerCount + Math.max(0, Number(addedCount) || 0);
+  const mustReconcile = previousServerCount == null || unexpectedCountChange || due;
   if (!mustReconcile) return { removed: 0, reconciledAt: lastReconcile };
 
   throwIfAborted(signal);
@@ -336,12 +387,13 @@ async function syncFolderWithClient(client, account, folder, dataDir, onProgress
     // dernier UID a été supprimé, mémoriser uidNext-1 évite de le redemander.
     maxUid = Math.max(maxUid, lastServerUid);
     const reconciliation = await reconcileFolder(
-      client, account, folder, state, serverCount, signal, onProgress, role
+      client, account, folder, state, serverCount, addedIds.length, signal, onProgress, role
     );
     const finalCount = db.countFolderMessages(account.id, folder);
     db.setSyncState(account.id, folder, uidValidity, maxUid, {
       highestModseq,
       messageCount: finalCount,
+      serverCount,
       lastReconcile: reconciliation.reconciledAt,
     });
 
@@ -364,9 +416,7 @@ async function syncFolders(account, jobs, dataDir, onProgress, { signal = null, 
   throwIfAborted(signal);
   const client = makeClient(account);
   syncClients.set(account.id, client);
-  const abort = () => {
-    try { client.close(); } catch {}
-  };
+  const abort = () => { interruptClient(client); };
   signal?.addEventListener('abort', abort, { once: true });
 
   try {
@@ -396,7 +446,7 @@ async function syncFolders(account, jobs, dataDir, onProgress, { signal = null, 
     signal?.removeEventListener('abort', abort);
     if (syncClients.get(account.id) === client) syncClients.delete(account.id);
     if (signal?.aborted) {
-      try { client.close(); } catch {}
+      interruptClient(client);
     } else {
       await client.logout().catch(() => {});
     }
@@ -422,7 +472,7 @@ function cancelSync(accountId = null) {
   let cancelled = 0;
   for (const [id, client] of entries) {
     if (!client) continue;
-    try { client.close(); } catch {}
+    interruptClient(client);
     syncClients.delete(id);
     cancelled++;
   }
@@ -433,7 +483,7 @@ async function listFolders(account, { signal = null } = {}) {
   if (!account) throw new Error('Compte introuvable');
   throwIfAborted(signal);
   const client = makeClient(account);
-  const abort = () => { try { client.close(); } catch {} };
+  const abort = () => { interruptClient(client); };
   signal?.addEventListener('abort', abort, { once: true });
   try {
     await client.connect();
@@ -451,7 +501,7 @@ async function listFolders(account, { signal = null } = {}) {
   } finally {
     signal?.removeEventListener('abort', abort);
     if (signal?.aborted) {
-      try { client.close(); } catch {}
+      interruptClient(client);
     } else {
       await client.logout().catch(() => {});
     }
@@ -599,6 +649,7 @@ module.exports = {
   syncFolders,
   cancelSync,
   isSyncCancelled,
+  isExpectedCancellationError,
   listFolders,
   resolveFolderMap,
   serverAction,

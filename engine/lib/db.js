@@ -321,6 +321,7 @@ function init(dataDir) {
     account_id TEXT,
     color TEXT NOT NULL DEFAULT '',
     enabled INTEGER NOT NULL DEFAULT 1,
+    refresh_minutes INTEGER NOT NULL DEFAULT 30,
     etag TEXT NOT NULL DEFAULT '',
     last_modified TEXT NOT NULL DEFAULT '',
     last_sync_at INTEGER NOT NULL DEFAULT 0,
@@ -362,8 +363,10 @@ function init(dataDir) {
   ensureColumn('contacts', 'avatar_data', "TEXT NOT NULL DEFAULT ''");
   ensureColumn('sync_state', 'highest_modseq', 'TEXT');
   ensureColumn('sync_state', 'message_count', 'INTEGER DEFAULT 0');
+  ensureColumn('sync_state', 'server_count', 'INTEGER');
   ensureColumn('sync_state', 'last_reconcile', 'INTEGER DEFAULT 0');
   ensureColumn('calendar_events', 'import_key', 'TEXT');
+  ensureColumn('calendar_subscriptions', 'refresh_minutes', 'INTEGER NOT NULL DEFAULT 30');
   ensureColumn('calendar_events', 'subscription_id', 'INTEGER');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_calendar_events_import_key ON calendar_events(import_key)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_calendar_events_subscription ON calendar_events(subscription_id, start_at)');
@@ -1567,20 +1570,22 @@ const getSyncState = (accountId, folder) => db.prepare(
 function setSyncState(accountId, folder, uidValidity, lastUid, options = {}) {
   const highestModseq = options.highestModseq == null ? null : String(options.highestModseq);
   const messageCount = Math.max(0, Number(options.messageCount) || 0);
+  const serverCount = options.serverCount == null ? null : Math.max(0, Number(options.serverCount) || 0);
   const lastReconcile = Math.max(0, Number(options.lastReconcile) || 0);
   return db.prepare(`
     INSERT INTO sync_state(account_id, folder, uidvalidity, last_uid,
-                           highest_modseq, message_count, last_reconcile)
-    VALUES (?,?,?,?,?,?,?)
+                           highest_modseq, message_count, server_count, last_reconcile)
+    VALUES (?,?,?,?,?,?,?,?)
     ON CONFLICT(account_id, folder) DO UPDATE SET
       uidvalidity=excluded.uidvalidity,
       last_uid=excluded.last_uid,
       highest_modseq=COALESCE(excluded.highest_modseq, sync_state.highest_modseq),
       message_count=excluded.message_count,
+      server_count=COALESCE(excluded.server_count, sync_state.server_count),
       last_reconcile=CASE WHEN excluded.last_reconcile > 0
                           THEN excluded.last_reconcile ELSE sync_state.last_reconcile END
   `).run(accountId, folder, uidValidity, lastUid,
-         highestModseq, messageCount, lastReconcile);
+         highestModseq, messageCount, serverCount, lastReconcile);
 }
 
 function countFolderMessages(accountId, folder) {
@@ -1797,6 +1802,7 @@ function calendarSubscriptionRow(row) {
     accountId: row.account_id || '',
     color: row.color || '',
     enabled: Boolean(row.enabled),
+    refreshMinutes: Math.max(0, Number(row.refresh_minutes) || 0),
     etag: row.etag || '',
     lastModified: row.last_modified || '',
     lastSyncAt: Number(row.last_sync_at) || 0,
@@ -1816,6 +1822,13 @@ function getCalendarSubscription(id) {
   return calendarSubscriptionRow(db.prepare('SELECT * FROM calendar_subscriptions WHERE id=?').get(Number(id)));
 }
 
+function normalizeCalendarRefreshMinutes(value, fallback = 30) {
+  const numeric = Math.round(Number(value));
+  if (!Number.isFinite(numeric)) return fallback;
+  if (numeric <= 0) return 0;
+  return Math.max(5, Math.min(1440, numeric));
+}
+
 function saveCalendarSubscription(input = {}, id = null) {
   const name = String(input.name || '').trim().slice(0, 240);
   const url = String(input.url || '').trim().slice(0, 4096);
@@ -1824,19 +1837,20 @@ function saveCalendarSubscription(input = {}, id = null) {
   const rawColor = String(input.color || '').trim();
   const color = /^#[0-9a-fA-F]{6}$/.test(rawColor) ? rawColor.toUpperCase() : '';
   const enabled = input.enabled === false ? 0 : 1;
+  const refreshMinutes = normalizeCalendarRefreshMinutes(input.refreshMinutes, 30);
   const now = Date.now();
   const numericId = Number(id || input.id || 0);
   if (numericId > 0) {
     const result = db.prepare(`UPDATE calendar_subscriptions
-      SET name=?, url=?, account_id=?, color=?, enabled=?, updated_at=? WHERE id=?`).run(
-      name, url, accountId, color, enabled, now, numericId,
+      SET name=?, url=?, account_id=?, color=?, enabled=?, refresh_minutes=?, updated_at=? WHERE id=?`).run(
+      name, url, accountId, color, enabled, refreshMinutes, now, numericId,
     );
     if (!result.changes) throw new Error('Abonnement introuvable');
     return getCalendarSubscription(numericId);
   }
   const result = db.prepare(`INSERT INTO calendar_subscriptions
-    (name,url,account_id,color,enabled,etag,last_modified,last_sync_at,last_status,last_error,created_at,updated_at)
-    VALUES (?,?,?,?,?,'','',0,'','',?,?)`).run(name, url, accountId, color, enabled, now, now);
+    (name,url,account_id,color,enabled,refresh_minutes,etag,last_modified,last_sync_at,last_status,last_error,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,'','',0,'','',?,?)`).run(name, url, accountId, color, enabled, refreshMinutes, now, now);
   return getCalendarSubscription(result.lastInsertRowid);
 }
 
@@ -1870,9 +1884,10 @@ function updateCalendarSubscriptionEventsPresentation(subscriptionId, { accountI
 function syncCalendarSubscriptionEvents(subscriptionId, items = []) {
   const subId = Number(subscriptionId);
   if (!(subId > 0)) throw new Error('Abonnement invalide');
-  const existingRows = db.prepare('SELECT id,import_key FROM calendar_events WHERE subscription_id=?').all(subId);
-  const existingByKey = new Map(existingRows.filter(row => row.import_key).map(row => [row.import_key, row.id]));
-  const selectByKey = db.prepare('SELECT id FROM calendar_events WHERE import_key=?');
+  const existingRows = db.prepare(`SELECT
+    id,title,start_at,end_at,all_day,location,notes,account_id,color,import_key,subscription_id
+    FROM calendar_events WHERE subscription_id=?`).all(subId);
+  const existingByKey = new Map(existingRows.filter(row => row.import_key).map(row => [row.import_key, row]));
   const insert = db.prepare(`INSERT INTO calendar_events
     (title,start_at,end_at,all_day,location,notes,account_id,color,import_key,subscription_id,created_at,updated_at)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
@@ -1881,8 +1896,19 @@ function syncCalendarSubscriptionEvents(subscriptionId, items = []) {
     WHERE import_key=?`);
   const remove = db.prepare('DELETE FROM calendar_events WHERE id=?');
   const now = Date.now();
-  let created = 0, updated = 0, skipped = 0, removed = 0;
+  let created = 0, updated = 0, unchanged = 0, skipped = 0, removed = 0;
   const incomingKeys = new Set();
+  const sameEvent = (row, event) => (
+    String(row.title || '') === event.title
+    && Number(row.start_at) === event.startAt
+    && Number(row.end_at) === event.endAt
+    && Number(row.all_day) === event.allDay
+    && String(row.location || '') === event.location
+    && String(row.notes || '') === event.notes
+    && (row.account_id || null) === event.accountId
+    && String(row.color || '').toUpperCase() === event.color
+    && Number(row.subscription_id) === subId
+  );
   const transaction = db.transaction(events => {
     for (const input of events) {
       let event;
@@ -1890,10 +1916,14 @@ function syncCalendarSubscriptionEvents(subscriptionId, items = []) {
       catch { skipped += 1; continue; }
       if (!event.importKey) { skipped += 1; continue; }
       incomingKeys.add(event.importKey);
-      const existing = selectByKey.get(event.importKey);
+      const existing = existingByKey.get(event.importKey);
       if (existing) {
-        update.run(event.title,event.startAt,event.endAt,event.allDay,event.location,event.notes,event.accountId,event.color,subId,now,event.importKey);
-        updated += 1;
+        if (sameEvent(existing, event)) {
+          unchanged += 1;
+        } else {
+          update.run(event.title,event.startAt,event.endAt,event.allDay,event.location,event.notes,event.accountId,event.color,subId,now,event.importKey);
+          updated += 1;
+        }
       } else {
         insert.run(event.title,event.startAt,event.endAt,event.allDay,event.location,event.notes,event.accountId,event.color,event.importKey,subId,now,now);
         created += 1;
@@ -1905,7 +1935,7 @@ function syncCalendarSubscriptionEvents(subscriptionId, items = []) {
     }
   });
   transaction(Array.isArray(items) ? items : []);
-  return { created, updated, skipped, removed, total: created + updated };
+  return { created, updated, unchanged, skipped, removed, total: created + updated + unchanged };
 }
 
 function removeCalendarSubscription(id) {
