@@ -1,12 +1,12 @@
-# LibraMail 0.3.5
+# LibraMail 0.3.6
 
 ## Français
 
-Amélioration du paquet Windows : suppression des lanceurs VBS, CMD et PowerShell au profit d'un démarrage direct via LibraMail.exe. Le moteur Node.js embarqué est désormais démarré et arrêté automatiquement par l'application, et les ressources Neutralino sont intégrées directement dans l'exécutable. Cette évolution simplifie le lancement sous Windows et limite les faux positifs antivirus liés aux anciens scripts.
+Amélioration de la compatibilité TLS sous Windows : LibraMail utilise désormais également le magasin de certificats système Windows pour les connexions IMAP et SMTP. Cette évolution améliore notamment la compatibilité avec les antivirus, proxys d'entreprise et autorités de certification locales, sans désactiver la validation TLS.
 
 ## English
 
-Improved Windows package: removed VBS, CMD and PowerShell launchers in favor of direct startup through LibraMail.exe. The bundled Node.js engine is now automatically started and stopped by the application, and Neutralino resources are embedded directly into the executable. This simplifies Windows startup and reduces antivirus false positives caused by the previous scripts.
+Improved TLS compatibility on Windows: LibraMail now also uses the Windows system certificate store for IMAP and SMTP connections. This improves compatibility with antivirus software, enterprise proxies and local certificate authorities without disabling TLS certificate validation.
 
 ### Downloads / Téléchargements
 
