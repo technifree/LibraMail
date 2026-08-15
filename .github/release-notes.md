@@ -1,12 +1,12 @@
-# LibraMail 0.3.4
+# LibraMail 0.3.5
 
 ## Français
 
-Amélioration de la rédaction des réponses avec citations modifiables, actualisation manuelle et périodique configurable des calendriers Internet, mise en évidence du message sélectionné et compte-rendu détaillé des synchronisations de planning. Amélioration également de l'arrêt et des performances de la relève IMAP, avec une gestion plus robuste des interruptions de connexion.
+Amélioration du paquet Windows : suppression des lanceurs VBS, CMD et PowerShell au profit d'un démarrage direct via LibraMail.exe. Le moteur Node.js embarqué est désormais démarré et arrêté automatiquement par l'application, et les ressources Neutralino sont intégrées directement dans l'exécutable. Cette évolution simplifie le lancement sous Windows et limite les faux positifs antivirus liés aux anciens scripts.
 
 ## English
 
-Improved reply composition with editable quoted messages, manual and configurable periodic refresh of Internet calendars, clearer highlighting of the selected message, and detailed calendar synchronization summaries. Also improved IMAP synchronization cancellation, performance, and connection interruption handling.
+Improved Windows package: removed VBS, CMD and PowerShell launchers in favor of direct startup through LibraMail.exe. The bundled Node.js engine is now automatically started and stopped by the application, and Neutralino resources are embedded directly into the executable. This simplifies Windows startup and reduces antivirus false positives caused by the previous scripts.
 
 ### Downloads / Téléchargements
 
