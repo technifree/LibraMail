@@ -22,7 +22,7 @@ const calendarImport = require('./lib/calendar_import');
 const calendarSubscriptions = require('./lib/calendar_subscriptions');
 
 const PORT = 47800;
-const APP_VERSION = '0.3.4';
+const APP_VERSION = '0.3.5';
 const ROOT = path.resolve(__dirname, '..');
 const DATA = path.join(ROOT, 'data');
 const ACCOUNTS_FILE = path.join(DATA, 'accounts.json');
@@ -2034,6 +2034,22 @@ async function initializeAccount(account) {
   try { await ensureFolderMap(account, { force: true }); } catch {}
   startWatch(account);
   scheduleAccount(account);
+}
+
+const launcherParentArgument = process.argv.find(argument => String(argument).startsWith('--libramail-parent-pid='));
+const launcherParentPid = Number(launcherParentArgument?.split('=')[1] || process.env.LIBRAMAIL_PARENT_PID || 0);
+if (Number.isInteger(launcherParentPid) && launcherParentPid > 0) {
+  const parentWatch = setInterval(() => {
+    try {
+      process.kill(launcherParentPid, 0);
+    } catch (error) {
+      if (error?.code === 'ESRCH') {
+        console.warn('[LibraMail] Lanceur Windows fermé : arrêt du moteur.');
+        shutdown();
+      }
+    }
+  }, 2000);
+  parentWatch.unref?.();
 }
 
 process.on('unhandledRejection', error => {

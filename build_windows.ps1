@@ -1,6 +1,6 @@
 ﻿#requires -version 5.1
 <#
-LibraMail - construction d'un paquet Windows x64 autonome.
+LibraMail - construction d'un paquet Windows x64 autonome à lancement natif.
 
 Exemples :
   .\build_windows.ps1 -FreshNpm
@@ -133,11 +133,6 @@ Require-Directory -RelativePath 'resources'
 Require-Directory -RelativePath 'engine'
 Require-Directory -RelativePath 'packaging\windows'
 Require-File -RelativePath 'packaging\windows\snapshot-db.js'
-Require-File -RelativePath 'packaging\windows\libramail.ps1'
-Require-File -RelativePath 'packaging\windows\libramail.cmd'
-Require-File -RelativePath 'packaging\windows\LibraMail.vbs'
-Require-File -RelativePath 'packaging\windows\check_portable.ps1'
-Require-File -RelativePath 'packaging\windows\check_portable.cmd'
 Require-File -RelativePath 'packaging\windows\README_WINDOWS.txt.in'
 
 $ConfigPath = Join-Path $ProjectDir 'neutralino.config.json'
@@ -342,6 +337,21 @@ try {
         -Value "LibraMail $Version" `
         -Force
 
+    if ((-not ($patchedConfig.PSObject.Properties.Name -contains 'globalVariables')) -or (-not $patchedConfig.globalVariables)) {
+        $patchedConfig | Add-Member `
+            -MemberType NoteProperty `
+            -Name globalVariables `
+            -Value ([pscustomobject]@{})
+    }
+
+    # Le binaire Windows démarre lui-même le moteur Node.js. Cette variable
+    # n'est injectée que dans le paquet Windows, pas dans les builds Linux/dev.
+    $patchedConfig.globalVariables | Add-Member `
+        -MemberType NoteProperty `
+        -Name BUNDLED_ENGINE `
+        -Value $true `
+        -Force
+
     $json = $patchedConfig | ConvertTo-Json -Depth 100
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     [IO.File]::WriteAllText($ConfigPath, $json, $utf8NoBom)
@@ -384,10 +394,9 @@ try {
         throw "Binaire Neutralino absent : $requiredNeuBinary"
     }
 
-    $buildArguments = @('build')
-    if ($EmbedResources) {
-        $buildArguments += '--embed-resources'
-    }
+    # Le paquet Windows n'utilise plus de resources.neu séparé : les ressources
+    # sont injectées dans LibraMail.exe pour avoir un seul exécutable à lancer.
+    $buildArguments = @('build', '--embed-resources')
 
     Write-Build -Message "Construction Neutralino $Version pour Windows x64."
     Invoke-Checked `
@@ -426,32 +435,10 @@ try {
 
     Copy-Item `
         -LiteralPath $neuBinary.FullName `
-        -Destination (Join-Path $PackageDir 'libramail-app.exe') `
+        -Destination (Join-Path $PackageDir 'LibraMail.exe') `
         -Force
 
-    if (-not $EmbedResources) {
-        $resourcesNeu = Join-Path $NeuDist 'resources.neu'
-
-        if (-not (Test-Path -LiteralPath $resourcesNeu -PathType Leaf)) {
-            $resourceCandidate = Get-ChildItem `
-                -LiteralPath $NeuDist `
-                -Recurse `
-                -File `
-                -Filter 'resources.neu' |
-                Select-Object -First 1
-
-            if (-not $resourceCandidate) {
-                throw "resources.neu n'a pas été généré."
-            }
-
-            $resourcesNeu = $resourceCandidate.FullName
-        }
-
-        Copy-Item `
-            -LiteralPath $resourcesNeu `
-            -Destination (Join-Path $PackageDir 'resources.neu') `
-            -Force
-    }
+    Write-Ok -Message 'Ressources Neutralino intégrées directement dans LibraMail.exe.'
 
     Write-Build -Message 'Intégration du runtime Node.js.'
 
@@ -526,6 +513,14 @@ try {
 
     Write-Ok -Message 'better-sqlite3 fonctionne avec le runtime Windows embarqué.'
 
+    # Les shims npm (.cmd/.ps1) ne servent pas à l'exécution de LibraMail.
+    # On ne les distribue pas afin de garder un paquet runtime aussi sobre que possible.
+    Remove-Item `
+        -LiteralPath (Join-Path $packageEngine 'node_modules\.bin') `
+        -Recurse `
+        -Force `
+        -ErrorAction SilentlyContinue
+
     $packageData = Join-Path $PackageDir 'data'
     Ensure-Directory -Path $packageData
 
@@ -568,22 +563,15 @@ try {
         }
     }
 
-    Write-Build -Message 'Installation des lanceurs Windows.'
+    Write-Build -Message 'Préparation du lancement natif Windows.'
 
     $windowsPackagingDir = Join-Path $ProjectDir 'packaging\windows'
-    $launcherNames = @(
-        'libramail.ps1',
-        'libramail.cmd',
-        'LibraMail.vbs',
-        'check_portable.ps1',
-        'check_portable.cmd'
-    )
-
-    foreach ($launcherName in $launcherNames) {
-        Copy-Item `
-            -LiteralPath (Join-Path $windowsPackagingDir $launcherName) `
-            -Destination (Join-Path $PackageDir $launcherName) `
-            -Force
+    $appExePath = Join-Path $PackageDir 'LibraMail.exe'
+    if (-not (Test-Path -LiteralPath $appExePath -PathType Leaf)) {
+        throw 'LibraMail.exe est absent du paquet Windows.'
+    }
+    if (Test-Path -LiteralPath (Join-Path $PackageDir 'resources.neu')) {
+        throw 'resources.neu ne doit pas être présent : les ressources doivent être intégrées dans LibraMail.exe.'
     }
 
     $readmeTemplatePath = Join-Path $windowsPackagingDir 'README_WINDOWS.txt.in'
@@ -597,6 +585,18 @@ try {
         $readmeText,
         $readmeEncoding
     )
+
+    $obsoleteLaunchers = @('LibraMail.vbs', 'libramail.ps1', 'libramail.cmd')
+    foreach ($obsoleteLauncher in $obsoleteLaunchers) {
+        if (Test-Path -LiteralPath (Join-Path $PackageDir $obsoleteLauncher)) {
+            throw "Ancien lanceur interdit dans le paquet : $obsoleteLauncher"
+        }
+    }
+
+    $vbsFiles = @(Get-ChildItem -LiteralPath $PackageDir -Recurse -File -Filter '*.vbs' -ErrorAction SilentlyContinue)
+    if ($vbsFiles.Count -gt 0) {
+        throw "Le paquet Windows contient encore un fichier VBS : $($vbsFiles[0].FullName)"
+    }
 
     $archivePath = Join-Path $OutputDir "$PackageName.zip"
     Remove-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue

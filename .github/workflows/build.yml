@@ -66,11 +66,6 @@ jobs:
           $required = @(
             'build_windows.ps1',
             'packaging/windows/snapshot-db.js',
-            'packaging/windows/libramail.ps1',
-            'packaging/windows/libramail.cmd',
-            'packaging/windows/LibraMail.vbs',
-            'packaging/windows/check_portable.ps1',
-            'packaging/windows/check_portable.cmd',
             'packaging/windows/README_WINDOWS.txt.in'
           )
 

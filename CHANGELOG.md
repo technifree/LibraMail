@@ -1,3 +1,12 @@
+## [0.3.5] - 2026-08-15
+
+### Windows
+- Suppression du lanceur `LibraMail.vbs` et des lanceurs PowerShell/CMD distribués.
+- Lancement direct de LibraMail via `LibraMail.exe`.
+- Démarrage et arrêt automatiques du moteur Node.js embarqué.
+- Intégration des ressources de l'interface directement dans l'exécutable Windows.
+- Simplification du paquet portable Windows afin de limiter les faux positifs antivirus liés aux scripts de lancement.
+
 ## [0.3.3] - 2026-08-13
 
 ### Calendrier / Planning

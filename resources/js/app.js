@@ -7,6 +7,10 @@ const App = (() => {
   let reconnectTimer = null;
   let reqId = 0;
   let shuttingDown = false;
+  let bundledEngineProcess = null;
+  let bundledEngineOwned = false;
+  let bundledEngineLastError = '';
+  let bundledEngineEventsWired = false;
   const pending = new Map();
 
   let config = {};
@@ -61,6 +65,104 @@ const App = (() => {
     { id: 'rose', color: '#CF5B78' },
     { id: 'red', color: '#D66F4F' },
   ];
+
+  // ---------- Moteur embarqué Windows ----------
+  function usesBundledWindowsEngine() {
+    return window.NL_OS === 'Windows' && (window.NL_BUNDLED_ENGINE === true || String(window.NL_BUNDLED_ENGINE || '') === 'true');
+  }
+
+  function probeEngine(timeout = 300) {
+    return new Promise(resolve => {
+      let settled = false;
+      let probe = null;
+      const finish = value => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        try { probe?.close(); } catch {}
+        resolve(value);
+      };
+      const timer = setTimeout(() => finish(false), timeout);
+      try {
+        probe = new WebSocket(ENGINE);
+        probe.onopen = () => finish(true);
+        probe.onerror = () => finish(false);
+        probe.onclose = () => finish(false);
+      } catch {
+        finish(false);
+      }
+    });
+  }
+
+  function wireBundledEngineEvents() {
+    if (bundledEngineEventsWired || !usesBundledWindowsEngine()) return;
+    bundledEngineEventsWired = true;
+    try {
+      Neutralino.events.on('spawnedProcess', event => {
+        const detail = event?.detail || {};
+        if (!bundledEngineProcess || Number(detail.id) !== Number(bundledEngineProcess.id)) return;
+        if (detail.action === 'stdErr' && detail.data) {
+          bundledEngineLastError = String(detail.data).trim().slice(-4000);
+          console.error('[LibraMail moteur]', detail.data);
+        } else if (detail.action === 'stdOut' && detail.data) {
+          console.info('[LibraMail moteur]', detail.data);
+        } else if (detail.action === 'exit') {
+          const wasOwned = bundledEngineOwned;
+          bundledEngineProcess = null;
+          bundledEngineOwned = false;
+          if (wasOwned && !shuttingDown) {
+            setEngine(false);
+            status(`Moteur LibraMail arrêté (code ${detail.data ?? '?'})`, 'error');
+          }
+        }
+      });
+    } catch (error) {
+      console.warn('[LibraMail] Événements du moteur Windows indisponibles :', error);
+    }
+  }
+
+  async function ensureBundledWindowsEngine() {
+    if (!usesBundledWindowsEngine()) return;
+    wireBundledEngineEvents();
+
+    // Une instance précédente peut déjà fournir le moteur. Dans ce cas, cette
+    // fenêtre s'y connecte mais n'en devient pas propriétaire.
+    if (await probeEngine(250)) return;
+
+    const appDir = String(window.NL_PATH || '').replace(/[\\/]+$/, '');
+    if (!appDir || appDir.includes('"')) throw new Error('Chemin d’installation LibraMail invalide.');
+    const nodeExe = `${appDir}\\runtime\\node\\node.exe`;
+    const engineFile = `${appDir}\\engine\\backend.js`;
+    const parentPid = Number(window.NL_PID || 0);
+    const parentArgument = Number.isInteger(parentPid) && parentPid > 0
+      ? ` --libramail-parent-pid=${parentPid}`
+      : '';
+    const command = `"${nodeExe}" "${engineFile}"${parentArgument}`;
+
+    bundledEngineLastError = '';
+    bundledEngineProcess = await Neutralino.os.spawnProcess(command, { cwd: appDir });
+    bundledEngineOwned = true;
+
+    const deadline = Date.now() + 12000;
+    while (Date.now() < deadline) {
+      if (await probeEngine(220)) return;
+      if (!bundledEngineProcess) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    const detail = bundledEngineLastError ? `\n\n${bundledEngineLastError}` : '';
+    throw new Error(`Le moteur LibraMail n’a pas pu démarrer.${detail}`);
+  }
+
+  async function stopBundledWindowsEngine() {
+    if (!usesBundledWindowsEngine() || !bundledEngineOwned || !bundledEngineProcess?.id) return;
+    const processId = bundledEngineProcess.id;
+    bundledEngineOwned = false;
+    try {
+      await Neutralino.os.updateSpawnedProcess(processId, 'exit');
+    } catch {}
+    bundledEngineProcess = null;
+  }
 
   // ---------- RPC ----------
   function scheduleReconnect(delay = 1500) {
@@ -655,7 +757,7 @@ const App = (() => {
   };
 
   function applyAppVersion() {
-    const rawVersion = String(window.NL_APPVERSION || '0.3.4').replace(/^v/i, '');
+    const rawVersion = String(window.NL_APPVERSION || '0.3.5').replace(/^v/i, '');
     const badge = document.getElementById('app-version');
     if (badge) {
       badge.textContent = `v${rawVersion}`;
@@ -5227,7 +5329,7 @@ const App = (() => {
 
   // ---------- Mise à jour et À propos ----------
   function appVersion() {
-    return String(window.NL_APPVERSION || '0.3.4').replace(/^v/i, '');
+    return String(window.NL_APPVERSION || '0.3.5').replace(/^v/i, '');
   }
 
   function compareVersions(a, b) {
@@ -5913,14 +6015,22 @@ const App = (() => {
       }, 900);
     };
 
+    const mayShutdownEngine = !usesBundledWindowsEngine() || bundledEngineOwned;
     try {
-      if (ws?.readyState === WebSocket.OPEN) {
+      if (mayShutdownEngine && ws?.readyState === WebSocket.OPEN) {
         await Promise.race([
           rpc('app.shutdown'),
           new Promise(resolve => setTimeout(resolve, 650)),
         ]);
       }
     } catch {}
+
+    // Le moteur Windows embarqué se ferme normalement via app.shutdown. Si la
+    // fermeture gracieuse n'a pas abouti, Neutralino termine le processus fils.
+    if (usesBundledWindowsEngine() && bundledEngineOwned) {
+      await new Promise(resolve => setTimeout(resolve, 250));
+      await stopBundledWindowsEngine();
+    }
 
     // Ne pas attendre indéfiniment Neutralino.app.exit() : sur certaines plateformes,
     // le moteur est bien arrêté mais la fenêtre reste vivante. On déclenche donc
@@ -6620,9 +6730,24 @@ const App = (() => {
     } catch {}
   }
 
-  window.addEventListener('DOMContentLoaded', () => {
+  window.addEventListener('DOMContentLoaded', async () => {
     try { Neutralino.init(); } catch {}
     wire();
+    try {
+      await ensureBundledWindowsEngine();
+    } catch (error) {
+      console.error('[LibraMail] Démarrage du moteur Windows :', error);
+      status(`${t('error')} : ${error.message}`, 'error');
+      try {
+        await Neutralino.os.showMessageBox(
+          'LibraMail',
+          `Le moteur LibraMail n’a pas pu démarrer.\n\n${error.message}`,
+          'OK',
+          'ERROR',
+        );
+      } catch {}
+      return;
+    }
     connect();
   });
 

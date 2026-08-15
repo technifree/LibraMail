@@ -1,6 +1,6 @@
 {
   "applicationId": "eu.libramail.app",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "defaultMode": "window",
   "port": 0,
   "documentRoot": "/resources/",
@@ -15,6 +15,8 @@
   "nativeAllowList": [
     "app.*",
     "os.open",
+    "os.updateSpawnedProcess",
+    "os.spawnProcess",
     "os.showSaveDialog",
     "os.showOpenDialog",
     "window.*",
@@ -27,7 +29,7 @@
   ],
   "modes": {
     "window": {
-      "title": "LibraMail 0.3.4",
+      "title": "LibraMail 0.3.5",
       "width": 1440,
       "height": 900,
       "minWidth": 1000,
@@ -45,5 +47,10 @@
     "clientLibrary": "/resources/js/neutralino.js",
     "binaryVersion": "6.4.0",
     "clientVersion": "6.4.0"
-  }
+  },
+  "applicationName": "LibraMail",
+  "applicationIcon": "resources/icons/appIcon.png",
+  "author": "Vincent (technifree.com)",
+  "description": "LibraMail - client de messagerie et planning portable",
+  "copyright": "Copyright © Vincent (technifree.com)"
 }
