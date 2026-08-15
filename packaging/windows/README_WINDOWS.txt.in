@@ -11,6 +11,11 @@ Node.js :
   - runtime interne : .\runtime\node\node.exe
   - aucune installation de Node.js ou npm n'est requise sur le poste cible.
 
+Certificats TLS :
+  - le moteur utilise aussi le magasin de certificats approuvés par Windows ;
+  - les certificats racine installés par un antivirus, un proxy d'entreprise ou
+    une PKI locale peuvent ainsi être reconnus sans désactiver la validation TLS.
+
 Prérequis système :
   - Windows 10 ou Windows 11 x64 ;
   - Microsoft Edge WebView2 Runtime ;

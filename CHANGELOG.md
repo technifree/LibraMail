@@ -1,3 +1,10 @@
+## [0.3.6] - 2026-08-15
+
+### Windows / TLS
+- le moteur Node.js embarqué utilise désormais également le magasin de certificats approuvés par Windows ;
+- amélioration de la compatibilité IMAP/SMTP avec les antivirus réalisant une inspection TLS, les proxys d'entreprise et les PKI locales ;
+- la validation TLS reste active : aucun contournement de type `rejectUnauthorized: false` n'est utilisé.
+
 ## [0.3.5] - 2026-08-15
 
 ### Windows

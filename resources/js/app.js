@@ -140,7 +140,14 @@ const App = (() => {
     const command = `"${nodeExe}" "${engineFile}"${parentArgument}`;
 
     bundledEngineLastError = '';
-    bundledEngineProcess = await Neutralino.os.spawnProcess(command, { cwd: appDir });
+    // Sous Windows, Node.js utilise par défaut son propre jeu de CA. En ajoutant
+    // le magasin système, LibraMail respecte aussi les autorités approuvées par
+    // Windows (antivirus avec inspection TLS, proxy d'entreprise, PKI locale),
+    // sans désactiver la validation des certificats.
+    bundledEngineProcess = await Neutralino.os.spawnProcess(command, {
+      cwd: appDir,
+      envs: { NODE_USE_SYSTEM_CA: '1' },
+    });
     bundledEngineOwned = true;
 
     const deadline = Date.now() + 12000;
@@ -757,7 +764,7 @@ const App = (() => {
   };
 
   function applyAppVersion() {
-    const rawVersion = String(window.NL_APPVERSION || '0.3.5').replace(/^v/i, '');
+    const rawVersion = String(window.NL_APPVERSION || '0.3.6').replace(/^v/i, '');
     const badge = document.getElementById('app-version');
     if (badge) {
       badge.textContent = `v${rawVersion}`;
@@ -5329,7 +5336,7 @@ const App = (() => {
 
   // ---------- Mise à jour et À propos ----------
   function appVersion() {
-    return String(window.NL_APPVERSION || '0.3.5').replace(/^v/i, '');
+    return String(window.NL_APPVERSION || '0.3.6').replace(/^v/i, '');
   }
 
   function compareVersions(a, b) {
