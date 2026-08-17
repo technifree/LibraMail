@@ -1,12 +1,12 @@
-# LibraMail 0.3.8
+# LibraMail 0.4.0
 
 ## Français
 
-Amélioration du planning et diverses corrections de stabilité. Le volet Planning affiche désormais correctement les rendez-vous provenant de l'ensemble des calendriers, y compris les calendriers Internet et importés, avec un tri chronologique cohérent et une identification plus claire de leur origine.
+LibraMail 0.4.0 introduit le support POP3, un nouveau stockage local chiffré des messages, la migration sécurisée des anciens fichiers EML, un index de recherche protégé et des sauvegardes chiffrées. Cette version améliore également le démarrage de l'application et le retour visuel lors de la relève du courrier, tout en conservant la compatibilité IMAP et les fonctions existantes.
 
 ## English
 
-Improved calendar integration and various stability fixes. The Planner sidebar now correctly displays appointments from all calendars, including Internet and imported calendars, with consistent chronological ordering and clearer calendar identification.
+LibraMail 0.4.0 introduces POP3 support, a new encrypted local message store, safe migration of existing EML files, protected search indexing and encrypted backups. This release also improves application startup and mail retrieval feedback while preserving IMAP compatibility and existing features.
 
 ### Downloads / Téléchargements
 
