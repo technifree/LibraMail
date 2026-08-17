@@ -12,6 +12,7 @@ const { simpleParser } = require('mailparser');
 
 const db = require('./lib/db');
 const imap = require('./lib/imap');
+const pop3 = require('./lib/pop3');
 const smtp = require('./lib/smtp');
 const spam = require('./lib/spam');
 const outbox = require('./lib/outbox');
@@ -21,9 +22,10 @@ const nativeDialog = require('./lib/native_dialog');
 const calendarImport = require('./lib/calendar_import');
 const calendarSubscriptions = require('./lib/calendar_subscriptions');
 const credentialStore = require('./lib/credential_store');
+const mailStore = require('./lib/mail_store');
 
 const PORT = 47800;
-const APP_VERSION = '0.3.8';
+const APP_VERSION = '0.4.0';
 const ROOT = path.resolve(__dirname, '..');
 const DATA = path.join(ROOT, 'data');
 const ACCOUNTS_FILE = path.join(DATA, 'accounts.json');
@@ -60,6 +62,10 @@ function recoverInterruptedRestore() {
         if (isRuntimeDataFile(name)) continue;
         fs.renameSync(path.join(rollbackRoot, name), path.join(DATA, name));
       }
+      if (state?.keyRollbackSecret) {
+        mailStore.restoreStashedMasterKey(state.keyRollbackSecret);
+        mailStore.removeStashedMasterKey(state.keyRollbackSecret);
+      }
       console.warn('[LibraMail] Une restauration interrompue a été annulée automatiquement.');
     } catch (error) {
       console.error('[LibraMail] Impossible d’annuler la restauration interrompue :', error.message);
@@ -74,6 +80,7 @@ function recoverInterruptedRestore() {
 
 recoverInterruptedRestore();
 db.init(DATA);
+mailStore.init(DATA);
 outbox.init(db.db, DATA);
 
 function loadJson(file, fallback) {
@@ -125,7 +132,7 @@ function domainFromEmail(value) {
 function providerKeyForAccount(account = {}) {
   const email = String(account.email || '').toLowerCase();
   const domain = domainFromEmail(email);
-  const host = `${account.imap?.host || ''} ${account.smtp?.host || ''}`.toLowerCase();
+  const host = `${account.imap?.host || ''} ${account.pop3?.host || ''} ${account.smtp?.host || ''}`.toLowerCase();
   const source = `${email} ${domain} ${host}`;
   if (/gmail|googlemail/.test(source)) return 'gmail';
   if (/outlook|hotmail|live\.com|office365|microsoft/.test(source)) return 'outlook';
@@ -141,8 +148,11 @@ function providerKeyForAccount(account = {}) {
 }
 
 function normalizeAccount(account) {
+  const receiveProtocol = String(account.receiveProtocol || 'imap').toLowerCase() === 'pop3' ? 'pop3' : 'imap';
+  const localFolderMap = { inbox: 'INBOX', sent: 'Local/Sent', trash: 'Local/Trash', junk: 'Local/Junk' };
   return {
     ...account,
+    receiveProtocol,
     logoData: normalizeLogoData(account.logoData),
     providerKey: providerKeyForAccount(account),
     syncIntervalMinutes: Number.isFinite(Number(account.syncIntervalMinutes))
@@ -151,14 +161,27 @@ function normalizeAccount(account) {
     spamRetentionDays: Number.isFinite(Number(account.spamRetentionDays))
       ? Math.max(0, Math.min(3650, Math.round(Number(account.spamRetentionDays))))
       : 30,
-    folderMap: account.folderMap && typeof account.folderMap === 'object'
+    pop3: receiveProtocol === 'pop3'
       ? {
-          inbox: account.folderMap.inbox || 'INBOX',
-          sent: account.folderMap.sent || null,
-          trash: account.folderMap.trash || null,
-          junk: account.folderMap.junk || null,
+          host: String(account.pop3?.host || '').trim(),
+          port: Number(account.pop3?.port) || 995,
+          secure: account.pop3?.secure !== false,
+          user: String(account.pop3?.user || account.email || '').trim(),
+          pass: String(account.pop3?.pass || ''),
+          deletePolicy: ['keep', 'immediate', 'after_days'].includes(account.pop3?.deletePolicy) ? account.pop3.deletePolicy : 'keep',
+          deleteAfterDays: Math.max(1, Math.min(3650, Number(account.pop3?.deleteAfterDays) || 7)),
         }
-      : { inbox: 'INBOX', sent: null, trash: null, junk: null },
+      : account.pop3,
+    folderMap: receiveProtocol === 'pop3'
+      ? localFolderMap
+      : (account.folderMap && typeof account.folderMap === 'object'
+          ? {
+              inbox: account.folderMap.inbox || 'INBOX',
+              sent: account.folderMap.sent || null,
+              trash: account.folderMap.trash || null,
+              junk: account.folderMap.junk || null,
+            }
+          : { inbox: 'INBOX', sent: null, trash: null, junk: null }),
   };
 }
 
@@ -182,6 +205,56 @@ function migrateTrustedSenders() {
   }
   config.trustedSenders = [];
   saveJson(CONFIG_FILE, config);
+}
+
+async function runSecureSearchMigration() {
+  const storage = mailStore.status();
+  if (!storage.available) {
+    console.warn(`[LibraMail] Index de recherche chiffré indisponible : ${storage.error || 'coffre-fort système indisponible'}`);
+    return { migrated: false, unavailable: true, indexed: 0, failed: 0 };
+  }
+  if (db.getMeta('secure_search_v1', '') === '1') {
+    return { migrated: false, unavailable: false, indexed: 0, failed: 0 };
+  }
+
+  const rows = db.listMessagesForSecureReindex();
+  console.log(`[LibraMail] Sécurisation de l’index local : ${rows.length} message(s) à traiter...`);
+  db.setMeta('secure_search_v1', 'in-progress');
+  // Le précédent index FTS contenait le corps en clair. On le détruit avant
+  // toute reconstruction pour qu'une interruption ne conserve pas deux index.
+  db.resetSecureSearchIndex();
+
+  let indexed = 0;
+  let failed = 0;
+  for (const row of rows) {
+    try {
+      const raw = mailStore.readMessage(row);
+      const parsed = await simpleParser(raw, { skipImageLinks: true });
+      const text = String(parsed.text || '').replace(/\s+/g, ' ').trim();
+      db.setEncryptedSnippet(row.id, mailStore.protectSnippet(row.account_id, text.slice(0, 160)));
+      db.indexBody(row.id, row, '', { secureTokens: mailStore.searchTokens(text) });
+      indexed++;
+    } catch (error) {
+      failed++;
+      // Même en cas de message historique endommagé, on ne remet jamais son
+      // ancien snippet ou son ancien corps en clair dans l'index.
+      try {
+        db.setEncryptedSnippet(row.id, mailStore.protectSnippet(row.account_id, ''));
+        db.indexBody(row.id, row, '', { secureTokens: [] });
+      } catch {}
+      console.warn(`[LibraMail] Index sécurisé : message ${row.id} ignoré : ${error.message}`);
+    }
+    if (indexed && indexed % 250 === 0) {
+      console.log(`[LibraMail] Index sécurisé : ${indexed}/${rows.length} message(s)`);
+    }
+  }
+
+  // VACUUM est volontaire : supprimer une table SQLite ne garantit pas que les
+  // anciennes pages contenant le texte soient immédiatement réécrites sur disque.
+  db.vacuum();
+  db.setMeta('secure_search_v1', '1');
+  console.log(`[LibraMail] Index local sécurisé : ${indexed} message(s), ${failed} erreur(s).`);
+  return { migrated: true, unavailable: false, indexed, failed };
 }
 
 function loadRuntimeState() {
@@ -227,15 +300,49 @@ let shuttingDown = false;
 let maintenanceOperation = null;
 let startupSyncTriggered = false;
 let serverReady = false;
+let resolveStartupMigration;
+const startupMigrationPromise = new Promise(resolve => { resolveStartupMigration = resolve; });
+
+async function migrateLocalStorage({ notify = false } = {}) {
+  const mailMigration = await mailStore.migrateLegacyMessages(db.db, {
+    onProgress: progress => {
+      if (progress.encrypted === 1 || progress.encrypted % 250 === 0) {
+        console.log(`[LibraMail] Migration du stockage local : ${progress.encrypted}/${progress.total} message(s) chiffré(s)`);
+        if (notify) broadcast('storage.migration.progress', { phase: 'messages', ...progress });
+      }
+    },
+  });
+  if (mailMigration.encrypted) {
+    console.log(`[LibraMail] Stockage local : ${mailMigration.encrypted} ancien(s) .eml migré(s) vers le magasin chiffré.`);
+  }
+  const searchMigration = await runSecureSearchMigration();
+  if (notify) broadcast('storage.migration.done', { mail: mailMigration, search: searchMigration });
+  return { mail: mailMigration, search: searchMigration };
+}
+
+async function runStartupStorageMigration() {
+  return migrateLocalStorage({ notify: true });
+}
 
 wss.on('listening', () => {
   serverReady = true;
   console.log(`[LibraMail ${APP_VERSION}] Moteur prêt sur ws://127.0.0.1:${PORT} — ${accounts.length} compte(s)`);
+  // Le port est ouvert avant de migrer les milliers d'anciens .eml : les
+  // lanceurs Linux/Windows ne prennent donc pas une migration légitime pour un
+  // échec de démarrage. La migration cède régulièrement la main à l'interface.
+  new Promise(resolve => setImmediate(resolve))
+    .then(runStartupStorageMigration)
+    .catch(error => {
+      console.error('[LibraMail] Migration du stockage 0.4.0 impossible :', error);
+      return { migrated: false, error: error.message };
+    })
+    .then(resolveStartupMigration);
 });
 
 wss.on('error', error => {
   console.error('[LibraMail] Impossible de démarrer le serveur local :', error);
   if (!serverReady || error?.code === 'EADDRINUSE') {
+    try { mailStore.close(); } catch {}
     try { db.close(); } catch {}
     process.exit(error?.code === 'EADDRINUSE' ? 98 : 1);
   }
@@ -254,6 +361,7 @@ function accountFoldersChanged(account, map) {
 
 async function ensureFolderMap(account, { force = false, signal = null } = {}) {
   if (!account) throw new Error('Compte introuvable');
+  if (account.receiveProtocol === 'pop3') return account.folderMap || { inbox: 'INBOX', sent: 'Local/Sent', trash: 'Local/Trash', junk: 'Local/Junk' };
   const hasUsefulMap = account.folderMap?.inbox
     && (account.folderMap.sent || account.folderMap.trash || account.folderMap.junk);
   if (!force && hasUsefulMap) return account.folderMap;
@@ -274,6 +382,7 @@ function publicAccount(account) {
     color: account.color,
     logoData: normalizeLogoData(account.logoData),
     providerKey: providerKeyForAccount(account),
+    receiveProtocol: account.receiveProtocol || 'imap',
     syncIntervalMinutes: account.syncIntervalMinutes,
     spamRetentionDays: account.spamRetentionDays,
     folders: {
@@ -286,8 +395,11 @@ function publicAccount(account) {
 
 function accountDetails(account) {
   if (!account) throw new Error('Compte introuvable');
+  const protocol = account.receiveProtocol || 'imap';
+  const incomingPassword = protocol === 'pop3' ? account.pop3?.pass : account.imap?.pass;
   return {
     ...publicAccount(account),
+    receiveProtocol: protocol,
     imap: {
       host: account.imap?.host || '',
       port: Number(account.imap?.port) || 993,
@@ -295,13 +407,23 @@ function accountDetails(account) {
       user: account.imap?.user || '',
       hasPassword: Boolean(account.imap?.pass),
     },
+    pop3: {
+      host: account.pop3?.host || '',
+      port: Number(account.pop3?.port) || 995,
+      secure: account.pop3?.secure !== false,
+      user: account.pop3?.user || account.email || '',
+      hasPassword: Boolean(account.pop3?.pass),
+      deletePolicy: account.pop3?.deletePolicy || 'keep',
+      deleteAfterDays: Number(account.pop3?.deleteAfterDays) || 7,
+    },
     smtp: {
       host: account.smtp?.host || '',
       port: Number(account.smtp?.port) || 465,
       secure: account.smtp?.secure !== false,
-      user: account.smtp?.user || account.imap?.user || '',
-      hasPassword: Boolean(account.smtp?.pass || account.imap?.pass),
+      user: account.smtp?.user || account.imap?.user || account.pop3?.user || '',
+      hasPassword: Boolean(account.smtp?.pass || incomingPassword),
     },
+    localStorage: mailStore.status(),
   };
 }
 
@@ -312,8 +434,15 @@ function validateAccountInput(input, existingId = null) {
       && String(account.email || '').toLowerCase() === email.toLowerCase())) {
     throw new Error('Un compte utilise déjà cette adresse e-mail');
   }
-  if (!String(input.imap?.host || '').trim()) throw new Error('Serveur IMAP obligatoire');
-  if (!String(input.imap?.user || '').trim()) throw new Error('Identifiant IMAP obligatoire');
+  const protocol = String(input.receiveProtocol || 'imap').toLowerCase() === 'pop3' ? 'pop3' : 'imap';
+  if (protocol === 'pop3') {
+    if (!String(input.pop3?.host || '').trim()) throw new Error('Serveur POP3 obligatoire');
+    if (!String(input.pop3?.user || '').trim()) throw new Error('Identifiant POP3 obligatoire');
+    if (input.pop3?.secure === false) throw new Error('POP3 doit utiliser SSL/TLS dans LibraMail');
+  } else {
+    if (!String(input.imap?.host || '').trim()) throw new Error('Serveur IMAP obligatoire');
+    if (!String(input.imap?.user || '').trim()) throw new Error('Identifiant IMAP obligatoire');
+  }
   if (!String(input.smtp?.host || '').trim()) throw new Error('Serveur SMTP obligatoire');
 }
 
@@ -334,22 +463,20 @@ function calendarAttachmentFilename(attachment = {}, index = 0) {
 
 function localMessagePath(message, { mustExist = true } = {}) {
   if (!message) throw new Error('Message introuvable');
+  if (String(message.storage_kind || '') === 'encrypted') return '';
   const resolved = db.resolveEmlPath(DATA, message);
-  if (resolved && resolved !== message.eml_path && fs.existsSync(resolved)) {
-    db.db.prepare('UPDATE messages SET eml_path=? WHERE id=?').run(resolved, message.id);
-    message.eml_path = resolved;
-  }
   if (mustExist && (!resolved || !fs.existsSync(resolved))) {
     throw new Error(`Fichier local du message introuvable : ${resolved || '(chemin vide)'}`);
   }
   return resolved;
 }
 
+function readLocalMessage(message) {
+  return mailStore.readMessage(message);
+}
+
 function removeLocalFiles(messages) {
-  for (const message of messages || []) {
-    const file = localMessagePath(message, { mustExist: false });
-    if (file) fs.rm(file, { force: true }, () => {});
-  }
+  for (const message of messages || []) mailStore.removeMessage(message);
 }
 
 function groupMessages(messages) {
@@ -364,6 +491,7 @@ function groupMessages(messages) {
 
 async function syncRole(account, folder, role, source, signal = null) {
   if (!folder) return { folder: '', role, added: 0, skipped: true };
+  if (account?.receiveProtocol === 'pop3') return { folder, role, added: 0, skipped: true, local: true };
   return imap.syncFolder(account, folder, DATA, progress =>
     broadcast('sync.progress', { accountId: account.id, source, ...progress }),
   { role, signal });
@@ -390,7 +518,7 @@ function cancelActiveSyncs(accountId = null) {
   // réseau qui ne répond plus. Le court délai anti-redémarrage ci-dessus évite
   // qu'IDLE ou le minuteur relancent aussitôt la relève que l'utilisateur vient
   // volontairement d'interrompre.
-  cancelled = Math.max(cancelled, imap.cancelSync(accountId));
+  cancelled = Math.max(cancelled, imap.cancelSync(accountId), pop3.cancelSync(accountId));
   return cancelled;
 }
 
@@ -417,6 +545,17 @@ async function syncAccount(account, source = 'manual') {
   const task = (async () => {
     broadcast('sync.started', { accountId: account.id, source, folder: 'all' });
     try {
+      if (account.receiveProtocol === 'pop3') {
+        const result = await pop3.syncAccount(
+          account,
+          DATA,
+          progress => broadcast('sync.progress', { accountId: account.id, source, ...progress }),
+          { signal: controller.signal }
+        );
+        broadcast('sync.done', { accountId: account.id, source, ...result });
+        if (result.added > 0) broadcast('mail.new', { accountId: account.id, added: result.added, source });
+        return result;
+      }
       const folders = await ensureFolderMap(account, { force: false, signal: controller.signal });
       if (controller.signal.aborted) throw Object.assign(new Error('Relève interrompue'), { code: 'SYNC_CANCELLED' });
       const jobs = [
@@ -501,6 +640,7 @@ function scheduleAccount(account) {
 }
 
 function startWatch(account) {
+  if (!account || account.receiveProtocol === 'pop3') return;
   imap.watchInbox(account, () => {
     syncAccount(account, 'idle').catch(() => {});
   }).catch(error =>
@@ -511,6 +651,7 @@ function startWatch(account) {
 function serverActionSafe(message, action) {
   if (!message) return;
   const account = getAccount(message.account_id);
+  if (account?.receiveProtocol === 'pop3') return;
   if (account) imap.serverAction(account, message.folder, message.uid, action).catch(() => {});
 }
 
@@ -532,7 +673,7 @@ async function setMessageSpamState(message, isSpam, { persistSenderRule = false 
   if (isSpam && (decision?.action === 'allow' || db.isTrustedEmail(message.from_addr))) {
     throw new Error('Cet expéditeur est autorisé. Retirez-le d’abord des expéditeurs autorisés ou du carnet de confiance.');
   }
-  const raw = fs.readFileSync(localMessagePath(message), 'utf8');
+  const raw = readLocalMessage(message).toString('utf8');
   const parsed = await simpleParser(raw);
   const corpus = `${message.subject || ''} ${message.from_addr || ''} ${parsed.text || ''}`;
   const wanted = isSpam ? 1 : 0;
@@ -633,6 +774,8 @@ async function moveMessagesToTrash(messages, { source = 'manual', onProgress = n
   const total = Array.isArray(messages) ? messages.length : 0;
   let completed = 0;
   const succeededIds = [];
+  const localMovedIds = [];
+  const localDeletedIds = [];
   const affectedAccounts = new Set();
   const errors = [];
 
@@ -648,14 +791,23 @@ async function moveMessagesToTrash(messages, { source = 'manual', onProgress = n
 
     try {
       const folders = await ensureFolderMap(account);
-      const uids = group.map(message => message.uid);
-      if (first.folder_role === 'trash' || !folders.trash || first.folder === folders.trash) {
-        await imap.deleteUids(account, first.folder, uids);
+      if (account.receiveProtocol === 'pop3') {
+        const ids = group.map(message => message.id);
+        if (first.folder_role === 'trash') localDeletedIds.push(...ids);
+        else {
+          db.moveLocalMessages(ids, folders.trash || 'Local/Trash', 'trash');
+          localMovedIds.push(...ids);
+        }
       } else {
-        await imap.moveUids(account, first.folder, uids, folders.trash);
-        affectedAccounts.add(account.id);
+        const uids = group.map(message => message.uid);
+        if (first.folder_role === 'trash' || !folders.trash || first.folder === folders.trash) {
+          await imap.deleteUids(account, first.folder, uids);
+        } else {
+          await imap.moveUids(account, first.folder, uids, folders.trash);
+          affectedAccounts.add(account.id);
+        }
+        succeededIds.push(...group.map(message => message.id));
       }
-      succeededIds.push(...group.map(message => message.id));
     } catch (error) {
       errors.push({ accountId: account.id, folder: first.folder, error: error.message });
     } finally {
@@ -664,7 +816,7 @@ async function moveMessagesToTrash(messages, { source = 'manual', onProgress = n
     }
   }
 
-  const removed = db.deleteMessages(succeededIds);
+  const removed = db.deleteMessages([...succeededIds, ...localDeletedIds]);
   removeLocalFiles(removed);
 
   // Une relève ciblée rend immédiatement visibles les messages déplacés dans
@@ -677,8 +829,8 @@ async function moveMessagesToTrash(messages, { source = 'manual', onProgress = n
   }
 
   return {
-    processed: removed.length,
-    moved: affectedAccounts.size ? removed.length : 0,
+    processed: removed.length + localMovedIds.length,
+    moved: (affectedAccounts.size ? succeededIds.length : 0) + localMovedIds.length,
     errors,
   };
 }
@@ -729,6 +881,7 @@ async function restoreMessagesFromTrash(messages, { source = 'manual', onProgres
   const total = eligible.length;
   let completed = 0;
   const succeededIds = [];
+  const localRestoredIds = [];
   const affectedAccounts = new Set();
   const errors = [];
 
@@ -746,9 +899,15 @@ async function restoreMessagesFromTrash(messages, { source = 'manual', onProgres
       const inbox = folders.inbox || 'INBOX';
       if (!first.folder) throw new Error('Dossier de corbeille introuvable');
       if (first.folder === inbox) throw new Error('Le message se trouve déjà dans la boîte de réception');
-      await imap.moveUids(account, first.folder, group.map(message => message.uid), inbox);
-      succeededIds.push(...group.map(message => message.id));
-      affectedAccounts.add(account.id);
+      if (account.receiveProtocol === 'pop3') {
+        const ids = group.map(message => message.id);
+        db.moveLocalMessages(ids, inbox, 'inbox');
+        localRestoredIds.push(...ids);
+      } else {
+        await imap.moveUids(account, first.folder, group.map(message => message.uid), inbox);
+        succeededIds.push(...group.map(message => message.id));
+        affectedAccounts.add(account.id);
+      }
     } catch (error) {
       errors.push({ accountId: account.id, folder: first.folder, error: error.message });
     } finally {
@@ -770,8 +929,8 @@ async function restoreMessagesFromTrash(messages, { source = 'manual', onProgres
   }
 
   return {
-    processed: removed.length,
-    restored: removed.length,
+    processed: removed.length + localRestoredIds.length,
+    restored: removed.length + localRestoredIds.length,
     skipped: Math.max(0, requested.length - eligible.length),
     errors,
   };
@@ -794,6 +953,14 @@ async function emptyTrash({ source = 'manual', onProgress = null } = {}) {
     try { folders = await ensureFolderMap(account); }
     catch (error) {
       errors.push({ accountId: account.id, error: error.message });
+      continue;
+    }
+
+    if (account.receiveProtocol === 'pop3') {
+      const local = messages.filter(message => message.account_id === account.id && message.folder_role === 'trash');
+      removedIds.push(...local.map(message => message.id));
+      completed += local.length;
+      if (typeof onProgress === 'function') onProgress({ completed, total });
       continue;
     }
 
@@ -1026,6 +1193,7 @@ function ensureMaintenanceAvailable() {
 }
 
 async function withMaintenance(kind, task) {
+  await startupMigrationPromise;
   ensureMaintenanceAvailable();
   maintenanceOperation = kind;
   stopAccountRuntime();
@@ -1062,7 +1230,7 @@ function progressBroadcaster(kind, step, { useProgressStep = false } = {}) {
   };
 }
 
-async function exportCompleteBackup(targetPath, { kind = 'export', step = 'archive' } = {}) {
+async function exportCompleteBackup(targetPath, { kind = 'export', step = 'archive', password = '' } = {}) {
   const reportProgress = progressBroadcaster(kind, step, {
     useProgressStep: kind === 'export' && step === 'archive',
   });
@@ -1071,6 +1239,7 @@ async function exportCompleteBackup(targetPath, { kind = 'export', step = 'archi
     database: db.db,
     targetPath,
     appVersion: APP_VERSION,
+    password,
     onProgress: progress => {
       // Pendant la sauvegarde de sécurité précédant un import, la phase
       // « prepare » ne doit pas faire passer artificiellement la jauge à 100 %
@@ -1108,16 +1277,22 @@ function clearDataContents(dataDir, { keepEngineLog = false } = {}) {
   }
 }
 
-async function importCompleteBackup(sourcePath) {
+async function importCompleteBackup(sourcePath, password = '') {
   const resolvedSource = path.resolve(String(sourcePath || ''));
   if (resolvedSource === DATA || resolvedSource.startsWith(DATA + path.sep)) {
     throw new Error('Déplacez la sauvegarde en dehors du dossier data avant de la restaurer');
   }
   const inspection = await backup.inspectArchive(resolvedSource);
+  const importedEncryption = inspection.manifest?.mailStoreEncryption || {};
+  if (importedEncryption.enabled) {
+    if (!importedEncryption.keyEnvelope) throw new Error('Cette sauvegarde chiffrée ne contient pas de clé de récupération.');
+    mailStore.unwrapKeyEnvelope(importedEncryption.keyEnvelope, password);
+  }
+  let keyRollbackSecret = '';
   fs.mkdirSync(BACKUPS_DIR, { recursive: true });
   const safetyBackup = path.join(BACKUPS_DIR, `LibraMail-avant-restauration-${backupTimestamp()}.zip`);
   broadcast('backup.progress', { kind: 'import', step: 'safety', completed: 0, total: 1, name: path.basename(safetyBackup) });
-  await exportCompleteBackup(safetyBackup, { kind: 'import', step: 'safety' });
+  await exportCompleteBackup(safetyBackup, { kind: 'import', step: 'safety', password });
 
   const stagingRoot = fs.mkdtempSync(path.join(ROOT, '.libramail-restore-'));
   const rollbackRoot = path.join(ROOT, `.libramail-rollback-${process.pid}-${Date.now()}`);
@@ -1135,25 +1310,34 @@ async function importCompleteBackup(sourcePath) {
       onProgress: progressBroadcaster('import', 'extract'),
     });
     broadcast('backup.progress', { kind: 'import', step: 'validate', completed: 0, total: 1, name: '' });
-    await backup.validateExtractedData(extracted.dataDir);
+    await backup.validateExtractedData(extracted.dataDir, { manifest: inspection.manifest, password });
     broadcast('backup.progress', { kind: 'import', step: 'validate', completed: 1, total: 1, name: '' });
+    if (mailStore.status().available) {
+      keyRollbackSecret = `mailstore-rollback-${process.pid}-${Date.now()}`;
+      if (!mailStore.stashMasterKey(keyRollbackSecret)) keyRollbackSecret = '';
+    }
     fs.writeFileSync(RESTORE_STATE_FILE, JSON.stringify({
       rollbackRoot,
       stagingRoot,
       sourcePath: resolvedSource,
+      keyRollbackSecret,
       createdAt: new Date().toISOString(),
     }, null, 2));
 
     broadcast('backup.progress', { kind: 'import', step: 'apply', completed: 0, total: 1, name: '' });
+    mailStore.close();
     db.close();
     databaseClosed = true;
     fs.mkdirSync(rollbackRoot, { recursive: true });
     moveDataContents(DATA, rollbackRoot, { keepEngineLog: true });
     oldDataMoved = true;
     moveDataContents(extracted.dataDir, DATA);
+    if (importedEncryption.enabled) mailStore.importKeyEnvelope(importedEncryption.keyEnvelope, password);
 
     db.init(DATA);
-outbox.init(db.db, DATA);
+    mailStore.init(DATA);
+    await migrateLocalStorage();
+    outbox.init(db.db, DATA);
     databaseClosed = false;
     loadRuntimeState();
     broadcast('backup.progress', { kind: 'import', step: 'apply', completed: 1, total: 1, name: '' });
@@ -1161,6 +1345,7 @@ outbox.init(db.db, DATA);
     broadcast('backup.progress', { kind: 'import', step: 'finalize', completed: 0, total: 1, name: '' });
     fs.rmSync(rollbackRoot, { recursive: true, force: true });
     fs.rmSync(stagingRoot, { recursive: true, force: true });
+    if (keyRollbackSecret) mailStore.removeStashedMasterKey(keyRollbackSecret);
     fs.rmSync(RESTORE_STATE_FILE, { force: true });
     broadcast('backup.progress', { kind: 'import', step: 'finalize', completed: 1, total: 1, name: '' });
     return {
@@ -1173,6 +1358,7 @@ outbox.init(db.db, DATA);
   } catch (error) {
     try {
       if (!databaseClosed) {
+        mailStore.close();
         db.close();
         databaseClosed = true;
       }
@@ -1180,8 +1366,11 @@ outbox.init(db.db, DATA);
         clearDataContents(DATA, { keepEngineLog: true });
         moveDataContents(rollbackRoot, DATA);
       }
+      if (keyRollbackSecret) mailStore.restoreStashedMasterKey(keyRollbackSecret);
       db.init(DATA);
-outbox.init(db.db, DATA);
+      mailStore.init(DATA);
+      await migrateLocalStorage();
+      outbox.init(db.db, DATA);
       databaseClosed = false;
       loadRuntimeState();
     } catch (rollbackError) {
@@ -1191,6 +1380,7 @@ outbox.init(db.db, DATA);
     }
     fs.rmSync(stagingRoot, { recursive: true, force: true });
     fs.rmSync(rollbackRoot, { recursive: true, force: true });
+    if (keyRollbackSecret) mailStore.removeStashedMasterKey(keyRollbackSecret);
     fs.rmSync(RESTORE_STATE_FILE, { force: true });
     throw error;
   }
@@ -1284,11 +1474,16 @@ async function sendMailNow(accountId, mail) {
   const folders = await ensureFolderMap(account).catch(() => account.folderMap || {});
   let savedToSent = false;
   let sentCopyWarning = null;
-  if (folders.sent && sent.raw) {
+  if (sent.raw) {
     try {
-      const appended = await imap.appendSentCopy(account, folders.sent, sent.raw, sent.messageId);
-      savedToSent = appended.appended || appended.reason === 'already-present';
-      await imap.syncFolder(account, folders.sent, DATA, null, { role: 'sent' });
+      if (account.receiveProtocol === 'pop3') {
+        await pop3.storeRawMessage(account, sent.raw, { folder: folders.sent || 'Local/Sent', role: 'sent', seen: 1 });
+        savedToSent = true;
+      } else if (folders.sent) {
+        const appended = await imap.appendSentCopy(account, folders.sent, sent.raw, sent.messageId);
+        savedToSent = appended.appended || appended.reason === 'already-present';
+        await imap.syncFolder(account, folders.sent, DATA, null, { role: 'sent' });
+      }
     } catch (error) {
       sentCopyWarning = error.message;
       broadcast('sent.copy.error', { accountId: account.id, error: error.message });
@@ -1362,8 +1557,8 @@ const methods = {
   'backup.inspect': async ({ sourcePath }) =>
     publicBackupInspection(await backup.inspectArchive(sourcePath)),
 
-  'backup.export': async ({ targetPath }) => withMaintenance('export', async () => {
-    const result = await exportCompleteBackup(targetPath, { kind: 'export', step: 'archive' });
+  'backup.export': async ({ targetPath, password = '' }) => withMaintenance('export', async () => {
+    const result = await exportCompleteBackup(targetPath, { kind: 'export', step: 'archive', password });
     return {
       targetPath: result.targetPath,
       archiveSize: result.archiveSize,
@@ -1372,44 +1567,61 @@ const methods = {
     };
   }),
 
-  'backup.import': async ({ sourcePath }) => withMaintenance('import', async () =>
-    importCompleteBackup(sourcePath)),
+  'backup.import': async ({ sourcePath, password = '' }) => withMaintenance('import', async () =>
+    importCompleteBackup(sourcePath, password)),
 
   'accounts.add': async input => {
     validateAccountInput(input);
-    const imapPassword = String(input.imap?.pass || '');
-    const smtpPassword = String(input.smtp?.pass || '') || imapPassword;
-    if (!imapPassword) throw new Error('Mot de passe IMAP obligatoire');
+    const receiveProtocol = String(input.receiveProtocol || 'imap').toLowerCase() === 'pop3' ? 'pop3' : 'imap';
+    const incomingInput = receiveProtocol === 'pop3' ? input.pop3 : input.imap;
+    const incomingPassword = String(incomingInput?.pass || '');
+    const smtpPassword = String(input.smtp?.pass || '') || incomingPassword;
+    if (!incomingPassword) throw new Error(`Mot de passe ${receiveProtocol.toUpperCase()} obligatoire`);
     const account = normalizeAccount({
       id: crypto.randomUUID(),
+      receiveProtocol,
       displayName: String(input.displayName || '').trim(),
       email: String(input.email || '').trim(),
       color: input.color || '#8b7dd8',
       logoData: normalizeLogoData(input.logoData),
-      imap: {
+      imap: receiveProtocol === 'imap' ? {
         host: String(input.imap.host || '').trim(),
         port: Number(input.imap.port) || 993,
         secure: input.imap.secure !== false,
         user: String(input.imap.user || '').trim(),
-        pass: imapPassword,
-      },
+        pass: incomingPassword,
+      } : {},
+      pop3: receiveProtocol === 'pop3' ? {
+        host: String(input.pop3.host || '').trim(),
+        port: Number(input.pop3.port) || 995,
+        secure: input.pop3.secure !== false,
+        user: String(input.pop3.user || '').trim(),
+        pass: incomingPassword,
+        deletePolicy: input.pop3.deletePolicy || 'keep',
+        deleteAfterDays: Number(input.pop3.deleteAfterDays) || 7,
+      } : {},
       smtp: {
         host: String(input.smtp.host || '').trim(),
         port: Number(input.smtp.port) || 465,
         secure: input.smtp.secure !== false,
-        user: String(input.smtp.user || input.imap.user || '').trim(),
+        user: String(input.smtp.user || incomingInput?.user || '').trim(),
         pass: smtpPassword,
       },
       syncIntervalMinutes: input.syncIntervalMinutes ?? 5,
       spamRetentionDays: input.spamRetentionDays ?? 30,
     });
     await smtp.verify(account).catch(error => { throw new Error('SMTP : ' + error.message); });
-    account.folderMap = await imap.resolveFolderMap(account)
-      .catch(error => { throw new Error('IMAP : ' + error.message); });
+    if (receiveProtocol === 'pop3') {
+      await pop3.verify(account).catch(error => { throw new Error('POP3 : ' + error.message); });
+      account.folderMap = { inbox: 'INBOX', sent: 'Local/Sent', trash: 'Local/Trash', junk: 'Local/Junk' };
+    } else {
+      account.folderMap = await imap.resolveFolderMap(account)
+        .catch(error => { throw new Error('IMAP : ' + error.message); });
+    }
 
     try {
-      credentialStore.storePair(account.id, imapPassword, smtpPassword);
-      account.credentials = { store: 'system', version: 1, imap: true, smtp: true };
+      credentialStore.storeIncoming(account.id, receiveProtocol, incomingPassword, smtpPassword);
+      account.credentials = { store: 'system', version: 2, incoming: receiveProtocol, smtp: true };
     } catch (error) {
       throw new Error(`Stockage sécurisé des mots de passe impossible : ${error.message}`);
     }
@@ -1433,37 +1645,59 @@ const methods = {
     if (activeSyncs.has(current.id)) throw new Error('Une relève est en cours pour ce compte. Réessayez dans quelques instants.');
     validateAccountInput(input, current.id);
 
+    const receiveProtocol = String(input.receiveProtocol || current.receiveProtocol || 'imap').toLowerCase() === 'pop3' ? 'pop3' : 'imap';
+    const currentIncoming = receiveProtocol === 'pop3' ? current.pop3 : current.imap;
+    const inputIncoming = receiveProtocol === 'pop3' ? input.pop3 : input.imap;
+    const incomingPassword = String(inputIncoming?.pass || '') || String(currentIncoming?.pass || '');
+    const smtpPassword = String(input.smtp?.pass || '') || current.smtp?.pass || incomingPassword;
+    if (!incomingPassword) throw new Error(`Mot de passe ${receiveProtocol.toUpperCase()} obligatoire`);
+
     const candidate = normalizeAccount({
       ...current,
+      receiveProtocol,
       displayName: String(input.displayName || '').trim(),
       email: String(input.email || '').trim(),
       color: input.color || current.color || '#8b7dd8',
       logoData: normalizeLogoData(input.logoData),
-      imap: {
+      imap: receiveProtocol === 'imap' ? {
         host: String(input.imap.host || '').trim(),
         port: Number(input.imap.port) || 993,
         secure: input.imap.secure !== false,
         user: String(input.imap.user || '').trim(),
-        pass: String(input.imap.pass || '') || current.imap?.pass || '',
-      },
+        pass: incomingPassword,
+      } : {},
+      pop3: receiveProtocol === 'pop3' ? {
+        host: String(input.pop3.host || '').trim(),
+        port: Number(input.pop3.port) || 995,
+        secure: input.pop3.secure !== false,
+        user: String(input.pop3.user || '').trim(),
+        pass: incomingPassword,
+        deletePolicy: input.pop3.deletePolicy || current.pop3?.deletePolicy || 'keep',
+        deleteAfterDays: Number(input.pop3.deleteAfterDays) || current.pop3?.deleteAfterDays || 7,
+      } : {},
       smtp: {
         host: String(input.smtp.host || '').trim(),
         port: Number(input.smtp.port) || 465,
         secure: input.smtp.secure !== false,
-        user: String(input.smtp.user || input.imap.user || '').trim(),
-        pass: String(input.smtp.pass || '') || current.smtp?.pass || current.imap?.pass || '',
+        user: String(input.smtp.user || inputIncoming?.user || '').trim(),
+        pass: smtpPassword,
       },
       syncIntervalMinutes: input.syncIntervalMinutes ?? current.syncIntervalMinutes,
       spamRetentionDays: input.spamRetentionDays ?? current.spamRetentionDays,
     });
 
     await smtp.verify(candidate).catch(error => { throw new Error('SMTP : ' + error.message); });
-    candidate.folderMap = await imap.resolveFolderMap(candidate)
-      .catch(error => { throw new Error('IMAP : ' + error.message); });
+    if (receiveProtocol === 'pop3') {
+      await pop3.verify(candidate).catch(error => { throw new Error('POP3 : ' + error.message); });
+      candidate.folderMap = { inbox: 'INBOX', sent: 'Local/Sent', trash: 'Local/Trash', junk: 'Local/Junk' };
+    } else {
+      candidate.folderMap = await imap.resolveFolderMap(candidate)
+        .catch(error => { throw new Error('IMAP : ' + error.message); });
+    }
 
     try {
-      credentialStore.storePair(candidate.id, candidate.imap.pass, candidate.smtp.pass || candidate.imap.pass);
-      candidate.credentials = { store: 'system', version: 1, imap: true, smtp: true };
+      credentialStore.storeIncoming(candidate.id, receiveProtocol, incomingPassword, smtpPassword);
+      candidate.credentials = { store: 'system', version: 2, incoming: receiveProtocol, smtp: true };
     } catch (error) {
       throw new Error(`Stockage sécurisé des mots de passe impossible : ${error.message}`);
     }
@@ -1493,6 +1727,7 @@ const methods = {
     const localMessages = db.deleteAccountData(id);
     removeLocalFiles(localMessages);
     fs.rm(path.join(DATA, 'mail', id), { recursive: true, force: true }, () => {});
+    mailStore.removeAccount(id);
     credentialStore.removePair(id);
 
     accounts = accounts.filter(item => item.id !== id);
@@ -1531,7 +1766,17 @@ const methods = {
     return publicAccount(account);
   },
 
-  'accounts.folders': async ({ id }) => imap.listFolders(getAccount(id)),
+  'accounts.folders': async ({ id }) => {
+    const account = getAccount(id);
+    if (!account) throw new Error('Compte introuvable');
+    if (account.receiveProtocol === 'pop3') return [
+      { path: 'INBOX', name: 'INBOX', specialUse: '\\Inbox' },
+      { path: 'Local/Sent', name: 'Envoyés', specialUse: '\\Sent' },
+      { path: 'Local/Trash', name: 'Corbeille', specialUse: '\\Trash' },
+      { path: 'Local/Junk', name: 'Indésirables', specialUse: '\\Junk' },
+    ];
+    return imap.listFolders(account);
+  },
 
   // ---------- Synchronisation ----------
   'sync.folder': async ({ accountId }) => syncAccount(getAccount(accountId), 'manual'),
@@ -1548,6 +1793,7 @@ const methods = {
   // initiale n'est lancée qu'une seule fois par exécution du moteur, y compris
   // si la connexion WebSocket est momentanément recréée.
   'app.ready': async () => {
+    await startupMigrationPromise;
     if (startupSyncTriggered) return { started: false, accounts: accounts.length };
     startupSyncTriggered = true;
     setTimeout(() => {
@@ -1573,15 +1819,20 @@ const methods = {
     threadKey,
     messages: db.getConversation(threadKey),
   }),
-  'messages.search': async ({ query, limit, sortBy, sortDirection }) =>
-    db.search(query, { limit, sortBy, sortDirection }),
+  'messages.search': async ({ query, limit, sortBy, sortDirection }) => {
+    await startupMigrationPromise;
+    return db.search(query, {
+      limit, sortBy, sortDirection,
+      bodyTokens: mailStore.status().available ? mailStore.searchTokens(query) : null,
+    });
+  },
   'messages.remote.allow': ({ id, urls }) => ({
     urls: db.allowMessageRemoteResources(id, urls),
   }),
   'messages.read': async ({ id }) => {
     const message = db.getMessage(id);
     if (!message) throw new Error('Message introuvable');
-    const raw = fs.readFileSync(localMessagePath(message));
+    const raw = readLocalMessage(message);
     const parsed = await simpleParser(raw);
     const outgoing = message.folder_role === 'sent';
     const correspondent = outgoing
@@ -1836,7 +2087,7 @@ const methods = {
   'calendar.importAttachment': async ({ messageId, index } = {}) => {
     const message = db.getMessage(messageId);
     if (!message) throw new Error('Message introuvable');
-    const parsedMessage = await simpleParser(fs.readFileSync(localMessagePath(message)));
+    const parsedMessage = await simpleParser(readLocalMessage(message));
     const attachmentIndex = Number(index);
     const attachment = (parsedMessage.attachments || [])[attachmentIndex];
     if (!attachment) throw new Error('Pièce jointe introuvable');
@@ -1953,7 +2204,7 @@ const methods = {
   'attachments.save': async ({ messageId, index, targetPath }) => {
     const message = db.getMessage(messageId);
     if (!message) throw new Error('Message introuvable');
-    const parsed = await simpleParser(fs.readFileSync(localMessagePath(message)));
+    const parsed = await simpleParser(readLocalMessage(message));
     const attachment = (parsed.attachments || [])[index];
     if (!attachment) throw new Error('Pièce jointe introuvable');
     fs.writeFileSync(targetPath, attachment.content);
@@ -2056,6 +2307,7 @@ function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
   stopAccountRuntime();
+  try { mailStore.close(); } catch {}
   try { db.close(); } catch {}
   for (const socket of sockets) {
     try { socket.close(); } catch {}
@@ -2098,7 +2350,9 @@ process.on('uncaughtException', error => {
   console.error('[LibraMail] Erreur non interceptée :', error);
 });
 
-startAccountRuntime({ resolveFolders: true });
+startupMigrationPromise.then(() => {
+  if (!shuttingDown) startAccountRuntime({ resolveFolders: true });
+});
 
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);

@@ -28,6 +28,7 @@ const App = (() => {
   let activitySequence = 0;
   let activityEntries = [];
   let unseenActivityCount = 0;
+  let manualSyncPending = false;
   const activeSyncActivities = new Map();
   const activeMaintenanceActivities = new Map();
   let pendingConfirmAction = null;
@@ -66,6 +67,43 @@ const App = (() => {
     { id: 'rose', color: '#CF5B78' },
     { id: 'red', color: '#D66F4F' },
   ];
+
+  function startupMessage(text, { error = false } = {}) {
+    const screen = document.getElementById('startup-screen');
+    const message = document.getElementById('startup-message');
+    if (message && text) message.textContent = String(text);
+    if (screen) screen.classList.toggle('error', Boolean(error));
+  }
+
+  function hideStartupScreen() {
+    const screen = document.getElementById('startup-screen');
+    if (!screen) return;
+    screen.classList.add('done');
+    setTimeout(() => screen.remove(), 300);
+  }
+
+  function setManualSyncBusy(busy) {
+    manualSyncPending = Boolean(busy);
+    const button = document.getElementById('btn-sync');
+    if (!button) return;
+    button.disabled = manualSyncPending;
+    button.setAttribute('aria-busy', manualSyncPending ? 'true' : 'false');
+    button.classList.toggle('sync-pending', manualSyncPending);
+    button.querySelector('i')?.classList.toggle('fa-spin', manualSyncPending);
+  }
+
+  async function runManualSync() {
+    if (manualSyncPending) return;
+    setManualSyncBusy(true);
+    status(t('status.syncRequested'), 'busy');
+    try {
+      await rpc('sync.all');
+    } catch (error) {
+      status(`${t('error')} : ${error.message}`, 'error');
+    } finally {
+      setManualSyncBusy(false);
+    }
+  }
 
   // ---------- Moteur embarqué Windows ----------
   function usesBundledWindowsEngine() {
@@ -140,6 +178,7 @@ const App = (() => {
 
   async function ensureBundledWindowsEngine() {
     if (!usesBundledWindowsEngine()) return;
+    startupMessage('Initialisation du moteur…');
     wireBundledEngineEvents();
 
     // Une instance précédente peut déjà fournir le moteur. Dans ce cas, cette
@@ -167,6 +206,7 @@ const App = (() => {
     await writeEngineStartupLog(`Démarrage : ${command}`, { reset: true });
     // --use-system-ca ajoute le magasin de certificats Windows aux CA de Node
     // sans désactiver la validation TLS.
+    startupMessage('Démarrage du moteur de messagerie…');
     bundledEngineProcess = await Neutralino.os.spawnProcess(command, { cwd: appDir });
     bundledEngineOwned = true;
 
@@ -221,6 +261,7 @@ const App = (() => {
       try { await boot(); }
       catch (error) {
         console.error('[LibraMail] Démarrage de l’interface :', error);
+        startupMessage(`${t('error')} : ${error.message}`, { error: true });
         status(`${t('error')} : ${error.message}`, 'error');
       }
     };
@@ -716,6 +757,16 @@ const App = (() => {
         state: 'error',
       });
       setBackupOperationStatus(`${t('error')} : ${data.error || t('error')}`, 'error');
+    } else if (event === 'storage.migration.progress') {
+      status(t('storage.migrationProgress', {
+        current: Number(data.encrypted) || 0,
+        total: Number(data.total) || 0,
+      }), 'busy');
+    } else if (event === 'storage.migration.done') {
+      if (Number(data.mail?.encrypted) > 0 || data.search?.migrated) {
+        status(t('storage.migrationDone'), 'success');
+        refresh().catch(() => {});
+      }
     } else if (event === 'contacts.changed') {
       refreshContactsCount().catch(() => {});
       refreshContactDirectory().then(() => refresh()).catch(() => refresh());
@@ -733,6 +784,7 @@ const App = (() => {
 
   // ---------- Démarrage ----------
   async function boot() {
+    startupMessage('Chargement de la configuration…');
     const state = await rpc('config.get');
     config = state.config;
     accounts = state.accounts;
@@ -741,6 +793,7 @@ const App = (() => {
     document.getElementById('app').dataset.layout = config.layout || 'vertical';
     applyAccentScheme();
     await I18N.load(config.locale || 'fr');
+    startupMessage(t('startup.loading'));
     applyPaneDimensions();
     applyAppVersion();
     applySidebarSectionStates();
@@ -756,6 +809,7 @@ const App = (() => {
     window.OutboxUI?.refresh?.();
     window.PlannerUI?.refreshSummary?.();
     status(t('status.connected'), 'success');
+    hideStartupScreen();
     checkForUpdates(false).catch(() => {});
 
     // Une seule relève est demandée lorsque l'interface est réellement prête.
@@ -785,7 +839,7 @@ const App = (() => {
   };
 
   function applyAppVersion() {
-    const rawVersion = String(window.NL_APPVERSION || '0.3.8').replace(/^v/i, '');
+    const rawVersion = String(window.NL_APPVERSION || '0.4.0').replace(/^v/i, '');
     const badge = document.getElementById('app-version');
     if (badge) {
       badge.textContent = `v${rawVersion}`;
@@ -4991,6 +5045,14 @@ const App = (() => {
     });
   }
 
+  function updateIncomingProtocolForm() {
+    const protocol = accountField('acc-receive-protocol')?.value === 'pop3' ? 'pop3' : 'imap';
+    accountField('account-imap-section')?.classList.toggle('hidden', protocol !== 'imap');
+    accountField('account-pop3-section')?.classList.toggle('hidden', protocol !== 'pop3');
+    const deletePolicy = accountField('acc-pop3-delete-policy')?.value || 'keep';
+    accountField('acc-pop3-delete-days-field')?.classList.toggle('hidden', protocol !== 'pop3' || deletePolicy !== 'after_days');
+  }
+
   function resetAccountForm() {
     editingAccountId = null;
     accountField('acc-id').value = '';
@@ -4999,6 +5061,7 @@ const App = (() => {
     accountField('acc-name').value = '';
     accountField('acc-email').value = '';
     accountField('acc-color').value = '#8b7dd8';
+    accountField('acc-receive-protocol').value = 'imap';
     accountField('acc-logo-data').value = '';
     updateAccountLogoPreview('');
     accountField('acc-imap-host').value = '';
@@ -5006,6 +5069,12 @@ const App = (() => {
     accountField('acc-imap-secure').value = '1';
     accountField('acc-imap-user').value = '';
     accountField('acc-imap-pass').value = '';
+    accountField('acc-pop3-host').value = '';
+    accountField('acc-pop3-port').value = '995';
+    accountField('acc-pop3-user').value = '';
+    accountField('acc-pop3-pass').value = '';
+    accountField('acc-pop3-delete-policy').value = 'keep';
+    accountField('acc-pop3-delete-days').value = '7';
     accountField('acc-smtp-host').value = '';
     accountField('acc-smtp-port').value = '465';
     accountField('acc-smtp-secure').value = '1';
@@ -5014,6 +5083,7 @@ const App = (() => {
     accountField('acc-sync-interval').value = '5';
     accountField('acc-spam-retention').value = '30';
     accountField('account-password-hint').textContent = t('account.passwordRequired');
+    updateIncomingProtocolForm();
     setAccountStatus();
   }
 
@@ -5038,6 +5108,7 @@ const App = (() => {
       accountField('acc-name').value = details.displayName || '';
       accountField('acc-email').value = details.email || '';
       accountField('acc-color').value = safeColor(details.color);
+      accountField('acc-receive-protocol').value = details.receiveProtocol === 'pop3' ? 'pop3' : 'imap';
       accountField('acc-logo-data').value = details.logoData || '';
       updateAccountLogoPreview(details.logoData || '', details);
       accountField('acc-imap-host').value = details.imap?.host || '';
@@ -5045,13 +5116,20 @@ const App = (() => {
       accountField('acc-imap-secure').value = details.imap?.secure === false ? '0' : '1';
       accountField('acc-imap-user').value = details.imap?.user || '';
       accountField('acc-imap-pass').value = '';
+      accountField('acc-pop3-host').value = details.pop3?.host || '';
+      accountField('acc-pop3-port').value = Number(details.pop3?.port) || 995;
+      accountField('acc-pop3-user').value = details.pop3?.user || details.email || '';
+      accountField('acc-pop3-pass').value = '';
+      accountField('acc-pop3-delete-policy').value = details.pop3?.deletePolicy || 'keep';
+      accountField('acc-pop3-delete-days').value = Number(details.pop3?.deleteAfterDays) || 7;
       accountField('acc-smtp-host').value = details.smtp?.host || '';
       accountField('acc-smtp-port').value = Number(details.smtp?.port) || 465;
       accountField('acc-smtp-secure').value = details.smtp?.secure === false ? '0' : '1';
-      accountField('acc-smtp-user').value = details.smtp?.user || details.imap?.user || '';
+      accountField('acc-smtp-user').value = details.smtp?.user || details.pop3?.user || details.imap?.user || '';
       accountField('acc-smtp-pass').value = '';
       accountField('acc-sync-interval').value = Number(details.syncIntervalMinutes) || 0;
       accountField('acc-spam-retention').value = Number(details.spamRetentionDays) || 0;
+      updateIncomingProtocolForm();
       setAccountStatus();
       accountField('acc-name').focus();
     } catch (error) {
@@ -5069,6 +5147,7 @@ const App = (() => {
       syncIntervalMinutes: Number(accountField('acc-sync-interval').value) || 0,
       spamRetentionDays: Number(accountField('acc-spam-retention').value) || 0,
       logoData: accountField('acc-logo-data')?.value || '',
+      receiveProtocol: accountField('acc-receive-protocol').value === 'pop3' ? 'pop3' : 'imap',
       imap: {
         host: value('acc-imap-host'),
         port: Number(value('acc-imap-port')),
@@ -5076,11 +5155,20 @@ const App = (() => {
         user: value('acc-imap-user'),
         pass: accountField('acc-imap-pass').value,
       },
+      pop3: {
+        host: value('acc-pop3-host'),
+        port: Number(value('acc-pop3-port')),
+        secure: true,
+        user: value('acc-pop3-user'),
+        pass: accountField('acc-pop3-pass').value,
+        deletePolicy: accountField('acc-pop3-delete-policy').value || 'keep',
+        deleteAfterDays: Number(value('acc-pop3-delete-days')) || 7,
+      },
       smtp: {
         host: value('acc-smtp-host'),
         port: Number(value('acc-smtp-port')),
         secure: accountField('acc-smtp-secure').value === '1',
-        user: value('acc-smtp-user') || value('acc-imap-user'),
+        user: value('acc-smtp-user') || (accountField('acc-receive-protocol').value === 'pop3' ? value('acc-pop3-user') : value('acc-imap-user')),
         pass: accountField('acc-smtp-pass').value,
       },
     };
@@ -5357,7 +5445,7 @@ const App = (() => {
 
   // ---------- Mise à jour et À propos ----------
   function appVersion() {
-    return String(window.NL_APPVERSION || '0.3.8').replace(/^v/i, '');
+    return String(window.NL_APPVERSION || '0.4.0').replace(/^v/i, '');
   }
 
   function compareVersions(a, b) {
@@ -5588,10 +5676,18 @@ const App = (() => {
     backupBusy = Boolean(value);
     const card = document.querySelector('.backup-settings-card');
     card?.classList.toggle('is-busy', backupBusy);
-    ['btn-export-backup', 'btn-import-backup'].forEach(id => {
+    ['btn-export-backup', 'btn-import-backup', 'backup-password', 'backup-password-confirm'].forEach(id => {
       const button = document.getElementById(id);
       if (button) button.disabled = backupBusy;
     });
+  }
+
+  function backupRecoveryPassword({ confirm = false } = {}) {
+    const password = String(document.getElementById('backup-password')?.value || '');
+    const confirmation = String(document.getElementById('backup-password-confirm')?.value || '');
+    if (password.length < 8) throw new Error(t('backup.recoveryPasswordTooShort'));
+    if (confirm && password !== confirmation) throw new Error(t('backup.recoveryPasswordMismatch'));
+    return password;
   }
 
   function backupFilename() {
@@ -5626,9 +5722,10 @@ const App = (() => {
         return;
       }
       if (!target.toLowerCase().endsWith('.zip')) target += '.zip';
+      const password = backupRecoveryPassword({ confirm: true });
 
       setBackupOperationStatus(t('backup.exporting'), 'busy');
-      const result = await rpc('backup.export', { targetPath: target });
+      const result = await rpc('backup.export', { targetPath: target, password });
       setBackupProgress({
         label: t('backup.exportComplete'),
         percent: 100,
@@ -5687,6 +5784,15 @@ const App = (() => {
 
     const manifest = inspection.manifest || {};
     const summary = manifest.summary || {};
+    let password;
+    try {
+      password = backupRecoveryPassword();
+    } catch (error) {
+      setBackupProgress({ label: t('backup.failed'), percent: null, detail: error.message, state: 'error' });
+      setBackupOperationStatus(`${t('error')} : ${error.message}`, 'error');
+      setBackupBusy(false);
+      return;
+    }
     const createdAt = manifest.createdAt
       ? new Date(manifest.createdAt).toLocaleString(I18N.locale || 'fr')
       : '—';
@@ -5712,7 +5818,7 @@ const App = (() => {
 
     setBackupOperationStatus(t('backup.importing'), 'busy');
     try {
-      const result = await rpc('backup.import', { sourcePath });
+      const result = await rpc('backup.import', { sourcePath, password });
       const message = t('backup.imported', {
         accounts: Number(result.accounts) || 0,
         messages: Number(result.messages) || 0,
@@ -6362,7 +6468,7 @@ const App = (() => {
     });
 
     document.getElementById('btn-compose').onclick = () => openCompose(null, 'new');
-    document.getElementById('btn-sync').onclick = () => rpc('sync.all').catch(error => status(error.message));
+    document.getElementById('btn-sync').onclick = runManualSync;
     document.getElementById('btn-select-all').onclick = () => list.selectAll();
     document.getElementById('btn-clear-selection').onclick = () => list.clearSelection();
     document.getElementById('btn-bulk-read').onclick = () => runBulkFlag('seen', true);
@@ -6472,6 +6578,8 @@ const App = (() => {
       if (event.key === 'Escape' && editingLabelId !== null) resetLabelEditor({ focus: true });
     };
     document.getElementById('btn-save-account').onclick = saveAccount;
+    document.getElementById('acc-receive-protocol')?.addEventListener('change', updateIncomingProtocolForm);
+    document.getElementById('acc-pop3-delete-policy')?.addEventListener('change', updateIncomingProtocolForm);
     document.getElementById('btn-delete-account').onclick = deleteEditedAccount;
     document.getElementById('btn-new-contact').onclick = () => resetContactEditor({ focus: true });
     document.getElementById('btn-save-contact').onclick = saveContact;
@@ -6765,6 +6873,7 @@ const App = (() => {
       await ensureBundledWindowsEngine();
     } catch (error) {
       console.error('[LibraMail] Démarrage du moteur Windows :', error);
+      startupMessage(`Erreur de démarrage : ${error.message}`, { error: true });
       status(`${t('error')} : ${error.message}`, 'error');
       try {
         await Neutralino.os.showMessageBox(

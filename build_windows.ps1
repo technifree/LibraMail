@@ -128,6 +128,7 @@ if ($NodeVersion -notmatch '^\d+\.\d+\.\d+$') {
 
 Require-File -RelativePath 'neutralino.config.json'
 Require-File -RelativePath 'resources\index.html'
+Require-File -RelativePath 'resources\icons\appIcon.png'
 Require-File -RelativePath 'engine\backend.js'
 Require-Directory -RelativePath 'resources'
 Require-Directory -RelativePath 'engine'
@@ -141,6 +142,16 @@ $Version = [string]$Config.version
 if ([string]::IsNullOrWhiteSpace($Version)) {
     throw 'La version est absente de neutralino.config.json.'
 }
+
+$ConfiguredIcon = [string]$Config.applicationIcon
+if ([string]::IsNullOrWhiteSpace($ConfiguredIcon)) {
+    throw 'applicationIcon est absent de neutralino.config.json.'
+}
+$ConfiguredIconPath = Join-Path $ProjectDir ($ConfiguredIcon -replace '/', '\')
+if (-not (Test-Path -LiteralPath $ConfiguredIconPath -PathType Leaf)) {
+    throw "Icône Windows introuvable : $ConfiguredIcon"
+}
+Write-Ok -Message "Icône Windows configurée : $ConfiguredIcon"
 
 $BinaryName = 'libramail'
 if ($Config.cli -and $Config.cli.binaryName) {

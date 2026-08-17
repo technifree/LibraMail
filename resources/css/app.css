@@ -2627,6 +2627,15 @@ body.resizing-panes.resize-rows { cursor: row-resize; }
   color: var(--warn) !important;
 }
 .backup-security-warning i { margin-top: 2px; }
+.backup-key-fields {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  padding-top: 4px;
+}
+.backup-key-fields .field-hint { grid-column: 1 / -1; }
+.backup-key-fields input { width: 100%; }
 .backup-settings-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2719,6 +2728,8 @@ body.resizing-panes.resize-rows { cursor: row-resize; }
 
 @media (max-width: 760px) {
   .backup-settings-card { grid-template-columns: 1fr; }
+  .backup-key-fields { grid-template-columns: 1fr; }
+  .backup-key-fields .field-hint { grid-column: 1; }
   .backup-settings-actions { justify-content: flex-start; }
 }
 
@@ -3955,4 +3966,13 @@ html[data-theme="light"] #reader-empty.reader-empty-brand .reader-empty-logo-lig
   .planner-side-panel { display:grid; grid-template-columns:minmax(240px,.9fr) minmax(300px,1.1fr); }
   .planner-day-section { max-height:none; border-bottom:0; border-right:1px solid var(--border); }
   .planner-year-grid { grid-template-columns:repeat(2,minmax(160px,1fr)); }
+}
+
+/* ---------- Retour visuel immédiat de la relève manuelle ---------- */
+#btn-sync.sync-pending {
+  opacity: .88;
+  cursor: progress;
+}
+#btn-sync.sync-pending:disabled {
+  color: var(--fg);
 }

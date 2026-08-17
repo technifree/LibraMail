@@ -1,12 +1,15 @@
 /**
  * LibraMail — Index SQLite (better-sqlite3, WAL, FTS5)
  * La liste, les dossiers virtuels et les statistiques travaillent uniquement
- * sur l'index local. Les fichiers .eml ne sont lus qu'à l'ouverture d'un mail.
+ * sur l'index local. Depuis la 0.4.0, le message MIME brut peut être stocké
+ * dans un magasin SQLite chiffré par compte; les anciens .eml restent lisibles
+ * pendant la migration de compatibilité.
  */
 'use strict';
 const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
+const mailStore = require('./mail_store');
 
 let db;
 
@@ -39,6 +42,9 @@ function migrateMessageData() {
   ensureColumn('messages', 'in_reply_to', 'TEXT');
   ensureColumn('messages', 'references_json', "TEXT DEFAULT '[]'");
   ensureColumn('messages', 'folder_role', "TEXT DEFAULT 'inbox'");
+  ensureColumn('messages', 'storage_kind', "TEXT DEFAULT 'eml'");
+  ensureColumn('messages', 'storage_ref', "TEXT DEFAULT ''");
+  ensureColumn('messages', 'storage_sha256', "TEXT DEFAULT ''");
 
   db.exec(`
     UPDATE messages
@@ -188,6 +194,9 @@ function init(dataDir) {
     is_spam INTEGER DEFAULT 0,
     size INTEGER DEFAULT 0,
     eml_path TEXT,
+    storage_kind TEXT DEFAULT 'eml',
+    storage_ref TEXT DEFAULT '',
+    storage_sha256 TEXT DEFAULT '',
     thread_key TEXT DEFAULT '',
     in_reply_to TEXT,
     references_json TEXT DEFAULT '[]',
@@ -200,6 +209,18 @@ function init(dataDir) {
   CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
     subject, from_addr, to_addr, body,
     content=''
+  );
+
+  CREATE TABLE IF NOT EXISTS secure_body_tokens (
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    token TEXT NOT NULL,
+    PRIMARY KEY (message_id, token)
+  );
+  CREATE INDEX IF NOT EXISTS idx_secure_body_token ON secure_body_tokens(token, message_id);
+
+  CREATE TABLE IF NOT EXISTS app_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
   );
 
   CREATE TABLE IF NOT EXISTS labels (
@@ -272,6 +293,16 @@ function init(dataDir) {
     uidvalidity INTEGER, last_uid INTEGER DEFAULT 0,
     PRIMARY KEY (account_id, folder)
   );
+
+  CREATE TABLE IF NOT EXISTS pop3_state (
+    account_id TEXT NOT NULL,
+    uidl TEXT NOT NULL,
+    message_id INTEGER,
+    downloaded_at INTEGER NOT NULL DEFAULT 0,
+    server_deleted_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (account_id, uidl)
+  );
+  CREATE INDEX IF NOT EXISTS idx_pop3_state_message ON pop3_state(message_id);
 
   -- Carnet d'adresses local. Les adresses sont normalisées et uniques afin
   -- qu'un expéditeur ne puisse pas se retrouver dans plusieurs fiches.
@@ -410,7 +441,7 @@ const upsertMessage = message => db.prepare(`
     answered=excluded.answered,
     has_attach=excluded.has_attach,
     size=excluded.size,
-    eml_path=excluded.eml_path,
+    eml_path=CASE WHEN COALESCE(excluded.eml_path,'') <> '' THEN excluded.eml_path ELSE messages.eml_path END,
     is_spam=CASE WHEN excluded.folder_role='junk' THEN 1 ELSE messages.is_spam END,
     thread_key=CASE WHEN excluded.thread_key <> '' THEN excluded.thread_key ELSE messages.thread_key END,
     in_reply_to=COALESCE(excluded.in_reply_to, messages.in_reply_to),
@@ -423,10 +454,12 @@ function deleteFtsRow(rowId) {
   if (exists) {
     db.prepare("INSERT INTO messages_fts(messages_fts, rowid) VALUES('delete', ?)").run(rowId);
   }
+  db.prepare('DELETE FROM secure_body_tokens WHERE message_id=?').run(Number(rowId));
 }
 
-function indexBody(rowId, message, body) {
+function indexBody(rowId, message, body, { secureTokens = null } = {}) {
   deleteFtsRow(rowId);
+  const secure = Array.isArray(secureTokens);
   db.prepare(`INSERT INTO messages_fts(rowid, subject, from_addr, to_addr, body)
               VALUES (?,?,?,?,?)`)
     .run(
@@ -434,8 +467,62 @@ function indexBody(rowId, message, body) {
       message.subject || '',
       message.from_addr || '',
       message.to_addr || '',
-      (body || '').slice(0, 200000)
+      secure ? '' : (body || '').slice(0, 200000)
     );
+  if (secure && secureTokens.length) {
+    const insert = db.prepare('INSERT OR IGNORE INTO secure_body_tokens(message_id, token) VALUES (?,?)');
+    db.transaction(tokens => {
+      for (const token of tokens) insert.run(Number(rowId), String(token));
+    })(secureTokens);
+  }
+}
+
+function revealSnippet(row) {
+  if (!row || !Object.prototype.hasOwnProperty.call(row, 'snippet')) return row;
+  return { ...row, snippet: mailStore.unprotectSnippet(row.account_id, row.snippet) };
+}
+
+function revealSnippets(rows) {
+  return (rows || []).map(revealSnippet);
+}
+
+function getMeta(key, fallback = '') {
+  const row = db.prepare('SELECT value FROM app_meta WHERE key=?').get(String(key));
+  return row ? String(row.value ?? '') : fallback;
+}
+
+function setMeta(key, value) {
+  db.prepare(`INSERT INTO app_meta(key,value) VALUES (?,?)
+              ON CONFLICT(key) DO UPDATE SET value=excluded.value`)
+    .run(String(key), String(value ?? ''));
+}
+
+function resetSecureSearchIndex() {
+  db.exec(`
+    DROP TABLE IF EXISTS messages_fts;
+    CREATE VIRTUAL TABLE messages_fts USING fts5(
+      subject, from_addr, to_addr, body,
+      content=''
+    );
+    DELETE FROM secure_body_tokens;
+  `);
+}
+
+function listMessagesForSecureReindex() {
+  return db.prepare(`SELECT id, account_id, folder, folder_role, uid, message_id,
+                            subject, from_name, from_addr, to_addr, date, snippet,
+                            eml_path, storage_kind, storage_ref, storage_sha256
+                       FROM messages ORDER BY id`).all();
+}
+
+function setEncryptedSnippet(id, snippet) {
+  db.prepare('UPDATE messages SET snippet=? WHERE id=?').run(String(snippet || ''), Number(id));
+}
+
+function vacuum() {
+  try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch {}
+  db.exec('VACUUM');
+  try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch {}
 }
 
 function normalizeSort(sortBy = 'date', sortDirection = 'desc') {
@@ -519,7 +606,7 @@ function buildFilter({
 function listMessages({ limit = 200, offset = 0, sortBy = 'date', sortDirection = 'desc', ...filters } = {}) {
   const filter = buildFilter(filters);
   const order = messageOrder(sortBy, sortDirection);
-  return db.prepare(`SELECT m.id, m.account_id, m.folder, m.folder_role, m.uid, m.thread_key,
+  return revealSnippets(db.prepare(`SELECT m.id, m.account_id, m.folder, m.folder_role, m.uid, m.thread_key,
       m.subject, m.from_name, m.from_addr, m.to_addr, m.date, m.snippet,
       m.seen, m.flagged, m.answered, m.has_attach, m.is_spam,
       (SELECT c.display_name FROM contact_emails ce JOIN contacts c ON c.id=ce.contact_id
@@ -538,7 +625,7 @@ function listMessages({ limit = 200, offset = 0, sortBy = 'date', sortDirection 
     FROM messages m ${filter.join}
     WHERE ${filter.where}
     ORDER BY ${order} LIMIT @limit OFFSET @offset`)
-    .all({ ...filter.params, limit, offset });
+    .all({ ...filter.params, limit, offset }));
 }
 
 function countMessages(filters = {}) {
@@ -552,7 +639,7 @@ function countMessages(filters = {}) {
 function listConversations({ limit = 200, offset = 0, sortBy = 'date', sortDirection = 'desc', ...filters } = {}) {
   const filter = buildFilter(filters);
   const order = conversationOrder(sortBy, sortDirection);
-  return db.prepare(`
+  return revealSnippets(db.prepare(`
     WITH filtered AS (
       SELECT m.*,
              COALESCE(NULLIF(m.thread_key, ''), 'message:' || m.id) AS conversation_key
@@ -607,7 +694,7 @@ function listConversations({ limit = 200, offset = 0, sortBy = 'date', sortDirec
      WHERE r.rn = 1
      ORDER BY ${order}
      LIMIT @limit OFFSET @offset
-  `).all({ ...filter.params, limit, offset });
+  `).all({ ...filter.params, limit, offset }));
 }
 
 function countConversations(filters = {}) {
@@ -622,7 +709,7 @@ function countConversations(filters = {}) {
 }
 
 function getConversation(threadKey) {
-  return db.prepare(`
+  return revealSnippets(db.prepare(`
     SELECT m.id, m.account_id, m.folder, m.folder_role, m.uid, m.thread_key,
            m.subject, m.from_name, m.from_addr, m.to_addr, m.date, m.snippet,
            m.seen, m.flagged, m.answered, m.has_attach, m.is_spam,
@@ -633,7 +720,7 @@ function getConversation(threadKey) {
       FROM messages m
      WHERE COALESCE(NULLIF(m.thread_key, ''), 'message:' || m.id) = ?
      ORDER BY m.date ASC, m.id ASC
-  `).all(threadKey);
+  `).all(threadKey));
 }
 
 function findThreadKeyByMessageIds(messageIds) {
@@ -651,9 +738,41 @@ function findThreadKeyByMessageIds(messageIds) {
   return row?.thread_key || null;
 }
 
-function search(query, { limit = 200, sortBy = 'date', sortDirection = 'desc' } = {}) {
+function search(query, { limit = 200, sortBy = 'date', sortDirection = 'desc', bodyTokens = null } = {}) {
   const order = messageOrder(sortBy, sortDirection);
-  return db.prepare(`
+  if (Array.isArray(bodyTokens)) {
+    const raw = String(query || '').trim();
+    if (!raw) return [];
+    const like = `%${raw.replace(/[\%_]/g, match => `\${match}`)}%`;
+    const metadata = `(m.subject LIKE @like ESCAPE '\\' OR m.from_name LIKE @like ESCAPE '\\'
+      OR m.from_addr LIKE @like ESCAPE '\\' OR m.to_addr LIKE @like ESCAPE '\\')`;
+    let bodyClause = '0';
+    const params = { like, limit: Math.max(1, Number(limit) || 200) };
+    if (bodyTokens.length) {
+      const placeholders = bodyTokens.map((_, index) => `@bodyToken${index}`).join(',');
+      bodyTokens.forEach((token, index) => { params[`bodyToken${index}`] = String(token); });
+      params.bodyTokenCount = bodyTokens.length;
+      bodyClause = `m.id IN (
+        SELECT message_id FROM secure_body_tokens
+         WHERE token IN (${placeholders})
+         GROUP BY message_id
+        HAVING COUNT(DISTINCT token)=@bodyTokenCount
+      )`;
+    }
+    return revealSnippets(db.prepare(`
+      SELECT m.id, m.account_id, m.folder, m.folder_role, m.uid, m.thread_key,
+             m.subject, m.from_name, m.from_addr, m.to_addr, m.date, m.snippet,
+             m.seen, m.flagged, m.answered, m.has_attach, m.is_spam,
+             (SELECT c.display_name FROM contact_emails ce JOIN contacts c ON c.id=ce.contact_id
+               WHERE ce.email=m.from_addr COLLATE NOCASE LIMIT 1) AS contact_name,
+             EXISTS(SELECT 1 FROM contact_emails ce JOIN contacts c ON c.id=ce.contact_id
+               WHERE ce.email=m.from_addr COLLATE NOCASE AND c.trusted=1) AS contact_trusted
+        FROM messages m
+       WHERE ${metadata} OR ${bodyClause}
+       ORDER BY ${order} LIMIT @limit
+    `).all(params));
+  }
+  return revealSnippets(db.prepare(`
     SELECT m.id, m.account_id, m.folder, m.folder_role, m.uid, m.thread_key,
            m.subject, m.from_name, m.from_addr, m.to_addr, m.date, m.snippet,
            m.seen, m.flagged, m.answered, m.has_attach, m.is_spam,
@@ -663,7 +782,7 @@ function search(query, { limit = 200, sortBy = 'date', sortDirection = 'desc' } 
              WHERE ce.email=m.from_addr COLLATE NOCASE AND c.trusted=1) AS contact_trusted
       FROM messages_fts f JOIN messages m ON m.id = f.rowid
      WHERE messages_fts MATCH ? ORDER BY ${order} LIMIT ?
-  `).all(query, limit);
+  `).all(query, limit));
 }
 
 function setConversationSeen(threadKey, value) {
@@ -675,7 +794,7 @@ function setConversationSeen(threadKey, value) {
   return messages;
 }
 
-const getMessage = id => db.prepare('SELECT * FROM messages WHERE id=?').get(id);
+const getMessage = id => revealSnippet(db.prepare('SELECT * FROM messages WHERE id=?').get(id));
 
 function getMessageRemotePermissions(messageId) {
   return db.prepare('SELECT url FROM message_remote_permissions WHERE message_id=? ORDER BY allowed_at, url')
@@ -710,7 +829,7 @@ function getMessagesByIds(ids) {
     const placeholders = chunk.map(() => '?').join(',');
     rows.push(...db.prepare(`SELECT * FROM messages WHERE id IN (${placeholders})`).all(...chunk));
   }
-  return rows;
+  return revealSnippets(rows);
 }
 const setFlag = (id, column, value) => {
   if (!['seen', 'flagged', 'answered'].includes(column)) throw new Error('Drapeau invalide');
@@ -719,8 +838,7 @@ const setFlag = (id, column, value) => {
 
 function deleteMessage(id) {
   deleteFtsRow(id);
-  return db.prepare(`DELETE FROM messages WHERE id=?
-                     RETURNING id, eml_path, account_id, folder, folder_role, uid`).get(id);
+  return db.prepare('DELETE FROM messages WHERE id=? RETURNING *').get(id);
 }
 
 function deleteMessages(ids) {
@@ -742,6 +860,23 @@ function deleteMessages(ids) {
 }
 
 
+function moveLocalMessages(ids, folder, folderRole) {
+  const uniqueIds = [...new Set((ids || []).map(Number).filter(Number.isInteger))];
+  if (!uniqueIds.length) return 0;
+  const update = db.prepare('UPDATE messages SET folder=?, folder_role=? WHERE id=?');
+  return db.transaction(messageIds => {
+    let changed = 0;
+    for (const id of messageIds) changed += update.run(String(folder), String(folderRole), id).changes;
+    return changed;
+  })(uniqueIds);
+}
+
+function nextLocalUid(accountId, folder) {
+  const row = db.prepare('SELECT COALESCE(MAX(uid),0)+1 AS uid FROM messages WHERE account_id=? AND folder=?')
+    .get(String(accountId || ''), String(folder || 'INBOX'));
+  return Math.max(1, Number(row?.uid) || 1);
+}
+
 function deleteAccountData(accountId) {
   const rows = db.prepare('SELECT * FROM messages WHERE account_id=?').all(accountId);
   const removeMessage = db.prepare('DELETE FROM messages WHERE id=?');
@@ -753,6 +888,7 @@ function deleteAccountData(accountId) {
       removeMessage.run(message.id);
     }
     db.prepare('DELETE FROM sync_state WHERE account_id=?').run(accountId);
+    db.prepare('DELETE FROM pop3_state WHERE account_id=?').run(accountId);
   });
   tx(rows);
   return rows;
@@ -1611,7 +1747,7 @@ function updateRemoteFlags(accountId, folder, uid, flags) {
 
 function removeMissingFolderUids(accountId, folder, serverUids) {
   const present = new Set((serverUids || []).map(Number).filter(Number.isFinite));
-  const local = db.prepare(`SELECT id, eml_path, uid FROM messages
+  const local = db.prepare(`SELECT id, account_id, folder, uid, eml_path, storage_kind, storage_ref, storage_sha256 FROM messages
                               WHERE account_id=? AND folder=?`).all(accountId, folder);
   const missing = local.filter(row => !present.has(Number(row.uid)));
   if (!missing.length) return [];
@@ -1630,6 +1766,37 @@ function removeMissingFolderUids(accountId, folder, serverUids) {
 const clearSyncState = (accountId, folder) => db.prepare(
   'DELETE FROM sync_state WHERE account_id=? AND folder=?'
 ).run(accountId, folder);
+
+
+// ---------- POP3 ----------
+function getPop3State(accountId) {
+  return db.prepare('SELECT * FROM pop3_state WHERE account_id=? ORDER BY downloaded_at').all(String(accountId || ''));
+}
+
+function getPop3StateByUidl(accountId, uidl) {
+  return db.prepare('SELECT * FROM pop3_state WHERE account_id=? AND uidl=?').get(String(accountId || ''), String(uidl || '')) || null;
+}
+
+function setPop3State(accountId, uidl, { messageId = null, downloadedAt = Date.now(), serverDeletedAt = 0 } = {}) {
+  db.prepare(`INSERT INTO pop3_state(account_id, uidl, message_id, downloaded_at, server_deleted_at)
+              VALUES(?,?,?,?,?)
+              ON CONFLICT(account_id, uidl) DO UPDATE SET
+                message_id=COALESCE(excluded.message_id,pop3_state.message_id),
+                downloaded_at=CASE WHEN pop3_state.downloaded_at>0 THEN pop3_state.downloaded_at ELSE excluded.downloaded_at END,
+                server_deleted_at=CASE WHEN excluded.server_deleted_at>0 THEN excluded.server_deleted_at ELSE pop3_state.server_deleted_at END`)
+    .run(String(accountId || ''), String(uidl || ''), messageId == null ? null : Number(messageId), Number(downloadedAt) || Date.now(), Number(serverDeletedAt) || 0);
+  return getPop3StateByUidl(accountId, uidl);
+}
+
+function markPop3ServerDeleted(accountId, uidl, when = Date.now()) {
+  return db.prepare('UPDATE pop3_state SET server_deleted_at=? WHERE account_id=? AND uidl=?')
+    .run(Number(when) || Date.now(), String(accountId || ''), String(uidl || ''));
+}
+
+function setMessageStorage(id, { kind = 'eml', ref = '', sha256 = '', emlPath = '' } = {}) {
+  return db.prepare(`UPDATE messages SET storage_kind=?, storage_ref=?, storage_sha256=?, eml_path=? WHERE id=?`)
+    .run(String(kind || 'eml'), String(ref || ''), String(sha256 || ''), String(emlPath || ''), Number(id));
+}
 
 // ---------- Planning / calendrier ----------
 function calendarRow(row) {
@@ -1964,6 +2131,12 @@ module.exports = {
   resolveEmlPath,
   upsertMessage,
   indexBody,
+  getMeta,
+  setMeta,
+  resetSecureSearchIndex,
+  listMessagesForSecureReindex,
+  setEncryptedSnippet,
+  vacuum,
   listMessages,
   countMessages,
   listConversations,
@@ -1979,6 +2152,8 @@ module.exports = {
   setFlag,
   deleteMessage,
   deleteMessages,
+  moveLocalMessages,
+  nextLocalUid,
   deleteAccountData,
   listMessagesForRetention,
   listSpamMessages,
@@ -2023,6 +2198,11 @@ module.exports = {
   updateRemoteFlags,
   removeMissingFolderUids,
   clearSyncState,
+  getPop3State,
+  getPop3StateByUidl,
+  setPop3State,
+  markPop3ServerDeleted,
+  setMessageStorage,
   listCalendarEvents,
   getCalendarEvent,
   saveCalendarEvent,

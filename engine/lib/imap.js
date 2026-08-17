@@ -1,14 +1,14 @@
 /**
  * LibraMail — Synchronisation et actions IMAP (imapflow)
- * Un fichier .eml par message et indexation incrémentale par UID.
+ * Indexation incrémentale par UID. Le message MIME brut est conservé dans
+ * le magasin local chiffré depuis LibraMail 0.4.0 (compatibilité .eml assurée).
  */
 'use strict';
-const path = require('path');
-const fs = require('fs');
 const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
 const db = require('./db');
 const spam = require('./spam');
+const mailStore = require('./mail_store');
 
 const clients = new Map();
 const syncClients = new Map();
@@ -72,11 +72,6 @@ function interruptClient(client) {
   return true;
 }
 
-function mailDir(dataDir, accountId, folder) {
-  const dir = path.join(dataDir, 'mail', accountId, folder.replace(/[^\w.-]/g, '_'));
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
-}
 
 function makeClient(account) {
   return new ImapFlow({
@@ -186,10 +181,7 @@ function numericBigInt(value) {
 }
 
 function removeLocalMessageFiles(rows) {
-  for (const row of rows || []) {
-    if (!row?.eml_path) continue;
-    try { fs.rmSync(row.eml_path, { force: true }); } catch {}
-  }
+  for (const row of rows || []) mailStore.removeMessage(row);
 }
 
 async function updateChangedFlags(client, account, folder, lastUid, state, signal, onProgress, role) {
@@ -234,10 +226,6 @@ async function storeNewMessages(client, account, folder, dataDir, firstUid, last
     throwIfAborted(signal);
     if (message.uid <= initialLastUid) continue;
 
-    const dir = mailDir(dataDir, account.id, folder);
-    const emlPath = path.join(dir, `${message.uid}.eml`);
-    fs.writeFileSync(emlPath, message.source);
-
     const parsed = await simpleParser(message.source, { skipImageLinks: true });
     throwIfAborted(signal);
     const text = (parsed.text || '').replace(/\s+/g, ' ').trim();
@@ -254,13 +242,15 @@ async function storeNewMessages(client, account, folder, dataDir, firstUid, last
       from_addr: from.address || '',
       to_addr: (envelope.to || []).map(address => address.address).join(', '),
       date: (envelope.date ? new Date(envelope.date) : new Date()).getTime(),
-      snippet: text.slice(0, 160),
+      snippet: mailStore.status().available
+        ? mailStore.protectSnippet(account.id, text.slice(0, 160))
+        : text.slice(0, 160),
       seen: message.flags.has('\\Seen') ? 1 : 0,
       flagged: message.flags.has('\\Flagged') ? 1 : 0,
       answered: message.flags.has('\\Answered') ? 1 : 0,
       has_attach: (parsed.attachments || []).length > 0 ? 1 : 0,
       size: message.size || 0,
-      eml_path: emlPath,
+      eml_path: '',
       is_spam: role === 'junk' ? 1 : 0,
       thread_key: '',
       in_reply_to: null,
@@ -293,7 +283,11 @@ async function storeNewMessages(client, account, folder, dataDir, firstUid, last
     });
 
     const { id } = db.upsertMessage(row);
-    db.indexBody(id, row, text);
+    const descriptor = mailStore.storeMessage({ ...row, id }, message.source);
+    db.setMessageStorage(id, descriptor);
+    db.indexBody(id, row, text, {
+      secureTokens: mailStore.status().available ? mailStore.searchTokens(text) : null,
+    });
     added.push(id);
     maxUid = Math.max(maxUid, Number(message.uid) || 0);
 

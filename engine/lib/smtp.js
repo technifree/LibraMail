@@ -15,8 +15,8 @@ function transporter(account) {
     port: account.smtp.port || 465,
     secure: account.smtp.secure !== false,
     auth: {
-      user: account.smtp.user || account.imap.user,
-      pass: account.smtp.pass || account.imap.pass,
+      user: account.smtp.user || account.pop3?.user || account.imap?.user,
+      pass: account.smtp.pass || account.pop3?.pass || account.imap?.pass,
     },
   });
 }
@@ -33,7 +33,7 @@ function normalizeAttachments(attachments) {
 function createMessage(account, mail) {
   const domain = String(account.email || '').split('@')[1] || 'libramail.local';
   const messageId = mail.messageId || `<${crypto.randomUUID()}@${domain}>`;
-  const receiptAddress = String(account.email || account.smtp?.user || account.imap?.user || '').trim();
+  const receiptAddress = String(account.email || account.smtp?.user || account.pop3?.user || account.imap?.user || '').trim();
   const headers = {};
 
   // MDN : le destinataire reste libre d'accepter ou de refuser l'envoi

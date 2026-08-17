@@ -16,6 +16,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { Transform, Writable } = require('stream');
 const { pipeline } = require('stream/promises');
+const mailStore = require('./mail_store');
 
 const UINT16_MAX = 0xffff;
 const UINT32_MAX = 0xffffffff;
@@ -23,7 +24,7 @@ const MAX_ENTRIES = 250000;
 const MAX_CENTRAL_DIRECTORY = 256 * 1024 * 1024;
 const MAX_UNCOMPRESSED_TOTAL = 500n * 1024n * 1024n * 1024n;
 const FORMAT = 'libramail-backup';
-const FORMAT_VERSION = 1;
+const FORMAT_VERSION = 2;
 const RUNTIME_DATA_FILES = new Set([
   'engine.log',
   'engine.stdout.log',
@@ -521,7 +522,8 @@ async function inspectArchive(sourcePath) {
   } catch (error) {
     throw new Error(`Manifeste de sauvegarde invalide : ${error.message}`);
   }
-  if (manifest?.format !== FORMAT || Number(manifest?.formatVersion) !== FORMAT_VERSION) {
+  const formatVersion = Number(manifest?.formatVersion);
+  if (manifest?.format !== FORMAT || ![1, FORMAT_VERSION].includes(formatVersion)) {
     throw new Error('Cette archive n’est pas une sauvegarde LibraMail compatible');
   }
   for (const required of ['data/accounts.json', 'data/config.json', 'data/index.db']) {
@@ -562,7 +564,7 @@ function shouldExcludeDataPath(relative) {
   const normalized = String(relative || '').replace(/\\/g, '/');
   const basename = path.posix.basename(normalized);
   if (normalized === 'index.db' || isRuntimeDataPath(normalized)) return true;
-  if (basename.endsWith('.tmp') || basename.endsWith('.lock')) return true;
+  if (basename.endsWith('.tmp') || basename.endsWith('.lock') || basename.endsWith('-wal') || basename.endsWith('-shm')) return true;
   return false;
 }
 
@@ -584,21 +586,25 @@ async function walkFiles(root, relative = '') {
   return output;
 }
 
-function summaryFromDatabase(database, dataFiles) {
+function summaryFromDatabase(database, dataFiles, coverage = null) {
   const scalar = sql => {
     try { return Number(database.prepare(sql).pluck().get()) || 0; } catch { return 0; }
   };
+  const checked = coverage || mailStore.verifyIndexCoverage(database);
   return {
     accounts: 0,
     messages: scalar('SELECT COUNT(*) FROM messages'),
     unread: scalar('SELECT COUNT(*) FROM messages WHERE seen=0'),
     contacts: scalar('SELECT COUNT(*) FROM contacts'),
     labels: scalar('SELECT COUNT(*) FROM labels'),
+    encryptedMessages: Number(checked.encrypted) || 0,
+    legacyMessages: Number(checked.legacy) || 0,
+    mailStoreFiles: dataFiles.filter(file => file.relative.replace(/\\/g, '/').startsWith('mailstore/') && file.relative.endsWith('.db')).length,
     mailFiles: dataFiles.filter(file => file.relative.replace(/\\/g, '/').startsWith('mail/') && file.relative.endsWith('.eml')).length,
   };
 }
 
-async function exportArchive({ dataDir, database, targetPath, appVersion, onProgress }) {
+async function exportArchive({ dataDir, database, targetPath, appVersion, password = '', onProgress }) {
   const target = path.resolve(String(targetPath || ''));
   if (!target.toLowerCase().endsWith('.zip')) throw new Error('Le fichier de sauvegarde doit porter l’extension .zip');
   const resolvedData = path.resolve(dataDir);
@@ -614,6 +620,7 @@ async function exportArchive({ dataDir, database, targetPath, appVersion, onProg
 
   try {
     onProgress?.({ step: 'prepare', completed: 0, total: 1, name: '' });
+    mailStore.checkpointAll();
     await database.backup(snapshotPath);
     const accountsPath = path.join(resolvedData, 'accounts.json');
     const configPath = path.join(resolvedData, 'config.json');
@@ -629,18 +636,22 @@ async function exportArchive({ dataDir, database, targetPath, appVersion, onProg
     safeAccounts = safeAccounts.map(account => {
       const copy = JSON.parse(JSON.stringify(account || {}));
       if (copy.imap) delete copy.imap.pass;
+      if (copy.pop3) delete copy.pop3.pass;
       if (copy.smtp) delete copy.smtp.pass;
       return copy;
     });
     await fsp.writeFile(safeAccountsPath, JSON.stringify(safeAccounts, null, 2) + '\n', { mode: 0o600 });
 
-    const summary = summaryFromDatabase(database, dataFiles);
+    const coverage = mailStore.verifyIndexCoverage(database, resolvedData);
+    const summary = summaryFromDatabase(database, dataFiles, coverage);
     try {
       summary.accounts = JSON.parse(await fsp.readFile(accountsPath, 'utf8')).length || 0;
     } catch {}
-    if (summary.mailFiles < summary.messages) {
-      throw new Error(`Sauvegarde incomplète refusée : ${summary.messages} message(s) sont indexés, mais seulement ${summary.mailFiles} fichier(s) .eml sont présents dans data/mail.`);
+    if (!coverage.complete) {
+      throw new Error(`Sauvegarde incomplète refusée : ${coverage.missingEncrypted.length} message(s) chiffré(s) et ${coverage.missingLegacy.length} ancien(s) message(s) sont introuvables.`);
     }
+    let keyEnvelope = null;
+    if (summary.encryptedMessages > 0) keyEnvelope = mailStore.exportKeyEnvelope(password);
     const manifest = {
       format: FORMAT,
       formatVersion: FORMAT_VERSION,
@@ -650,6 +661,12 @@ async function exportArchive({ dataDir, database, targetPath, appVersion, onProg
       architecture: process.arch,
       includesCredentials: false,
       summary,
+      mailStoreEncryption: {
+        enabled: summary.encryptedMessages > 0,
+        algorithm: summary.encryptedMessages > 0 ? 'AES-256-GCM' : null,
+        requiresPassword: summary.encryptedMessages > 0,
+        keyEnvelope,
+      },
     };
     await fsp.writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n', { mode: 0o600 });
 
@@ -683,7 +700,7 @@ async function exportArchive({ dataDir, database, targetPath, appVersion, onProg
   }
 }
 
-async function validateExtractedData(dataDir) {
+async function validateExtractedData(dataDir, { manifest = null, password = '' } = {}) {
   const accountsPath = path.join(dataDir, 'accounts.json');
   const configPath = path.join(dataDir, 'config.json');
   const databasePath = path.join(dataDir, 'index.db');
@@ -703,11 +720,14 @@ async function validateExtractedData(dataDir) {
     if (String(integrity).toLowerCase() !== 'ok') throw new Error(`Base SQLite endommagée : ${integrity}`);
     const tables = new Set(validationDb.prepare("SELECT name FROM sqlite_master WHERE type='table'").pluck().all());
     if (!tables.has('messages')) throw new Error('La base sauvegardée ne contient pas la table des messages');
-    const messageCount = Number(validationDb.prepare('SELECT COUNT(*) FROM messages').pluck().get()) || 0;
-    const files = await walkFiles(dataDir);
-    const mailFileCount = files.filter(file => file.relative.replace(/\\/g, '/').startsWith('mail/') && file.relative.endsWith('.eml')).length;
-    if (mailFileCount < messageCount) {
-      throw new Error(`Sauvegarde incomplète : ${messageCount} message(s) sont indexés, mais seulement ${mailFileCount} fichier(s) .eml ont été trouvés.`);
+    const coverage = mailStore.verifyIndexCoverage(validationDb, dataDir);
+    if (!coverage.complete) {
+      throw new Error(`Sauvegarde incomplète : ${coverage.missingEncrypted.length} message(s) chiffré(s) et ${coverage.missingLegacy.length} ancien(s) message(s) sont introuvables.`);
+    }
+    const encryption = manifest?.mailStoreEncryption || {};
+    if (coverage.encrypted > 0) {
+      if (!encryption?.keyEnvelope) throw new Error('La sauvegarde contient des messages chiffrés mais aucune clé de récupération.');
+      mailStore.unwrapKeyEnvelope(encryption.keyEnvelope, password);
     }
   } finally {
     validationDb.close();

@@ -3,23 +3,47 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LibraMail 0.3.8</title>
+  <title>LibraMail 0.4.0</title>
   <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
   <link rel="stylesheet" href="themes/dark.css">
   <link rel="stylesheet" href="themes/light.css">
   <link rel="stylesheet" href="css/app.css">
+  <style>
+    /* Affichage immédiat, avant même l'initialisation JavaScript/du moteur. */
+    #startup-screen {
+      position: fixed; inset: 0; z-index: 100000; display: grid; place-items: center;
+      background: #17191f; color: #f2f4f8; font-family: "Segoe UI", "Ubuntu", "Cantarell", system-ui, sans-serif;
+      transition: opacity .18s ease, visibility .18s ease;
+    }
+    #startup-screen.done { opacity: 0; visibility: hidden; pointer-events: none; }
+    #startup-screen.error .startup-spinner { display: none; }
+    .startup-card { display: grid; justify-items: center; gap: 14px; padding: 28px; text-align: center; }
+    .startup-logo { width: 92px; height: 92px; object-fit: contain; }
+    .startup-title { font-size: 22px; font-weight: 700; letter-spacing: .2px; }
+    .startup-message { min-height: 20px; color: #c7ccd6; font-size: 13px; }
+    .startup-spinner { width: 28px; height: 28px; border: 3px solid rgba(255,255,255,.18); border-top-color: #a879da; border-radius: 50%; animation: startup-spin .85s linear infinite; }
+    @keyframes startup-spin { to { transform: rotate(360deg); } }
+  </style>
 </head>
 <body>
+<div id="startup-screen" role="status" aria-live="polite">
+  <div class="startup-card">
+    <img class="startup-logo" src="icons/appIcon.png" alt="">
+    <div class="startup-title">LibraMail</div>
+    <div class="startup-spinner" aria-hidden="true"></div>
+    <div class="startup-message" id="startup-message">Initialisation…</div>
+  </div>
+</div>
 <div id="app" data-layout="vertical">
 
   <div id="topbar">
-    <button id="brand" class="brand-button" type="button" title="LibraMail 0.3.8" data-i18n-title="about.open">
+    <button id="brand" class="brand-button" type="button" title="LibraMail 0.4.0" data-i18n-title="about.open">
       <span class="brand-logo-box" aria-hidden="true">
         <img class="brand-logo brand-logo-light" src="assets/logo-light.png" alt="">
         <img class="brand-logo brand-logo-dark" src="assets/logo-dark.png" alt="">
       </span>
       <span class="brand-name">LibraMail</span>
-      <span class="version-badge" id="app-version">v0.3.8</span>
+      <span class="version-badge" id="app-version">v0.4.0</span>
     </button>
     <button class="btn primary" id="btn-compose">
       <i class="fa-solid fa-pen"></i><span data-i18n="compose"></span>
@@ -477,7 +501,12 @@
       <div class="grid2">
         <div class="field"><label data-i18n="account.name"></label><input id="acc-name" autocomplete="name"></div>
         <div class="field"><label data-i18n="account.email"></label><input id="acc-email" type="email" autocomplete="email"></div>
+        <div class="field field-span-2"><label data-i18n="account.receiveProtocol"></label>
+          <select id="acc-receive-protocol"><option value="imap" data-i18n="account.protocol.imap"></option><option value="pop3" data-i18n="account.protocol.pop3"></option></select>
+          <small class="field-hint" data-i18n="account.protocolHint"></small>
+        </div>
       </div>
+      <div id="account-imap-section">
       <div class="side-section account-server-title" data-i18n="account.imap"></div>
       <div class="grid2 account-server-grid">
         <div class="field"><label data-i18n="account.host"></label><input id="acc-imap-host" placeholder="imap.exemple.fr"></div>
@@ -486,6 +515,22 @@
           <select id="acc-imap-secure"><option value="1" data-i18n="account.security.ssl"></option><option value="0" data-i18n="account.security.starttls"></option></select></div>
         <div class="field"><label data-i18n="account.user"></label><input id="acc-imap-user" autocomplete="username"></div>
         <div class="field field-span-2"><label data-i18n="account.pass"></label><input id="acc-imap-pass" type="password" autocomplete="new-password" data-i18n-ph="account.passwordKeep"></div>
+      </div>
+      </div>
+      <div id="account-pop3-section" class="hidden">
+        <div class="side-section account-server-title" data-i18n="account.pop3"></div>
+        <div class="grid2 account-server-grid">
+          <div class="field"><label data-i18n="account.host"></label><input id="acc-pop3-host" placeholder="pop.exemple.fr"></div>
+          <div class="field"><label data-i18n="account.port"></label><input id="acc-pop3-port" type="number" min="1" max="65535" value="995"></div>
+          <div class="field"><label data-i18n="account.security"></label><select id="acc-pop3-secure" disabled><option value="1" data-i18n="account.security.ssl"></option></select></div>
+          <div class="field"><label data-i18n="account.user"></label><input id="acc-pop3-user" autocomplete="username"></div>
+          <div class="field field-span-2"><label data-i18n="account.pass"></label><input id="acc-pop3-pass" type="password" autocomplete="new-password" data-i18n-ph="account.passwordKeep"></div>
+          <div class="field"><label data-i18n="account.popDeletePolicy"></label>
+            <select id="acc-pop3-delete-policy"><option value="keep" data-i18n="account.popKeep"></option><option value="immediate" data-i18n="account.popDeleteImmediate"></option><option value="after_days" data-i18n="account.popDeleteAfter"></option></select>
+          </div>
+          <div class="field" id="acc-pop3-delete-days-field"><label data-i18n="account.popDeleteDays"></label><input id="acc-pop3-delete-days" type="number" min="1" max="3650" value="7"></div>
+          <div class="field-hint field-span-2" data-i18n="account.popLocalHint"></div>
+        </div>
       </div>
       <div class="side-section account-server-title" data-i18n="account.smtp"></div>
       <div class="grid2 account-server-grid">
@@ -738,6 +783,11 @@
           <strong data-i18n="backup.completeTitle"></strong>
           <p data-i18n="backup.description"></p>
           <p class="backup-security-warning"><i class="fa-solid fa-key"></i><span data-i18n="backup.credentialsWarning"></span></p>
+        </div>
+        <div class="backup-key-fields">
+          <label class="field"><span data-i18n="backup.recoveryPassword"></span><input id="backup-password" type="password" minlength="8" autocomplete="new-password" data-i18n-ph="backup.recoveryPasswordPlaceholder"></label>
+          <label class="field"><span data-i18n="backup.recoveryPasswordConfirm"></span><input id="backup-password-confirm" type="password" minlength="8" autocomplete="new-password" data-i18n-ph="backup.recoveryPasswordConfirmPlaceholder"></label>
+          <div class="field-hint" data-i18n="backup.recoveryPasswordHint"></div>
         </div>
         <div class="backup-settings-actions">
           <button class="btn primary" id="btn-export-backup" type="button">
