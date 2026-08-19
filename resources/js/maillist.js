@@ -10,6 +10,7 @@ class VirtualMailList {
     this.expandedThreads = new Map();
     this.collapsedGroups = new Set();
     this.selectedKeys = new Set();
+    this.selectionAnchorKey = null;
     this.activeMessageId = null;
     this.rowHeight = 64;
     this.groupHeight = 32;
@@ -19,7 +20,10 @@ class VirtualMailList {
     this.options = { ...(this.options || {}), ...options };
     const scrollTop = this.element?.scrollTop || 0;
     if (!options.preserveExpansion) this.expandedThreads.clear();
-    if (!options.preserveSelection) this.selectedKeys.clear();
+    if (!options.preserveSelection) {
+      this.selectedKeys.clear();
+      this.selectionAnchorKey = null;
+    }
     if (!options.preserveActive) this.activeMessageId = null;
     this.rows = Array.isArray(rows) ? rows : [];
     this.render(Boolean(options.preservePosition));
@@ -144,7 +148,7 @@ class VirtualMailList {
 
     div.querySelector('.mail-select')?.addEventListener('click', event => {
       event.stopPropagation();
-      this.toggleSelection(row);
+      this.toggleSelection(row, event.shiftKey);
     });
     // LibraMail 0.2.24 UI v18 — la flèche est une vraie bascule.
     // Elle ne doit jamais ouvrir la ligne, ouvrir un onglet ou laisser un
@@ -184,18 +188,36 @@ class VirtualMailList {
     } else {
       for (const row of this.visibleRows) this.selectedKeys.add(this.itemKey(this.selectionItem(row)));
     }
+    this.selectionAnchorKey = null;
     this.render(true);
   }
 
   clearSelection() {
     this.selectedKeys.clear();
+    this.selectionAnchorKey = null;
     this.render(true);
   }
 
-  toggleSelection(row) {
+  toggleSelection(row, extendRange = false) {
     const key = this.itemKey(this.selectionItem(row));
+    if (extendRange && this.selectionAnchorKey) {
+      const anchorIndex = this.visibleRows.findIndex(item =>
+        this.itemKey(this.selectionItem(item)) === this.selectionAnchorKey);
+      const currentIndex = this.visibleRows.findIndex(item =>
+        this.itemKey(this.selectionItem(item)) === key);
+      if (anchorIndex >= 0 && currentIndex >= 0) {
+        const start = Math.min(anchorIndex, currentIndex);
+        const end = Math.max(anchorIndex, currentIndex);
+        for (let index = start; index <= end; index++) {
+          this.selectedKeys.add(this.itemKey(this.selectionItem(this.visibleRows[index])));
+        }
+        this.render(true);
+        return;
+      }
+    }
     if (this.selectedKeys.has(key)) this.selectedKeys.delete(key);
     else this.selectedKeys.add(key);
+    this.selectionAnchorKey = key;
     this.render(true);
   }
 

@@ -405,7 +405,8 @@ async function syncFolderWithClient(client, account, folder, dataDir, onProgress
   }
 }
 
-async function syncFolders(account, jobs, dataDir, onProgress, { signal = null, continueOnError = false } = {}) {
+async function syncFolders(account, jobs, dataDir, onProgress,
+                           { signal = null, continueOnError = false, source = 'other' } = {}) {
   if (!account) throw new Error('Compte introuvable');
   throwIfAborted(signal);
   const client = makeClient(account);
@@ -413,25 +414,51 @@ async function syncFolders(account, jobs, dataDir, onProgress, { signal = null, 
   const abort = () => { interruptClient(client); };
   signal?.addEventListener('abort', abort, { once: true });
 
+  const syncStartedAt = Date.now();
+  let connectMs = 0;
+  const folderTimings = [];
+
   try {
+    const connectStartedAt = Date.now();
     await client.connect();
+    connectMs = Date.now() - connectStartedAt;
     throwIfAborted(signal);
+
     const results = [];
     for (const job of jobs || []) {
       throwIfAborted(signal);
       const role = Array.isArray(job) ? job[0] : job.role;
       const folder = Array.isArray(job) ? job[1] : job.folder;
       if (!folder) continue;
+
+      const folderStartedAt = Date.now();
       try {
         results.push(await syncFolderWithClient(client, account, folder, dataDir, onProgress, {
           role, signal,
         }));
+        folderTimings.push({ role, ms: Date.now() - folderStartedAt });
       } catch (error) {
+        folderTimings.push({ role, ms: Date.now() - folderStartedAt });
         if (signal?.aborted || isSyncCancelled(error)) throw new SyncCancelledError();
         if (!continueOnError) throw error;
         results.push({ folder, role, added: 0, changed: 0, removed: 0, error: error.message });
       }
     }
+
+    const totalMs = Date.now() - syncStartedAt;
+    if (source === 'manual' || totalMs >= 1500) {
+      const label = account.displayName || account.email || account.id || 'compte';
+      const seconds = value => `${(Math.max(0, Number(value) || 0) / 1000).toFixed(2)}s`;
+      const detail = folderTimings
+        .map(item => `${item.role}:${seconds(item.ms)}`)
+        .join(' · ');
+      console.log(
+        `[LibraMail][IMAP] ${label} · ${source} · connexion ${seconds(connectMs)}`
+        + (detail ? ` · ${detail}` : '')
+        + ` · total ${seconds(totalMs)}`
+      );
+    }
+
     return results;
   } catch (error) {
     if (signal?.aborted || isSyncCancelled(error)) throw new SyncCancelledError();

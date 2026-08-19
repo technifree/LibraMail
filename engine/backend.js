@@ -25,7 +25,7 @@ const credentialStore = require('./lib/credential_store');
 const mailStore = require('./lib/mail_store');
 
 const PORT = 47800;
-const APP_VERSION = '0.4.0';
+const APP_VERSION = '0.4.1';
 const ROOT = path.resolve(__dirname, '..');
 const DATA = path.join(ROOT, 'data');
 const ACCOUNTS_FILE = path.join(DATA, 'accounts.json');
@@ -558,12 +558,18 @@ async function syncAccount(account, source = 'manual') {
       }
       const folders = await ensureFolderMap(account, { force: false, signal: controller.signal });
       if (controller.signal.aborted) throw Object.assign(new Error('Relève interrompue'), { code: 'SYNC_CANCELLED' });
-      const jobs = [
+      const allJobs = [
         ['inbox', folders.inbox || 'INBOX'],
         ['sent', folders.sent],
         ['trash', folders.trash],
         ['junk', folders.junk],
       ].filter(([, folder]) => Boolean(folder));
+
+      // Une notification IMAP IDLE concerne uniquement la boîte surveillée.
+      // Les relèves manuelles, planifiées et de démarrage restent complètes.
+      const jobs = source === 'idle'
+        ? allJobs.filter(([role]) => role === 'inbox')
+        : allJobs;
 
       // Une seule connexion IMAP est utilisée pour tous les dossiers du
       // compte. Gmail n'a donc plus à subir quatre authentifications TLS à
@@ -573,7 +579,7 @@ async function syncAccount(account, source = 'manual') {
         jobs,
         DATA,
         progress => broadcast('sync.progress', { accountId: account.id, source, ...progress }),
-        { signal: controller.signal, continueOnError: true }
+        { signal: controller.signal, continueOnError: true, source }
       );
       const errors = results.filter(result => result.error)
         .map(({ role, folder, error }) => ({ role, folder, error }));
@@ -994,6 +1000,7 @@ async function emptyTrash({ source = 'manual', onProgress = null } = {}) {
 async function cleanupExpiredSpamForAccount(account, { source = 'retention', silent = false } = {}) {
   if (maintenanceOperation) return { processed: 0, skipped: 'maintenance' };
   if (!account || !Number(account.spamRetentionDays)) return { processed: 0, disabled: true };
+  if (activeSyncs.has(account.id)) return { processed: 0, skipped: 'sync-active' };
   if (activeCleanups.has(account.id)) return activeCleanups.get(account.id);
 
   const task = (async () => {
@@ -1169,7 +1176,16 @@ function startAccountRuntime({ resolveFolders = false } = {}) {
   if (retentionTimer) clearInterval(retentionTimer);
   retentionTimer = setInterval(() => cleanupAllExpiredSpam({ silent: true }).catch(() => {}), RETENTION_CHECK_MS);
   retentionTimer.unref?.();
-  setTimeout(() => cleanupAllExpiredSpam({ silent: true }).catch(() => {}), 8000).unref?.();
+  // Au démarrage, éviter de lancer le nettoyage pendant une relève.
+  // S'il reste une relève en cours, on reporte simplement de cinq secondes.
+  const runInitialRetentionCleanup = () => {
+    if (activeSyncs.size || activeSyncBatch) {
+      setTimeout(runInitialRetentionCleanup, 5000).unref?.();
+      return;
+    }
+    cleanupAllExpiredSpam({ silent: true }).catch(() => {});
+  };
+  setTimeout(runInitialRetentionCleanup, 8000).unref?.();
   if (scheduledSendTimer) clearInterval(scheduledSendTimer);
   scheduledSendTimer = setInterval(() => processScheduledMessages().catch(() => {}), OUTBOX_CHECK_MS);
   scheduledSendTimer.unref?.();

@@ -684,12 +684,27 @@ function listConversations({ limit = 200, offset = 0, sortBy = 'date', sortDirec
               FROM messages m2
              WHERE COALESCE(NULLIF(m2.thread_key, ''), 'message:' || m2.id) = r.conversation_key
            ) AS participants,
+           /* Étiquettes de conversation : uniquement celles qui sont présentes
+              sur chacun des messages du fil. Les étiquettes propres à un seul
+              message restent visibles sur les lignes enfants une fois le fil déplié. */
            (SELECT json_group_array(json_object('name', l.name, 'color', l.color))
-              FROM message_labels ml JOIN labels l ON l.id = ml.label_id
-             WHERE ml.message_id IN (
-               SELECT m3.id FROM messages m3
-                WHERE COALESCE(NULLIF(m3.thread_key, ''), 'message:' || m3.id) = r.conversation_key
-             )) AS labels
+              FROM labels l
+             WHERE EXISTS (
+               SELECT 1
+                 FROM message_labels ml
+                 JOIN messages lm ON lm.id = ml.message_id
+                WHERE ml.label_id = l.id
+                  AND COALESCE(NULLIF(lm.thread_key, ''), 'message:' || lm.id) = r.conversation_key
+             )
+               AND NOT EXISTS (
+                 SELECT 1
+                   FROM messages cm
+                  WHERE COALESCE(NULLIF(cm.thread_key, ''), 'message:' || cm.id) = r.conversation_key
+                    AND NOT EXISTS (
+                      SELECT 1 FROM message_labels cml
+                       WHERE cml.message_id = cm.id AND cml.label_id = l.id
+                    )
+               )) AS labels
       FROM ranked r
      WHERE r.rn = 1
      ORDER BY ${order}
@@ -713,6 +728,9 @@ function getConversation(threadKey) {
     SELECT m.id, m.account_id, m.folder, m.folder_role, m.uid, m.thread_key,
            m.subject, m.from_name, m.from_addr, m.to_addr, m.date, m.snippet,
            m.seen, m.flagged, m.answered, m.has_attach, m.is_spam,
+           (SELECT json_group_array(json_object('name', l.name, 'color', l.color))
+              FROM message_labels ml JOIN labels l ON l.id = ml.label_id
+             WHERE ml.message_id = m.id) AS labels,
            (SELECT c.display_name FROM contact_emails ce JOIN contacts c ON c.id=ce.contact_id
              WHERE ce.email=m.from_addr COLLATE NOCASE LIMIT 1) AS contact_name,
            EXISTS(SELECT 1 FROM contact_emails ce JOIN contacts c ON c.id=ce.contact_id

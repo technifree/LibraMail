@@ -82,14 +82,22 @@ const App = (() => {
     setTimeout(() => screen.remove(), 300);
   }
 
-  function setManualSyncBusy(busy) {
-    manualSyncPending = Boolean(busy);
+  function renderSyncButtonState() {
     const button = document.getElementById('btn-sync');
     if (!button) return;
+    const syncing = manualSyncPending || activeSyncActivities.size > 0;
+    // Une relève automatique doit être aussi visible qu'une relève manuelle.
+    // On ne désactive toutefois le bouton que pendant la requête manuelle :
+    // le moteur conserve ainsi ses garde-fous habituels contre les doublons.
     button.disabled = manualSyncPending;
-    button.setAttribute('aria-busy', manualSyncPending ? 'true' : 'false');
-    button.classList.toggle('sync-pending', manualSyncPending);
-    button.querySelector('i')?.classList.toggle('fa-spin', manualSyncPending);
+    button.setAttribute('aria-busy', syncing ? 'true' : 'false');
+    button.classList.toggle('sync-pending', syncing);
+    button.querySelector('i')?.classList.toggle('fa-spin', syncing);
+  }
+
+  function setManualSyncBusy(busy) {
+    manualSyncPending = Boolean(busy);
+    renderSyncButtonState();
   }
 
   async function runManualSync() {
@@ -370,6 +378,7 @@ const App = (() => {
       counter.textContent = String(Math.min(99, unseenActivityCount));
       counter.classList.toggle('hidden', unseenActivityCount === 0);
     }
+    renderSyncButtonState();
   }
 
   function addActivity({ kind = 'sync', state = 'info', title, detail = '', key = null, accountId = null }) {
@@ -685,7 +694,7 @@ const App = (() => {
         account: accountLabel(data.accountId),
         added: Number(data.added) || 0,
       }), 'success');
-      refresh();
+      scheduleSyncUiRefresh();
     } else if (event === 'mail.new') {
       addActivity({
         kind: 'mail', state: 'success',
@@ -696,7 +705,7 @@ const App = (() => {
         account: accountLabel(data.accountId),
         count: Number(data.added) || 0,
       }), 'success');
-      refresh();
+      scheduleSyncUiRefresh();
     } else if (event === 'sync.cancelled') {
       cancelSyncActivity(data);
       status(t('status.syncCancelled', { account: accountLabel(data.accountId) }), 'info');
@@ -839,7 +848,7 @@ const App = (() => {
   };
 
   function applyAppVersion() {
-    const rawVersion = String(window.NL_APPVERSION || '0.4.0').replace(/^v/i, '');
+    const rawVersion = String(window.NL_APPVERSION || '0.4.1').replace(/^v/i, '');
     const badge = document.getElementById('app-version');
     if (badge) {
       badge.textContent = `v${rawVersion}`;
@@ -1055,6 +1064,30 @@ const App = (() => {
       preserveActive: preserveListState,
       preserveSelection: preserveListState,
     };
+  }
+
+
+  // === LibraMail 0.4.1 - rafraichissement UI de releve regroupe ===
+  // Une releve peut produire sync.done puis mail.new, et une releve de tous
+  // les comptes produit plusieurs sync.done successifs. On regroupe ces
+  // evenements pour ne reconstruire la liste et les compteurs qu'une fois.
+  let syncUiRefreshTimer = null;
+  function scheduleSyncUiRefresh(delay = 350) {
+    if (syncUiRefreshTimer) clearTimeout(syncUiRefreshTimer);
+    syncUiRefreshTimer = setTimeout(() => {
+      syncUiRefreshTimer = null;
+
+      // sync.all traite les comptes successivement. Attendre que la rafale de
+      // releves soit terminee evite un rafraichissement complet entre comptes.
+      if (activeSyncActivities.size > 0) {
+        scheduleSyncUiRefresh(delay);
+        return;
+      }
+
+      // Respecte une recherche en cours et conserve position, selection,
+      // conversation depliee et message actif.
+      refreshVisibleList({ preserveListState: true }).catch(() => {});
+    }, delay);
   }
 
   async function refresh({ preserveListState = false } = {}) {
@@ -4159,7 +4192,7 @@ const App = (() => {
     updateComposeSignature({ resetChoice: true });
     setComposeEmojiPickerOpen(false);
     openModal('compose-modal');
-    prepareComposeEditorForMode(mode);
+    prepareComposeEditorForMode(mode, { focusRecipient: mode === 'new' });
   }
 
   // LibraMail 0.2.24 UI v14 — destinataires et édition enrichie fiables
@@ -4305,14 +4338,25 @@ const App = (() => {
     }
   }
 
-  function prepareComposeEditorForMode(mode = composeMode) {
+  function prepareComposeEditorForMode(mode = composeMode, { focusRecipient = false } = {}) {
     const editor = ensureComposeEditorInsertionPoint();
     if (!editor) return;
     resetComposeViewport();
+    const focusPrimaryField = () => {
+      if (focusRecipient && mode === 'new') {
+        const input = document.getElementById('compose-to');
+        if (input) {
+          input.focus({ preventScroll: true });
+          try { input.setSelectionRange(input.value.length, input.value.length); } catch {}
+          return;
+        }
+      }
+      focusComposeEditorAtStart({ scroll: true });
+    };
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => focusComposeEditorAtStart({ scroll: true }));
+      requestAnimationFrame(focusPrimaryField);
     });
-    setTimeout(() => focusComposeEditorAtStart({ scroll: true }), 120);
+    setTimeout(focusPrimaryField, 120);
   }
 
   function maintainComposeEditorInsertionPoint() {
@@ -4737,6 +4781,25 @@ const App = (() => {
       if (input) input.value = window.OutboxUI?.localDateTimeValue?.(context.sendAt) || '';
     }
     prepareComposeEditorForMode(composeMode);
+  }
+
+  function preserveComposeEditingShortcuts(event) {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+    const key = String(event.key || '').toLowerCase();
+    if (!['a', 'c', 'x', 'v', 'z', 'y'].includes(key)) return;
+    // Copier/couper/coller/sélectionner restent gérés nativement par le WebView.
+    // Pour annuler/rétablir, execCommand conserve la pile d'édition contenteditable
+    // utilisée par l'éditeur actuel et fiabilise le comportement sous WebKitGTK.
+    event.stopPropagation();
+    const undo = key === 'z' && !event.shiftKey;
+    const redo = key === 'y' || (key === 'z' && event.shiftKey);
+    if (!undo && !redo) return;
+    event.preventDefault();
+    try {
+      document.execCommand(undo ? 'undo' : 'redo', false, null);
+      maintainComposeEditorInsertionPoint();
+      rememberComposeSelection();
+    } catch {}
   }
 
   // LibraMail 0.2.24 UI v8 — sélecteur HTML fiable pour les pièces jointes
@@ -5445,7 +5508,7 @@ const App = (() => {
 
   // ---------- Mise à jour et À propos ----------
   function appVersion() {
-    return String(window.NL_APPVERSION || '0.4.0').replace(/^v/i, '');
+    return String(window.NL_APPVERSION || '0.4.1').replace(/^v/i, '');
   }
 
   function compareVersions(a, b) {
@@ -6508,6 +6571,7 @@ const App = (() => {
       maintainComposeEditorInsertionPoint();
       rememberComposeSelection();
     });
+    composeEditor?.addEventListener('keydown', preserveComposeEditingShortcuts);
     document.querySelector('.compose-editor-resize-shell')?.addEventListener('click', event => {
       if (event.target === event.currentTarget) focusComposeEditorAtStart({ scroll: false });
     });
@@ -6516,6 +6580,27 @@ const App = (() => {
     const composeQuote = document.getElementById('compose-quote-content');
     composeQuote?.addEventListener('input', syncComposeQuoteText);
     composeQuote?.addEventListener('blur', syncComposeQuoteText);
+    composeQuote?.addEventListener('keydown', preserveComposeEditingShortcuts);
+
+    const composeDropZone = document.querySelector('#compose-modal .compose-modal-box');
+    composeDropZone?.addEventListener('dragover', event => {
+      const types = Array.from(event.dataTransfer?.types || []);
+      if (!types.includes('Files')) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+    });
+    composeDropZone?.addEventListener('drop', async event => {
+      const files = Array.from(event.dataTransfer?.files || []);
+      if (!files.length) return;
+      event.preventDefault();
+      event.stopPropagation();
+      try {
+        await importComposeAttachmentFiles(files);
+      } catch (error) {
+        status(`${t('error')} : ${error.message}`, 'error');
+      }
+    });
     document.querySelectorAll('[data-compose-command]').forEach(button => {
       button.addEventListener('mousedown', event => {
         rememberComposeSelection();

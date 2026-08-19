@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LibraMail 0.4.0</title>
+  <title>LibraMail 0.4.1</title>
   <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
   <link rel="stylesheet" href="themes/dark.css">
   <link rel="stylesheet" href="themes/light.css">
@@ -37,13 +37,13 @@
 <div id="app" data-layout="vertical">
 
   <div id="topbar">
-    <button id="brand" class="brand-button" type="button" title="LibraMail 0.4.0" data-i18n-title="about.open">
+    <button id="brand" class="brand-button" type="button" title="LibraMail 0.4.1" data-i18n-title="about.open">
       <span class="brand-logo-box" aria-hidden="true">
         <img class="brand-logo brand-logo-light" src="assets/logo-light.png" alt="">
         <img class="brand-logo brand-logo-dark" src="assets/logo-dark.png" alt="">
       </span>
       <span class="brand-name">LibraMail</span>
-      <span class="version-badge" id="app-version">v0.4.0</span>
+      <span class="version-badge" id="app-version">v0.4.1</span>
     </button>
     <button class="btn primary" id="btn-compose">
       <i class="fa-solid fa-pen"></i><span data-i18n="compose"></span>
@@ -426,13 +426,13 @@
         </section>
       </div>
       <div class="field">
-        <button class="btn" id="btn-attach" style="align-self:flex-start">
-          <i class="fa-solid fa-paperclip"></i><span data-i18n="compose.attach"></span></button>
         <input id="compose-file-picker" class="hidden" type="file" multiple>
         <div id="compose-attachments" style="display:flex;gap:6px;flex-wrap:wrap"></div>
       </div>
     </div>
     <footer class="compose-footer">
+      <button class="btn" id="btn-attach" type="button">
+        <i class="fa-solid fa-paperclip"></i><span data-i18n="compose.attach"></span></button>
       <button class="btn" id="btn-save-draft" type="button"><i class="fa-solid fa-file-pen"></i><span data-i18n="drafts.save"></span></button>
       <span class="compose-footer-spacer"></span>
       <button class="btn" data-close data-i18n="cancel"></button>

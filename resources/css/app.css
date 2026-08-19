@@ -2266,20 +2266,33 @@ body.resizing-panes.resize-rows { cursor: row-resize; }
   font-size:9.5px; font-weight:800; text-transform:uppercase; letter-spacing:.45px;
 }
 .planner-main-section-title strong { margin-left:auto; color:var(--fg-faint); font-size:9px; font-weight:600; text-transform:none; letter-spacing:0; }
-.planner-main-events { display:flex; min-height:0; flex-direction:column; gap:5px; overflow:auto; }
+.planner-main-events { display:flex; min-height:0; flex-direction:column; gap:0; overflow:auto; }
 .planner-main-upcoming-section .planner-main-events { flex:1; }
+/* Vue agenda compacte : un rendez-vous est une ligne, pas une carte. */
 .planner-main-event {
-  --event-color:var(--accent); width:100%; display:grid; grid-template-columns:48px minmax(0,1fr); gap:7px; align-items:start;
-  padding:7px 8px; border:1px solid var(--border-soft,var(--border)); border-left:3px solid var(--event-color);
-  border-radius:7px; background:var(--bg-panel-2); text-align:left;
+  --event-color:var(--accent);
+  width:100%; min-height:34px;
+  display:grid; grid-template-columns:44px minmax(0,1fr); gap:8px; align-items:start;
+  padding:5px 5px 5px 7px;
+  border:0; border-left:2px solid var(--event-color); border-bottom:1px solid var(--border-soft,var(--border));
+  border-radius:0; background:transparent; text-align:left;
+  transition:background .12s ease;
 }
-.planner-main-event:hover { background:var(--bg-hover); }
-.planner-main-event-time { color:var(--event-color); font-size:9px; font-weight:800; line-height:1.3; }
+.planner-main-event:hover { background:color-mix(in srgb,var(--event-color) 6%,var(--bg-panel)); }
+.planner-main-event:focus-visible {
+  outline:1px solid color-mix(in srgb,var(--event-color) 58%,var(--border));
+  outline-offset:-1px;
+}
+.planner-main-event-time {
+  padding-top:1px; color:var(--event-color); font-size:9px; font-weight:800; line-height:1.25; white-space:nowrap;
+}
 .planner-main-event-main { min-width:0; }
-.planner-main-event-main strong,.planner-main-event-main small { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.planner-main-event-main strong { color:var(--fg-strong); font-size:10.5px; }
-.planner-main-event-main small { margin-top:2px; color:var(--fg-faint); font-size:8.8px; }
-.planner-main-date-separator { padding:7px 3px 2px; color:var(--fg-faint); font-size:9px; font-weight:700; }
+.planner-main-event-main strong,.planner-main-event-main small {
+  display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.planner-main-event-main strong { color:var(--fg-strong); font-size:10.5px; line-height:1.25; }
+.planner-main-event-main small { margin-top:1px; color:var(--fg-faint); font-size:8.8px; line-height:1.2; }
+.planner-main-date-separator { padding:8px 3px 3px; color:var(--fg-faint); font-size:9px; font-weight:700; }
 .planner-main-empty { flex:1; min-height:120px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:7px; color:var(--fg-faint); font-size:10px; text-align:center; }
 .planner-main-empty i { font-size:22px; opacity:.6; }
 .planner-main-open-full { flex:none; justify-content:center; margin-top:8px; font-size:10px; }
@@ -3975,4 +3988,153 @@ html[data-theme="light"] #reader-empty.reader-empty-brand .reader-empty-logo-lig
 }
 #btn-sync.sync-pending:disabled {
   color: var(--fg);
+}
+
+/* === LibraMail 0.4.1 - Planning bureautique compact === */
+/*
+   Surcharge purement visuelle :
+   - aucune structure HTML modifiée
+   - aucun comportement JS modifié
+   - aucune donnée calendrier modifiée
+*/
+
+/* Modale et commandes : moins de capsules, lignes plus nettes. */
+.planner-modal-box {
+  border-radius: 5px;
+}
+
+.planner-modal-box > header .btn,
+.planner-toolbar .btn,
+.planner-toolbar select,
+.planner-editor input,
+.planner-editor select,
+.planner-editor textarea,
+.planner-editor-actions .btn {
+  border-radius: 4px;
+}
+
+.planner-view-switch {
+  gap: 0;
+  padding: 0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.planner-view-switch .btn {
+  min-height: 28px;
+  padding: 3px 8px;
+  border-radius: 0;
+}
+
+.planner-view-switch .btn.active {
+  background: var(--bg-active);
+  color: var(--fg-strong);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+/* Vue mois : événements = lignes d'agenda compactes. */
+.planner-day {
+  padding: 5px;
+}
+
+.planner-day.selected {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.planner-day-items {
+  gap: 1px;
+}
+
+.planner-event-chip {
+  min-height: 18px;
+  gap: 4px;
+  padding: 2px 4px;
+  border-left-width: 2px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--event-color) 5%, var(--bg-panel-2));
+  font-size: 9px;
+}
+
+.planner-event-chip:hover {
+  background: color-mix(in srgb, var(--event-color) 10%, var(--bg-panel-2));
+}
+
+.planner-event-time {
+  color: var(--event-color);
+  font-size: 8px;
+}
+
+.planner-more {
+  padding: 1px 2px;
+  color: var(--fg-muted);
+  font-weight: 600;
+}
+
+/* Vue semaine / travail : même langage visuel que la vue mois. */
+.planner-week-event {
+  left: 2px;
+  right: 2px;
+  padding: 3px 4px;
+  border: 0;
+  border-left: 2px solid var(--event-color);
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--event-color) 7%, var(--bg-panel));
+}
+
+.planner-week-event:hover {
+  background: color-mix(in srgb, var(--event-color) 12%, var(--bg-panel));
+}
+
+.planner-week-event span {
+  color: var(--event-color);
+}
+
+/* Vue annuelle : mois structurés, sans effet grosse carte. */
+.planner-year-grid {
+  gap: 6px;
+  padding: 7px;
+  background: var(--bg-panel-2);
+}
+
+.planner-year-month {
+  padding: 6px;
+  border-radius: 2px;
+  background: var(--bg-panel);
+}
+
+/* Panneau de droite : rendez-vous en liste, pas en tuiles. */
+.planner-day-events {
+  padding: 5px 8px;
+}
+
+.planner-day-event {
+  grid-template-columns: 54px minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 6px 5px 6px 7px;
+  margin-bottom: 0;
+  border: 0;
+  border-left: 2px solid var(--event-color);
+  border-bottom: 1px solid var(--border-soft, var(--border));
+  border-radius: 0;
+  background: transparent;
+}
+
+.planner-day-event:hover {
+  background: color-mix(in srgb, var(--event-color) 6%, var(--bg-panel));
+  border-color: var(--border-soft, var(--border));
+  border-left-color: var(--event-color);
+}
+
+.planner-day-event-main small {
+  margin-top: 1px;
+}
+
+/* Éditeur : plus dense, plus "outil de travail". */
+.planner-editor {
+  gap: 7px;
+  padding: 10px 12px 12px;
+}
+
+.planner-editor-heading {
+  padding-bottom: 6px;
 }

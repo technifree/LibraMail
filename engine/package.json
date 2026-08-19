@@ -15,5 +15,8 @@
     "node-pop3": "^0.15.0",
     "nodemailer": "^9.0.5",
     "ws": "^8.18.0"
+  },
+  "overrides": {
+    "deepmerge-ts": "8.0.0"
   }
 }
