@@ -1,12 +1,12 @@
-# LibraMail 0.4.0
+# LibraMail 0.4.1
 
 ## Français
 
-LibraMail 0.4.0 introduit le support POP3, un nouveau stockage local chiffré des messages, la migration sécurisée des anciens fichiers EML, un index de recherche protégé et des sauvegardes chiffrées. Cette version améliore également le démarrage de l'application et le retour visuel lors de la relève du courrier, tout en conservant la compatibilité IMAP et les fonctions existantes.
+LibraMail 0.4.1 améliore les performances, l'ergonomie et la stabilité générale. Cette version optimise notamment les relèves IMAP/Gmail et les rafraîchissements de l'interface, anime le bouton Relever lors des relèves automatiques, ajoute la sélection multiple avec Shift, améliore les raccourcis clavier et le glisser-déposer de pièces jointes dans la rédaction, place automatiquement le focus sur le destinataire, améliore l'affichage des étiquettes dans les conversations et adopte une présentation du planning plus compacte et bureautique. Elle inclut également plusieurs corrections de sécurité des dépendances.
 
 ## English
 
-LibraMail 0.4.0 introduces POP3 support, a new encrypted local message store, safe migration of existing EML files, protected search indexing and encrypted backups. This release also improves application startup and mail retrieval feedback while preserving IMAP compatibility and existing features.
+LibraMail 0.4.1 improves performance, usability and overall stability. This release optimizes IMAP/Gmail synchronization and UI refreshes, animates the Retrieve button during automatic mail checks, adds Shift multi-selection, improves compose keyboard shortcuts and drag-and-drop attachments, automatically focuses the recipient field, improves conversation label display and introduces a more compact professional calendar interface. It also includes several dependency security fixes.
 
 ### Downloads / Téléchargements
 
