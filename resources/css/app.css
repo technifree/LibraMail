@@ -248,9 +248,11 @@ body.resizing-panes.resize-rows { cursor: row-resize; }
 .mail-row {
   position: absolute; left: 0; right: 0; height: var(--row-height);
   display: grid;
-  grid-template-columns: 34px 1fr auto;
+  /* LibraMail 0.4.4 — les actions rapides ont leur propre colonne.
+     La date et les indicateurs (trombone/étoile) restent donc visibles au survol. */
+  grid-template-columns: 34px minmax(0, 1fr) auto auto;
   grid-template-rows: 1fr 1fr;
-  grid-template-areas: "avatar from meta" "avatar subject meta";
+  grid-template-areas: "avatar from quick meta" "avatar subject quick meta";
   align-items: center; column-gap: 10px;
   padding: 0 12px;
   border-bottom: 1px solid var(--border-soft);
@@ -287,14 +289,16 @@ body.resizing-panes.resize-rows { cursor: row-resize; }
   font-size: 10px; font-weight: 600; line-height: 16px; color: #fff;
 }
 
-/* Actions rapides au survol */
+/* Actions rapides au survol
+   LibraMail 0.4.4 : elles ne remplacent plus la colonne meta. */
 .mail-row .quick {
-  grid-area: meta; display: none; gap: 2px; align-items: center;
+  grid-area: quick;
+  display: none;
+  gap: 2px;
+  align-items: center;
   background: inherit;
 }
 .mail-row:hover .quick { display: inline-flex; }
-.mail-row:hover .meta { visibility: hidden; }
-.mail-row:hover .quick + .meta { display: none; }
 .quick .iconbtn { width: 28px; height: 28px; }
 .quick .iconbtn:hover { color: var(--accent); }
 .quick .iconbtn.del:hover { color: var(--danger); background: var(--danger-soft); }

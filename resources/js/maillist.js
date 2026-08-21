@@ -258,10 +258,16 @@ class VirtualMailList {
     return row?.contact_name || row?.from_name || row?.from_addr || window.t?.('mail.unknownSender') || 'Expéditeur inconnu';
   }
 
+  // LibraMail 0.4.4 — dates d'archives avec année.
+  // Pour l'année courante, on conserve l'affichage compact jour/mois.
+  // Pour un message plus ancien (ou futur), l'année devient explicite.
   formatDate(value) {
     const date = new Date(value || '');
     if (Number.isNaN(date.getTime())) return '';
-    return date.toLocaleDateString(window.I18N?.locale || 'fr', { day: '2-digit', month: '2-digit' });
+    const now = new Date();
+    const options = { day: '2-digit', month: '2-digit' };
+    if (date.getFullYear() !== now.getFullYear()) options.year = 'numeric';
+    return date.toLocaleDateString(window.I18N?.locale || 'fr', options);
   }
 
   dateGroupKey(value) {
