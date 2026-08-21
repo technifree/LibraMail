@@ -42,6 +42,21 @@ export declare enum Architecture {
 	ia32 = "ia32",
 	unknown = "unknown"
 }
+export declare enum SendKeyState {
+	press = "press",
+	down = "down",
+	up = "up"
+}
+export declare enum NetworkFamily {
+	ipv4 = "ipv4",
+	ipv6 = "ipv6"
+}
+export declare enum AccessMode {
+	F_OK = 0,
+	R_OK = 4,
+	W_OK = 2,
+	X_OK = 1
+}
 export interface DirectoryEntry {
 	entry: string;
 	path: string;
@@ -128,6 +143,9 @@ declare function setPermissions(path: string, permissions: Permissions$1, mode: 
 declare function getJoinedPath(...paths: string[]): Promise<string>;
 declare function getNormalizedPath(path: string): Promise<string>;
 declare function getUnnormalizedPath(path: string): Promise<string>;
+declare function access(path: string, mode?: number): Promise<string>;
+declare function chmod(path: string, mode: number): Promise<string>;
+declare function chown(path: string, uid: number, gid: number): Promise<string>;
 export interface ExecCommandOptions {
 	stdIn?: string;
 	background?: boolean;
@@ -170,6 +188,7 @@ export interface Filter {
 export interface TrayOptions {
 	icon: string;
 	menuItems: TrayMenuItem[];
+	useTemplateIcon?: boolean;
 }
 export interface TrayMenuItem {
 	id?: string;
@@ -192,6 +211,7 @@ declare function showMessageBox(title: string, content: string, choice?: Message
 declare function setTray(options: TrayOptions): Promise<void>;
 declare function open$1(url: string): Promise<void>;
 declare function getPath(name: KnownPath): Promise<string>;
+declare function trashItem(path: string): Promise<string>;
 export interface MemoryInfo {
 	physical: {
 		total: number;
@@ -235,13 +255,27 @@ export interface MousePosition {
 	x: number;
 	y: number;
 }
+export interface NetworkInterfaceAddress {
+	address: string;
+	mac: string;
+	isInternal: boolean;
+	family: NetworkFamily;
+}
+export interface NetworkInterfaceInfo {
+	[key: string]: NetworkInterfaceAddress;
+}
 declare function getMemoryInfo(): Promise<MemoryInfo>;
 declare function getArch(): Promise<string>;
 declare function getKernelInfo(): Promise<KernelInfo>;
 declare function getOSInfo(): Promise<OSInfo>;
 declare function getCPUInfo(): Promise<CPUInfo>;
 declare function getDisplays(): Promise<Display[]>;
+declare function getHostname(): Promise<string>;
 declare function getMousePosition(): Promise<MousePosition>;
+declare function setMousePosition(x: number, y: number): Promise<void>;
+declare function setMouseGrabbing(grabbing: boolean): Promise<void>;
+declare function sendKey(key: number, state: SendKeyState): Promise<void>;
+declare function getNetworkInterfaces(): Promise<NetworkInterfaceInfo>;
 declare function setData(key: string, data: string | null): Promise<void>;
 declare function getData(key: string): Promise<string>;
 declare function removeData(key: string): Promise<void>;
@@ -290,8 +324,9 @@ export interface WindowSizeOptions {
 	resizable?: boolean;
 }
 export interface WindowPosOptions {
-	x: number;
-	y: number;
+	x?: number;
+	y?: number;
+	center?: boolean;
 }
 export interface WindowMenu extends Array<WindowMenuItem> {
 }
@@ -342,6 +377,7 @@ declare function setSize(options: WindowSizeOptions): Promise<void>;
 declare function getSize(): Promise<WindowSizeOptions>;
 declare function getPosition(): Promise<WindowPosOptions>;
 declare function setAlwaysOnTop(onTop: boolean): Promise<void>;
+declare function setBorderless(borderless: boolean): Promise<void>;
 declare function create(url: string, options?: WindowOptions): Promise<void>;
 declare function snapshot(path: string): Promise<void>;
 declare function setMainMenu(options: WindowMenu): Promise<void>;
@@ -403,7 +439,7 @@ declare function readFile$1(path: string): Promise<string>;
 declare function readBinaryFile$1(path: string): Promise<ArrayBuffer>;
 declare function mount(path: string, target: string): Promise<void>;
 declare function unmount(path: string): Promise<void>;
-declare function getMounts(): Promise<void>;
+declare function getMounts(): Promise<Record<string, string>>;
 declare function getMethods(): Promise<string[]>;
 export interface InitOptions {
 	exportCustomMethods?: boolean;
@@ -465,13 +501,13 @@ declare namespace custom {
 	export { getMethods };
 }
 declare namespace filesystem {
-	export { appendBinaryFile, appendFile, copy, createDirectory, createWatcher, getAbsolutePath, getJoinedPath, getNormalizedPath, getOpenedFileInfo, getPathParts, getPermissions, getRelativePath, getStats, getUnnormalizedPath, getWatchers, move, openFile, readBinaryFile, readDirectory, readFile, remove, removeWatcher, setPermissions, updateOpenedFile, writeBinaryFile, writeFile };
+	export { access, appendBinaryFile, appendFile, chmod, chown, copy, createDirectory, createWatcher, getAbsolutePath, getJoinedPath, getNormalizedPath, getOpenedFileInfo, getPathParts, getPermissions, getRelativePath, getStats, getUnnormalizedPath, getWatchers, move, openFile, readBinaryFile, readDirectory, readFile, remove, removeWatcher, setPermissions, updateOpenedFile, writeBinaryFile, writeFile };
 }
 declare namespace os {
-	export { execCommand, getEnv, getEnvs, getPath, getSpawnedProcesses, open$1 as open, setTray, showFolderDialog, showMessageBox, showNotification, showOpenDialog, showSaveDialog, spawnProcess, updateSpawnedProcess };
+	export { execCommand, getEnv, getEnvs, getPath, getSpawnedProcesses, open$1 as open, setTray, showFolderDialog, showMessageBox, showNotification, showOpenDialog, showSaveDialog, spawnProcess, trashItem, updateSpawnedProcess };
 }
 declare namespace computer {
-	export { getArch, getCPUInfo, getDisplays, getKernelInfo, getMemoryInfo, getMousePosition, getOSInfo };
+	export { getArch, getCPUInfo, getDisplays, getHostname, getKernelInfo, getMemoryInfo, getMousePosition, getNetworkInterfaces, getOSInfo, sendKey, setMouseGrabbing, setMousePosition };
 }
 declare namespace storage {
 	export { clear, getData, getKeys, removeData, setData };
@@ -483,7 +519,7 @@ declare namespace app {
 	export { broadcast, exit, getConfig, killProcess, readProcessInput, restartProcess, writeProcessError, writeProcessOutput };
 }
 declare namespace window$1 {
-	export { beginDrag, center, create, exitFullScreen, focus$1 as focus, getPosition, getSize, getTitle, hide, isFullScreen, isMaximized, isMinimized, isVisible, maximize, minimize, move$1 as move, print$1 as print, setAlwaysOnTop, setDraggableRegion, setFullScreen, setIcon, setMainMenu, setSize, setTitle, show, snapshot, unmaximize, unminimize, unsetDraggableRegion };
+	export { beginDrag, center, create, exitFullScreen, focus$1 as focus, getPosition, getSize, getTitle, hide, isFullScreen, isMaximized, isMinimized, isVisible, maximize, minimize, move$1 as move, print$1 as print, setAlwaysOnTop, setBorderless, setDraggableRegion, setFullScreen, setIcon, setMainMenu, setSize, setTitle, show, snapshot, unmaximize, unminimize, unsetDraggableRegion };
 }
 declare namespace events {
 	export { broadcast$1 as broadcast, dispatch, off, on };

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LibraMail 0.4.2</title>
+  <title>LibraMail 0.4.3</title>
   <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
   <link rel="stylesheet" href="themes/dark.css">
   <link rel="stylesheet" href="themes/light.css">
@@ -24,7 +24,7 @@
     .startup-spinner { width: 28px; height: 28px; border: 3px solid rgba(255,255,255,.18); border-top-color: #a879da; border-radius: 50%; animation: startup-spin .85s linear infinite; }
     @keyframes startup-spin { to { transform: rotate(360deg); } }
 
-    /* LibraMail 0.4.2 — bouton scindé de relève manuelle. */
+    /* LibraMail 0.4.3 — bouton scindé de relève manuelle. */
     .sync-split { position: relative; display: inline-flex; align-items: stretch; }
     .sync-split #btn-sync { border-top-right-radius: 0; border-bottom-right-radius: 0; }
     .sync-split #btn-sync-menu {
@@ -46,7 +46,7 @@
     .sync-account-menu-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sync-account-menu-separator { height: 1px; margin: 4px 3px; background: var(--border-soft, var(--border, #d7dce8)); }
 
-    /* LibraMail 0.4.2 — organisation claire de Sauvegarde / Import EML. */
+    /* LibraMail 0.4.3 — organisation claire de Sauvegarde / Import EML. */
     #settings-modal .backup-settings-card { display:flex; flex-direction:column; gap:0; }
     #settings-modal .backup-operation-section { display:flex; flex-direction:column; gap:12px; min-width:0; padding:2px 0 16px; }
     #settings-modal .backup-operation-section + .backup-operation-section { border-top:1px solid var(--border-soft,var(--border,#d7dce8)); padding-top:16px; }
@@ -91,13 +91,13 @@
 <div id="app" data-layout="vertical">
 
   <div id="topbar">
-    <button id="brand" class="brand-button" type="button" title="LibraMail 0.4.2" data-i18n-title="about.open">
+    <button id="brand" class="brand-button" type="button" title="LibraMail 0.4.3" data-i18n-title="about.open">
       <span class="brand-logo-box" aria-hidden="true">
         <img class="brand-logo brand-logo-light" src="assets/logo-light.png" alt="">
         <img class="brand-logo brand-logo-dark" src="assets/logo-dark.png" alt="">
       </span>
       <span class="brand-name">LibraMail</span>
-      <span class="version-badge" id="app-version">v0.4.2</span>
+      <span class="version-badge" id="app-version">v0.4.3</span>
     </button>
     <button class="btn primary" id="btn-compose">
       <i class="fa-solid fa-pen"></i><span data-i18n="compose"></span>

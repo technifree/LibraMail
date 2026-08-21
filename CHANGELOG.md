@@ -1,3 +1,25 @@
+# LibraMail 0.4.3 - 2026-08-21
+
+LibraMail 0.4.3 est une version corrective qui rétablit le glisser-déposer des pièces jointes dans la fenêtre de rédaction.
+
+## Corrections
+
+- Correction du glisser-déposer des fichiers dans un nouveau message ou une réponse.
+- Les fichiers déposés sont désormais ajoutés comme véritables pièces jointes.
+- Un fichier PDF déposé n'est plus ouvert directement dans LibraMail.
+- Les chemins locaux `file://` ne sont plus insérés dans le corps du message.
+- Prise en charge des fichiers PDF, ZIP, images, documents et autres types de fichiers.
+- Prise en charge du dépôt simultané de plusieurs fichiers.
+
+## Technique
+
+- Mise à jour de Neutralino vers la version 6.8.0.
+- Utilisation du mécanisme natif `filesDropped`.
+- Activation de `emitDropEvents` afin que le WebView n'interprète plus directement les fichiers déposés.
+
+---
+
+
 # LibraMail 0.4.2 - 2026-08-21
 
 LibraMail 0.4.2 améliore la gestion de la relève du courrier et ajoute une nouvelle fonction d'import de messages au format EML.

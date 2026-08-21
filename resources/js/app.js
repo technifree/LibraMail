@@ -992,7 +992,7 @@ const App = (() => {
   };
 
   function applyAppVersion() {
-    const rawVersion = String(window.NL_APPVERSION || '0.4.2').replace(/^v/i, '');
+    const rawVersion = String(window.NL_APPVERSION || '0.4.3').replace(/^v/i, '');
     const badge = document.getElementById('app-version');
     if (badge) {
       badge.textContent = `v${rawVersion}`;
@@ -5078,6 +5078,46 @@ const App = (() => {
     return added;
   }
 
+  function nativeDroppedAttachmentPaths(detail) {
+    let values = [];
+
+    if (Array.isArray(detail)) values = detail;
+    else if (Array.isArray(detail?.files)) values = detail.files;
+    else if (Array.isArray(detail?.paths)) values = detail.paths;
+    else if (detail?.path) values = [detail.path];
+    else if (typeof detail === 'string') values = [detail];
+
+    const paths = [];
+    const seen = new Set();
+
+    for (const value of values) {
+      const raw = typeof value === 'string'
+        ? value
+        : String(value?.path || value?.file || value?.filename || '');
+      const filePath = normalizeComposeAttachmentPath(raw);
+      if (!filePath || seen.has(filePath)) continue;
+      seen.add(filePath);
+      paths.push(filePath);
+    }
+    return paths;
+  }
+
+  function handleNativeFilesDropped(event) {
+    const modal = document.getElementById('compose-modal');
+    if (!modal?.classList.contains('open')) return;
+
+    const paths = nativeDroppedAttachmentPaths(event?.detail);
+    if (!paths.length) {
+      console.warn('[LibraMail] filesDropped sans chemin exploitable :', event?.detail);
+      status(t('compose.dropUnsupported'), 'error');
+      return;
+    }
+
+    const added = addComposeAttachmentPaths(paths);
+    if (added) reportAddedComposeAttachments(added);
+    else status(t('compose.attachAlreadyAdded'), 'info');
+  }
+
   function reportAddedComposeAttachments(count) {
     if (count > 0) status(t('compose.attachAdded', { count }), 'success');
   }
@@ -5652,7 +5692,7 @@ const App = (() => {
 
   // ---------- Mise à jour et À propos ----------
   function appVersion() {
-    return String(window.NL_APPVERSION || '0.4.2').replace(/^v/i, '');
+    return String(window.NL_APPVERSION || '0.4.3').replace(/^v/i, '');
   }
 
   function compareVersions(a, b) {
@@ -6826,25 +6866,11 @@ const App = (() => {
     composeQuote?.addEventListener('blur', syncComposeQuoteText);
     composeQuote?.addEventListener('keydown', preserveComposeEditingShortcuts);
 
-    const composeDropZone = document.querySelector('#compose-modal .compose-modal-box');
-    composeDropZone?.addEventListener('dragover', event => {
-      const types = Array.from(event.dataTransfer?.types || []);
-      if (!types.includes('Files')) return;
-      event.preventDefault();
-      event.stopPropagation();
-      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
-    });
-    composeDropZone?.addEventListener('drop', async event => {
-      const files = Array.from(event.dataTransfer?.files || []);
-      if (!files.length) return;
-      event.preventDefault();
-      event.stopPropagation();
-      try {
-        await importComposeAttachmentFiles(files);
-      } catch (error) {
-        status(`${t('error')} : ${error.message}`, 'error');
-      }
-    });
+    // LibraMail 0.4.3 — drag & drop natif Neutralino
+    // Le dépôt de fichiers est géré par l'événement natif "filesDropped".
+    // modes.window.emitDropEvents=true désactive le comportement natif du
+    // WebView (ouverture d'un PDF, insertion d'un file://, etc.).
+
     document.querySelectorAll('[data-compose-command]').forEach(button => {
       button.addEventListener('mousedown', event => {
         rememberComposeSelection();
@@ -7193,7 +7219,10 @@ const App = (() => {
 
     try {
       Neutralino.events.on('windowClose', openQuitDialog);
-    } catch {}
+      Neutralino.events.on('filesDropped', handleNativeFilesDropped);
+    } catch (error) {
+      console.warn('[LibraMail] Événements Neutralino indisponibles :', error);
+    }
   }
 
   window.addEventListener('DOMContentLoaded', async () => {
