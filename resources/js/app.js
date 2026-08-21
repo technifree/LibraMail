@@ -1780,9 +1780,21 @@ const App = (() => {
       chip.className = 'att-chip';
       chip.innerHTML = `<i class="fa-solid ${attachment.calendarInvite ? 'fa-calendar-days' : 'fa-paperclip'}"></i>${esc(attachment.filename)}
         <span class="size">${fmtSize(attachment.size)}</span>`;
-      chip.title = t('attachment.download');
-      chip.onclick = () => saveAttachment(message.meta.id, attachment);
+      chip.title = t('attachment.open');
+      chip.onclick = () => openAttachment(message.meta.id, attachment);
       wrapper.appendChild(chip);
+
+      const saveButton = document.createElement('button');
+      saveButton.type = 'button';
+      saveButton.className = 'iconbtn att-save';
+      saveButton.title = t('attachment.download');
+      saveButton.setAttribute('aria-label', t('attachment.download'));
+      saveButton.innerHTML = '<i class="fa-solid fa-download"></i>';
+      saveButton.onclick = event => {
+        event.stopPropagation();
+        saveAttachment(message.meta.id, attachment);
+      };
+      wrapper.appendChild(saveButton);
 
       if (attachment.calendarInvite) {
         const addButton = document.createElement('button');
@@ -1886,6 +1898,45 @@ const App = (() => {
     if (!target) return;
     await rpc('attachments.save', { messageId, index: attachment.index, targetPath: target });
     status('✓ ' + attachment.filename);
+  }
+
+
+  function attachmentOpenBlocked(filename) {
+    const extension = String(filename || '')
+      .toLowerCase()
+      .match(/\.[^.\\/]+$/)?.[0] || '';
+    return new Set([
+      '.exe', '.com', '.bat', '.cmd', '.ps1', '.psm1', '.psd1',
+      '.vbs', '.vbe', '.js', '.jse', '.wsf', '.wsh', '.hta',
+      '.msi', '.msp', '.mst', '.scr', '.cpl', '.reg', '.lnk', '.url',
+      '.sh', '.bash', '.zsh', '.fish', '.command', '.desktop',
+      '.appimage', '.jar', '.html', '.htm', '.xhtml', '.svg',
+      '.docm', '.dotm', '.xlsm', '.xltm', '.xlam',
+      '.pptm', '.potm', '.ppam', '.sldm',
+    ]).has(extension);
+  }
+
+  async function openAttachment(messageId, attachment) {
+    if (attachmentOpenBlocked(attachment?.filename)) {
+      status(t('attachment.openBlocked'), 'error');
+      return;
+    }
+    try {
+      status(t('attachment.opening', { filename: attachment.filename }), 'busy');
+      await rpc('attachments.open', {
+        messageId,
+        index: attachment.index,
+      });
+      status(t('attachment.opened', { filename: attachment.filename }), 'success');
+    } catch (error) {
+      if (String(error?.message || '').includes('ATTACHMENT_OPEN_BLOCKED')) {
+        status(t('attachment.openBlocked'), 'error');
+        return;
+      }
+      status(t('attachment.openFailed', {
+        error: error?.message || String(error),
+      }), 'error');
+    }
   }
 
   async function importCalendarAttachment(messageId, attachment, button) {

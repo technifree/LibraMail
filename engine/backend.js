@@ -5,6 +5,7 @@
 'use strict';
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const { WebSocketServer } = require('ws');
@@ -1671,6 +1672,115 @@ function openExternalWithSystem(value) {
 }
 
 
+
+// LibraMail 0.4.4 — ouverture locale sécurisée des pièces jointes.
+// La pièce jointe est extraite dans un répertoire temporaire isolé puis ouverte
+// avec l'application associée par le système. Les types actifs restent
+// enregistrables, mais LibraMail refuse volontairement de les lancer.
+const ATTACHMENT_OPEN_BLOCKED_EXTENSIONS = new Set([
+  '.exe', '.com', '.bat', '.cmd', '.ps1', '.psm1', '.psd1',
+  '.vbs', '.vbe', '.js', '.jse', '.wsf', '.wsh', '.hta',
+  '.msi', '.msp', '.mst', '.scr', '.cpl', '.reg', '.lnk', '.url',
+  '.sh', '.bash', '.zsh', '.fish', '.command', '.desktop',
+  '.appimage', '.jar', '.html', '.htm', '.xhtml', '.svg',
+  '.docm', '.dotm', '.xlsm', '.xltm', '.xlam',
+  '.pptm', '.potm', '.ppam', '.sldm',
+]);
+
+function attachmentOpenIsBlocked(filename) {
+  return ATTACHMENT_OPEN_BLOCKED_EXTENSIONS.has(
+    path.extname(String(filename || '')).toLowerCase()
+  );
+}
+
+function safeTemporaryAttachmentName(filename, index = 0) {
+  let name = path.basename(String(filename || ''))
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
+    .trim()
+    .replace(/[. ]+$/g, '');
+  if (!name) name = `piece-jointe-${Number(index) + 1}`;
+  if (name.length > 180) {
+    const originalExt = path.extname(name);
+    const ext = originalExt.slice(0, 24);
+    const base = path.basename(name, originalExt)
+      .slice(0, Math.max(1, 180 - ext.length));
+    name = `${base}${ext}`;
+  }
+  return name;
+}
+
+function openLocalFileWithSystem(filePath) {
+  const target = path.resolve(String(filePath || ''));
+  let command = '';
+  let args = [];
+
+  if (process.platform === 'linux') {
+    command = 'xdg-open';
+    args = [target];
+  } else if (process.platform === 'darwin') {
+    command = 'open';
+    args = [target];
+  } else if (process.platform === 'win32') {
+    command = 'explorer.exe';
+    args = [target];
+  } else {
+    throw new Error(`Ouverture de fichier non prise en charge sur ${process.platform}`);
+  }
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    child.once('error', error =>
+      reject(new Error(`Impossible d’ouvrir la pièce jointe : ${error.message}`))
+    );
+    child.once('spawn', () => {
+      child.unref();
+      resolve({ opened: true, path: target });
+    });
+  });
+}
+
+async function extractAttachmentForOpen(messageId, index) {
+  const message = db.getMessage(messageId);
+  if (!message) throw new Error('Message introuvable');
+
+  const parsed = await simpleParser(readLocalMessage(message));
+  const attachmentIndex = Number(index);
+  if (!Number.isInteger(attachmentIndex) || attachmentIndex < 0) {
+    throw new Error('Indice de pièce jointe invalide');
+  }
+
+  const attachment = (parsed.attachments || [])[attachmentIndex];
+  if (!attachment) throw new Error('Pièce jointe introuvable');
+
+  const filename = safeTemporaryAttachmentName(
+    attachment.filename || `piece-jointe-${attachmentIndex + 1}`,
+    attachmentIndex,
+  );
+
+  if (attachmentOpenIsBlocked(filename)) {
+    throw new Error('ATTACHMENT_OPEN_BLOCKED');
+  }
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'libramail-attachment-'));
+  const targetPath = path.join(tempDir, filename);
+  fs.writeFileSync(targetPath, attachment.content, { flag: 'wx' });
+
+  const cleanup = setTimeout(() => {
+    try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch {}
+  }, 6 * 60 * 60 * 1000);
+  cleanup.unref?.();
+
+  return {
+    path: targetPath,
+    filename,
+    size: Number(attachment.size) || attachment.content?.length || 0,
+  };
+}
+
 async function checkLatestRelease() {
   const endpoint = 'https://api.github.com/repos/technifree/LibraMail/releases/latest';
   const controller = new AbortController();
@@ -2497,6 +2607,16 @@ const methods = {
     if (!attachment) throw new Error('Pièce jointe introuvable');
     fs.writeFileSync(targetPath, attachment.content);
     return { saved: targetPath, size: attachment.size };
+  },
+
+  'attachments.open': async ({ messageId, index }) => {
+    const extracted = await extractAttachmentForOpen(messageId, index);
+    await openLocalFileWithSystem(extracted.path);
+    return {
+      opened: true,
+      filename: extracted.filename,
+      size: extracted.size,
+    };
   },
 
   // ---------- Brouillons et envois différés ----------

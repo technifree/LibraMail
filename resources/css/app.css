@@ -397,6 +397,19 @@ body.resizing-panes.resize-rows { cursor: row-resize; }
 .att-chip i { color: var(--accent); }
 .att-chip .size { color: var(--fg-faint); font-size: 11px; }
 .att-chip:hover { background: var(--bg-active); }
+
+.att-save {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  background: var(--bg-hover);
+}
+.att-save:hover {
+  color: var(--accent);
+  background: var(--bg-active);
+}
+
 .att-item,.att-calendar-item { display:inline-flex; align-items:center; gap:6px; min-width:0; }
 .att-calendar-item {
   padding:3px; border:1px solid color-mix(in srgb,var(--accent) 28%,var(--border));
