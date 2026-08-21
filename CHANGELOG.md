@@ -1,3 +1,39 @@
+# LibraMail 0.4.2 - 2026-08-21
+
+LibraMail 0.4.2 améliore la gestion de la relève du courrier et ajoute une nouvelle fonction d'import de messages au format EML.
+
+## Nouveautés
+
+### Import de messages EML
+
+LibraMail peut désormais importer un ou plusieurs messages `.eml` provenant d'un autre logiciel de messagerie ou d'une archive existante.
+
+- Import de plusieurs fichiers en une seule opération.
+- Choix du compte de destination.
+- Détection automatique des messages reçus ou envoyés.
+- Possibilité de forcer le classement en « Reçus » ou « Envoyés ».
+- Détection des messages déjà présents afin d'éviter les doublons.
+- Gestion normale des messages importés dans LibraMail.
+
+Les messages importés restent entièrement locaux : aucune copie n'est envoyée vers le serveur IMAP ou POP3.
+
+Ils sont stockés dans le magasin chiffré de LibraMail et restent isolés de la synchronisation avec le serveur de messagerie.
+
+## Relève du courrier
+
+Cette version apporte également plusieurs corrections au moteur de relève :
+
+- amélioration de l'arrêt d'une relève en cours ;
+- correction des relèves pouvant rester actives après un arrêt ;
+- amélioration de la réactivité du moteur lors des opérations longues ;
+- réduction de l'impact d'une relève lente ou bloquée sur les autres opérations de LibraMail.
+
+## Stockage et sécurité
+
+Les messages EML importés utilisent le même stockage local chiffré que les messages récupérés normalement par LibraMail.
+
+Aucun fichier EML importé n'est conservé en clair dans le répertoire de données de l'application.
+
 ## [0.3.7] - 2026-08-15
 
 ### Sécurité et Windows

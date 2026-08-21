@@ -23,9 +23,10 @@ const calendarImport = require('./lib/calendar_import');
 const calendarSubscriptions = require('./lib/calendar_subscriptions');
 const credentialStore = require('./lib/credential_store');
 const mailStore = require('./lib/mail_store');
+const emlImport = require('./lib/eml_import');
 
 const PORT = 47800;
-const APP_VERSION = '0.4.1';
+const APP_VERSION = '0.4.2';
 const ROOT = path.resolve(__dirname, '..');
 const DATA = path.join(ROOT, 'data');
 const ACCOUNTS_FILE = path.join(DATA, 'accounts.json');
@@ -287,8 +288,10 @@ const sockets = new Set();
 const syncTimers = new Map();
 const activeSyncs = new Map();
 const syncControllers = new Map();
+const activeSyncMeta = new Map();
 const syncCooldownUntil = new Map();
 const SYNC_CANCEL_COOLDOWN_MS = 60 * 1000;
+const SYNC_CANCEL_WATCHDOG_MS = 3500;
 let activeSyncBatch = null;
 const activeCleanups = new Map();
 let retentionTimer = null;
@@ -298,6 +301,7 @@ let calendarSubscriptionTimer = null;
 let calendarSubscriptionSyncBusy = false;
 let shuttingDown = false;
 let maintenanceOperation = null;
+let folderMaintenanceOperation = null;
 let startupSyncTriggered = false;
 let serverReady = false;
 let resolveStartupMigration;
@@ -489,35 +493,97 @@ function groupMessages(messages) {
   return [...groups.values()];
 }
 
+function isLocalImportedMessage(message) {
+  return /^Local\/Imported(?:\/|$)/i.test(String(message?.folder || ''));
+}
+
 async function syncRole(account, folder, role, source, signal = null) {
   if (!folder) return { folder: '', role, added: 0, skipped: true };
   if (account?.receiveProtocol === 'pop3') return { folder, role, added: 0, skipped: true, local: true };
-  return imap.syncFolder(account, folder, DATA, progress =>
-    broadcast('sync.progress', { accountId: account.id, source, ...progress }),
-  { role, signal });
+
+  // Synchronisation interne après déplacement/restauration d'un message.
+  // Elle appartient à l'opération de maintenance en cours et ne doit pas
+  // émettre sync.progress seule : sans sync.started/sync.done associés,
+  // l'interface créerait une fausse relève qui resterait animée.
+  return imap.syncFolder(account, folder, DATA, null, { role, signal });
+}
+
+function clearSyncRun(accountId, runId) {
+  const meta = activeSyncMeta.get(accountId);
+  if (!meta || (runId && meta.runId !== runId)) return false;
+  if (meta.cancelTimer) clearTimeout(meta.cancelTimer);
+  activeSyncMeta.delete(accountId);
+  activeSyncs.delete(accountId);
+  syncControllers.delete(accountId);
+  return true;
+}
+
+function forceCancelSync(accountId, runId) {
+  const meta = activeSyncMeta.get(accountId);
+  if (!meta || meta.runId !== runId) return false;
+
+  const result = {
+    cancelled: true,
+    forced: true,
+    added: 0,
+    indexed: 0,
+    changed: 0,
+    removed: 0,
+  };
+  broadcast('sync.cancelled', {
+    accountId,
+    runId,
+    source: meta.source,
+    ...result,
+  });
+  clearSyncRun(accountId, runId);
+  try { meta.forceResolve?.(result); } catch {}
+  console.warn(`[LibraMail] Relève ${accountId} libérée par le watchdog après ${SYNC_CANCEL_WATCHDOG_MS} ms.`);
+  return true;
 }
 
 function cancelActiveSyncs(accountId = null) {
-  if (!accountId && activeSyncBatch) activeSyncBatch.cancelled = true;
+  if (!accountId && activeSyncBatch) {
+    activeSyncBatch.cancelled = true;
+    // La file "toutes les boîtes" ne doit pas rester signalée active si la
+    // relève courante refuse de rendre la main. Son attente locale se poursuit
+    // éventuellement, mais elle est mise en quarantaine.
+    activeSyncBatch = null;
+  }
+
   const ids = accountId ? [accountId] : [...new Set([
     ...syncControllers.keys(),
     ...activeSyncs.keys(),
+    ...activeSyncMeta.keys(),
   ])];
+
   const cooldownUntil = Date.now() + SYNC_CANCEL_COOLDOWN_MS;
   if (accountId) syncCooldownUntil.set(accountId, cooldownUntil);
   else for (const account of accounts) syncCooldownUntil.set(account.id, cooldownUntil);
 
   let cancelled = 0;
   for (const id of ids) {
-    const controller = syncControllers.get(id);
-    if (!controller || controller.signal.aborted) continue;
-    controller.abort();
-    cancelled++;
+    const meta = activeSyncMeta.get(id);
+    const controller = syncControllers.get(id) || meta?.controller;
+    if (controller && !controller.signal.aborted) {
+      controller.abort();
+      cancelled++;
+    } else if (meta) {
+      cancelled++;
+    }
+
+    if (meta && !meta.cancelTimer) {
+      meta.cancelRequestedAt = Date.now();
+      meta.cancelTimer = setTimeout(() => {
+        forceCancelSync(id, meta.runId);
+      }, SYNC_CANCEL_WATCHDOG_MS);
+      meta.cancelTimer.unref?.();
+    }
   }
-  // Fermer immédiatement la socket débloque aussi un FETCH ou une connexion
-  // réseau qui ne répond plus. Le court délai anti-redémarrage ci-dessus évite
-  // qu'IDLE ou le minuteur relancent aussitôt la relève que l'utilisateur vient
-  // volontairement d'interrompre.
+
+  // Fermer immédiatement la socket débloque FETCH/SEARCH/LOCK. Le watchdog
+  // ci-dessus garantit en plus que l'état LibraMail est libéré même si une
+  // promesse tierce ne se résout jamais.
   cancelled = Math.max(cancelled, imap.cancelSync(accountId), pop3.cancelSync(accountId));
   return cancelled;
 }
@@ -531,33 +597,135 @@ function automaticSyncCoolingDown(accountId) {
   }
   return true;
 }
+function waitMs(ms) {
+  return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+async function waitForStoppingSyncs() {
+  if (!activeSyncMeta.size) return;
+
+  const running = [...activeSyncMeta.entries()]
+    .filter(([, meta]) => !meta.cancelRequestedAt)
+    .map(([accountId]) => accountId);
+  if (running.length) {
+    throw new Error('Une relève est en cours. Arrêtez-la avant cette opération.');
+  }
+
+  // Si l'utilisateur vient de cliquer sur Arrêter, laisser le watchdog 0.4.2
+  // terminer la fermeture avant de lancer une seconde opération IMAP.
+  const deadline = Date.now() + SYNC_CANCEL_WATCHDOG_MS + 1200;
+  while (activeSyncMeta.size && Date.now() < deadline) await waitMs(100);
+  if (activeSyncMeta.size) {
+    throw new Error('La relève est encore en cours d’arrêt. Réessayez dans quelques secondes.');
+  }
+}
+
+async function withFolderMaintenance(kind, task) {
+  if (folderMaintenanceOperation) {
+    throw new Error('Une opération de maintenance des dossiers est déjà en cours.');
+  }
+  if (maintenanceOperation) {
+    throw new Error('Une sauvegarde ou une restauration est en cours.');
+  }
+
+  await waitForStoppingSyncs();
+  folderMaintenanceOperation = kind;
+  try {
+    return await task();
+  } finally {
+    folderMaintenanceOperation = null;
+  }
+}
+
 
 async function syncAccount(account, source = 'manual') {
   if (!account) throw new Error('Compte introuvable');
+  if (folderMaintenanceOperation) {
+    if (source === 'manual') {
+      throw new Error('Une opération sur les dossiers est en cours. Réessayez lorsqu’elle est terminée.');
+    }
+    return {
+      skipped: true,
+      maintenance: true,
+      added: 0,
+      indexed: 0,
+      changed: 0,
+      removed: 0,
+    };
+  }
   if (source === 'manual') syncCooldownUntil.delete(account.id);
   else if (automaticSyncCoolingDown(account.id)) {
     return { skipped: true, cooldown: true, added: 0, indexed: 0, changed: 0, removed: 0 };
   }
+
+  const existingMeta = activeSyncMeta.get(account.id);
+  if (existingMeta) {
+    return existingMeta.task || activeSyncs.get(account.id) || {
+      skipped: true,
+      alreadyRunning: true,
+      runId: existingMeta.runId,
+      added: 0,
+      indexed: 0,
+      changed: 0,
+      removed: 0,
+    };
+  }
   if (activeSyncs.has(account.id)) return activeSyncs.get(account.id);
 
+  // Si un nettoyage automatique est déjà engagé pour ce compte, une relève
+  // manuelle/de démarrage attend sa fin. Les relèves automatiques ne créent
+  // pas de concurrence et attendront leur prochain passage.
+  const cleanup = activeCleanups.get(account.id);
+  if (cleanup) {
+    if (source === 'manual' || source === 'startup') await cleanup.catch(() => {});
+    else return { skipped: true, cleanup: true, added: 0, indexed: 0, changed: 0, removed: 0 };
+  }
+
+  const runId = crypto.randomUUID();
   const controller = new AbortController();
+  let forceResolve = null;
+  const forcedResultPromise = new Promise(resolve => { forceResolve = resolve; });
+
+  const meta = {
+    runId,
+    source,
+    controller,
+    startedAt: Date.now(),
+    cancelRequestedAt: 0,
+    cancelTimer: null,
+    forceResolve,
+    task: null,
+  };
+  activeSyncMeta.set(account.id, meta);
   syncControllers.set(account.id, controller);
-  const task = (async () => {
-    broadcast('sync.started', { accountId: account.id, source, folder: 'all' });
+
+  const isCurrentRun = () => activeSyncMeta.get(account.id)?.runId === runId;
+  const emit = (event, data = {}) => {
+    if (!isCurrentRun()) return false;
+    broadcast(event, { accountId: account.id, runId, source, ...data });
+    return true;
+  };
+
+  const operationTask = (async () => {
+    emit('sync.started', { folder: source === 'idle' ? 'inbox' : 'all' });
     try {
       if (account.receiveProtocol === 'pop3') {
         const result = await pop3.syncAccount(
           account,
           DATA,
-          progress => broadcast('sync.progress', { accountId: account.id, source, ...progress }),
+          progress => emit('sync.progress', progress),
           { signal: controller.signal }
         );
-        broadcast('sync.done', { accountId: account.id, source, ...result });
-        if (result.added > 0) broadcast('mail.new', { accountId: account.id, added: result.added, source });
+        emit('sync.done', result);
+        if (result.added > 0) emit('mail.new', { added: result.added });
         return result;
       }
+
       const folders = await ensureFolderMap(account, { force: false, signal: controller.signal });
-      if (controller.signal.aborted) throw Object.assign(new Error('Relève interrompue'), { code: 'SYNC_CANCELLED' });
+      if (controller.signal.aborted) {
+        throw Object.assign(new Error('Relève interrompue'), { code: 'SYNC_CANCELLED' });
+      }
+
       const allJobs = [
         ['inbox', folders.inbox || 'INBOX'],
         ['sent', folders.sent],
@@ -565,22 +733,20 @@ async function syncAccount(account, source = 'manual') {
         ['junk', folders.junk],
       ].filter(([, folder]) => Boolean(folder));
 
-      // Une notification IMAP IDLE concerne uniquement la boîte surveillée.
-      // Les relèves manuelles, planifiées et de démarrage restent complètes.
+      // Une notification IDLE concerne uniquement INBOX. Les relèves manuelles,
+      // planifiées et de démarrage restent complètes.
       const jobs = source === 'idle'
         ? allJobs.filter(([role]) => role === 'inbox')
         : allJobs;
 
-      // Une seule connexion IMAP est utilisée pour tous les dossiers du
-      // compte. Gmail n'a donc plus à subir quatre authentifications TLS à
-      // chaque relève, petit cérémonial qui coûtait beaucoup pour rien.
       const results = await imap.syncFolders(
         account,
         jobs,
         DATA,
-        progress => broadcast('sync.progress', { accountId: account.id, source, ...progress }),
+        progress => emit('sync.progress', progress),
         { signal: controller.signal, continueOnError: true, source }
       );
+
       const errors = results.filter(result => result.error)
         .map(({ role, folder, error }) => ({ role, folder, error }));
       const inboxError = errors.find(error => error.role === 'inbox');
@@ -591,23 +757,27 @@ async function syncAccount(account, source = 'manual') {
       const removed = results.reduce((total, result) => total + (Number(result.removed) || 0), 0);
       const added = Number(results.find(result => result.role === 'inbox')?.added) || 0;
       const result = { added, indexed, changed, removed, folders: results, errors };
-      broadcast('sync.done', { accountId: account.id, source, ...result });
-      if (added > 0) broadcast('mail.new', { accountId: account.id, added, source });
+      emit('sync.done', result);
+      if (added > 0) emit('mail.new', { added });
       return result;
     } catch (error) {
       if (controller.signal.aborted || imap.isSyncCancelled?.(error) || error?.code === 'SYNC_CANCELLED') {
         const result = { cancelled: true, added: 0, indexed: 0, changed: 0, removed: 0 };
-        broadcast('sync.cancelled', { accountId: account.id, source, ...result });
+        emit('sync.cancelled', result);
         return result;
       }
-      broadcast('sync.error', { accountId: account.id, source, error: error.message });
+      emit('sync.error', { error: error.message });
       throw error;
     } finally {
-      activeSyncs.delete(account.id);
-      syncControllers.delete(account.id);
+      if (isCurrentRun()) clearSyncRun(account.id, runId);
     }
   })();
 
+  // La promesse exposée au batch est libérée par le watchdog même si une
+  // bibliothèque réseau garde une ancienne promesse suspendue. L'opération
+  // réelle reste abortée et ses événements tardifs sont filtrés par runId.
+  const task = Promise.race([operationTask, forcedResultPromise]);
+  meta.task = task;
   activeSyncs.set(account.id, task);
   return task;
 }
@@ -657,7 +827,7 @@ function startWatch(account) {
 function serverActionSafe(message, action) {
   if (!message) return;
   const account = getAccount(message.account_id);
-  if (account?.receiveProtocol === 'pop3') return;
+  if (account?.receiveProtocol === 'pop3' || isLocalImportedMessage(message)) return;
   if (account) imap.serverAction(account, message.folder, message.uid, action).catch(() => {});
 }
 
@@ -796,23 +966,32 @@ async function moveMessagesToTrash(messages, { source = 'manual', onProgress = n
     }
 
     try {
-      const folders = await ensureFolderMap(account);
-      if (account.receiveProtocol === 'pop3') {
+      if (isLocalImportedMessage(first)) {
         const ids = group.map(message => message.id);
         if (first.folder_role === 'trash') localDeletedIds.push(...ids);
         else {
-          db.moveLocalMessages(ids, folders.trash || 'Local/Trash', 'trash');
+          db.moveLocalMessages(ids, 'Local/Imported/Trash', 'trash');
           localMovedIds.push(...ids);
         }
       } else {
-        const uids = group.map(message => message.uid);
-        if (first.folder_role === 'trash' || !folders.trash || first.folder === folders.trash) {
-          await imap.deleteUids(account, first.folder, uids);
+        const folders = await ensureFolderMap(account);
+        if (account.receiveProtocol === 'pop3') {
+          const ids = group.map(message => message.id);
+          if (first.folder_role === 'trash') localDeletedIds.push(...ids);
+          else {
+            db.moveLocalMessages(ids, folders.trash || 'Local/Trash', 'trash');
+            localMovedIds.push(...ids);
+          }
         } else {
-          await imap.moveUids(account, first.folder, uids, folders.trash);
-          affectedAccounts.add(account.id);
+          const uids = group.map(message => message.uid);
+          if (first.folder_role === 'trash' || !folders.trash || first.folder === folders.trash) {
+            await imap.deleteUids(account, first.folder, uids);
+          } else {
+            await imap.moveUids(account, first.folder, uids, folders.trash);
+            affectedAccounts.add(account.id);
+          }
+          succeededIds.push(...group.map(message => message.id));
         }
-        succeededIds.push(...group.map(message => message.id));
       }
     } catch (error) {
       errors.push({ accountId: account.id, folder: first.folder, error: error.message });
@@ -901,18 +1080,24 @@ async function restoreMessagesFromTrash(messages, { source = 'manual', onProgres
       continue;
     }
     try {
-      const folders = await ensureFolderMap(account);
-      const inbox = folders.inbox || 'INBOX';
       if (!first.folder) throw new Error('Dossier de corbeille introuvable');
-      if (first.folder === inbox) throw new Error('Le message se trouve déjà dans la boîte de réception');
-      if (account.receiveProtocol === 'pop3') {
+      if (isLocalImportedMessage(first)) {
         const ids = group.map(message => message.id);
-        db.moveLocalMessages(ids, inbox, 'inbox');
+        db.moveLocalMessages(ids, 'Local/Imported', 'inbox');
         localRestoredIds.push(...ids);
       } else {
-        await imap.moveUids(account, first.folder, group.map(message => message.uid), inbox);
-        succeededIds.push(...group.map(message => message.id));
-        affectedAccounts.add(account.id);
+        const folders = await ensureFolderMap(account);
+        const inbox = folders.inbox || 'INBOX';
+        if (first.folder === inbox) throw new Error('Le message se trouve déjà dans la boîte de réception');
+        if (account.receiveProtocol === 'pop3') {
+          const ids = group.map(message => message.id);
+          db.moveLocalMessages(ids, inbox, 'inbox');
+          localRestoredIds.push(...ids);
+        } else {
+          await imap.moveUids(account, first.folder, group.map(message => message.uid), inbox);
+          succeededIds.push(...group.map(message => message.id));
+          affectedAccounts.add(account.id);
+        }
       }
     } catch (error) {
       errors.push({ accountId: account.id, folder: first.folder, error: error.message });
@@ -955,6 +1140,15 @@ async function emptyTrash({ source = 'manual', onProgress = null } = {}) {
   }
 
   for (const account of accounts) {
+    const localImported = messages.filter(message =>
+      message.account_id === account.id && message.folder_role === 'trash' && isLocalImportedMessage(message)
+    );
+    if (localImported.length) {
+      removedIds.push(...localImported.map(message => message.id));
+      completed += localImported.length;
+      if (typeof onProgress === 'function') onProgress({ completed, total });
+    }
+
     let folders;
     try { folders = await ensureFolderMap(account); }
     catch (error) {
@@ -963,7 +1157,11 @@ async function emptyTrash({ source = 'manual', onProgress = null } = {}) {
     }
 
     if (account.receiveProtocol === 'pop3') {
-      const local = messages.filter(message => message.account_id === account.id && message.folder_role === 'trash');
+      const local = messages.filter(message =>
+        message.account_id === account.id
+        && message.folder_role === 'trash'
+        && !isLocalImportedMessage(message)
+      );
       removedIds.push(...local.map(message => message.id));
       completed += local.length;
       if (typeof onProgress === 'function') onProgress({ completed, total });
@@ -973,7 +1171,9 @@ async function emptyTrash({ source = 'manual', onProgress = null } = {}) {
     const candidates = new Set();
     if (folders.trash) candidates.add(folders.trash);
     for (const group of localByAccountFolder.values()) {
-      if (group[0]?.account_id === account.id) candidates.add(group[0].folder);
+      if (group[0]?.account_id === account.id && !isLocalImportedMessage(group[0])) {
+        candidates.add(group[0].folder);
+      }
     }
 
     for (const folder of candidates) {
@@ -998,7 +1198,7 @@ async function emptyTrash({ source = 'manual', onProgress = null } = {}) {
 }
 
 async function cleanupExpiredSpamForAccount(account, { source = 'retention', silent = false } = {}) {
-  if (maintenanceOperation) return { processed: 0, skipped: 'maintenance' };
+  if (maintenanceOperation || folderMaintenanceOperation) return { processed: 0, skipped: 'maintenance' };
   if (!account || !Number(account.spamRetentionDays)) return { processed: 0, disabled: true };
   if (activeSyncs.has(account.id)) return { processed: 0, skipped: 'sync-active' };
   if (activeCleanups.has(account.id)) return activeCleanups.get(account.id);
@@ -1203,6 +1403,7 @@ function backupTimestamp(date = new Date()) {
 
 function ensureMaintenanceAvailable() {
   if (maintenanceOperation) throw new Error('Une opération de sauvegarde ou de restauration est déjà en cours');
+  if (folderMaintenanceOperation) throw new Error('Une opération de maintenance des dossiers est en cours');
   if (activeSyncs.size) {
     throw new Error('Une relève est en cours. Réessayez lorsqu’elle est terminée.');
   }
@@ -1224,6 +1425,22 @@ async function withMaintenance(kind, task) {
   } catch (error) {
     broadcast('backup.error', { kind, error: error.message });
     throw error;
+  } finally {
+    maintenanceOperation = null;
+    if (!shuttingDown) startAccountRuntime({ resolveFolders: false });
+  }
+}
+
+async function withEmlImportMaintenance(task) {
+  await startupMigrationPromise;
+  ensureMaintenanceAvailable();
+  maintenanceOperation = 'eml-import';
+  stopAccountRuntime();
+  if (activeCleanups.size) {
+    await Promise.allSettled([...activeCleanups.values()]);
+  }
+  try {
+    return await task();
   } finally {
     maintenanceOperation = null;
     if (!shuttingDown) startAccountRuntime({ resolveFolders: false });
@@ -1586,6 +1803,27 @@ const methods = {
   'backup.import': async ({ sourcePath, password = '' }) => withMaintenance('import', async () =>
     importCompleteBackup(sourcePath, password)),
 
+  // ---------- Import local de messages EML ----------
+  'eml.selectImportPaths': async () => ({
+    paths: await nativeDialog.showEmlDialog({
+      title: 'Importer des messages EML dans LibraMail',
+    }),
+  }),
+
+  'eml.import': async ({ accountId, paths = [], mode = 'auto' } = {}) => {
+    const account = getAccount(String(accountId || ''));
+    if (!account) throw new Error('Compte de destination introuvable');
+    return withEmlImportMaintenance(() => emlImport.importFiles({
+      account,
+      paths,
+      mode,
+      onProgress: progress => broadcast('eml.import.progress', {
+        accountId: account.id,
+        ...progress,
+      }),
+    }));
+  },
+
   'accounts.add': async input => {
     validateAccountInput(input);
     const receiveProtocol = String(input.receiveProtocol || 'imap').toLowerCase() === 'pop3' ? 'pop3' : 'imap';
@@ -1795,14 +2033,48 @@ const methods = {
   },
 
   // ---------- Synchronisation ----------
+  // Les anciennes méthodes restent disponibles pour compatibilité/tests.
   'sync.folder': async ({ accountId }) => syncAccount(getAccount(accountId), 'manual'),
   'sync.all': async () => syncAllAccounts('manual'),
+
+  // Les actions UI 0.4.2 sont non bloquantes : le RPC rend la main dès que la
+  // relève est acceptée. L'interface suit ensuite l'état réel via sync.*.
+  'sync.start': async ({ accountId }) => {
+    const account = getAccount(String(accountId || ''));
+    if (!account) throw new Error('Compte introuvable');
+    const existing = activeSyncMeta.get(account.id);
+    if (existing) {
+      return { started: false, alreadyRunning: true, accountId: account.id, runId: existing.runId };
+    }
+    syncAccount(account, 'manual').catch(error =>
+      console.error(`[LibraMail] Relève manuelle ${account.email || account.id} :`, error.message)
+    );
+    return { started: true, accountId: account.id };
+  },
+  'sync.startAll': async () => {
+    if (activeSyncBatch) {
+      return { started: false, alreadyRunning: true, batchId: activeSyncBatch.id };
+    }
+    syncAllAccounts('manual').catch(error =>
+      console.error('[LibraMail] Relève manuelle de toutes les boîtes :', error.message)
+    );
+    return { started: true, accounts: accounts.length };
+  },
   'sync.cancel': async ({ accountId = null } = {}) => ({
     cancelled: cancelActiveSyncs(accountId ? String(accountId) : null),
+    watchdogMs: SYNC_CANCEL_WATCHDOG_MS,
   }),
   'sync.status': async () => ({
-    active: [...syncControllers.keys()],
+    active: [...activeSyncMeta.keys()],
     batch: Boolean(activeSyncBatch),
+    maintenance: folderMaintenanceOperation || null,
+    runs: [...activeSyncMeta.entries()].map(([accountId, meta]) => ({
+      accountId,
+      runId: meta.runId,
+      source: meta.source,
+      startedAt: meta.startedAt,
+      stopping: Boolean(meta.cancelRequestedAt),
+    })),
   }),
 
   // L'interface appelle cette méthode une fois son démarrage terminé. La relève
@@ -1990,36 +2262,36 @@ const methods = {
   },
   'icons.sender.resolveMany': async ({ emails } = {}) => resolveSenderIconsForEmails(emails),
   'spam.stats': async () => spam.stats(),
-  'spam.empty': async () => {
-    const messages = db.listSpamMessages();
-    broadcast('folder.empty.started', { kind: 'spam', count: messages.length });
-    try {
-      const result = await moveMessagesToTrash(messages, {
-        source: 'empty-spam',
-        onProgress: progress => broadcast('folder.empty.progress', { kind: 'spam', ...progress }),
-      });
-      broadcast('folder.empty.done', { kind: 'spam', count: result.processed, errors: result.errors });
-      return result;
-    } catch (error) {
-      broadcast('folder.empty.error', { kind: 'spam', error: error.message });
-      throw error;
-    }
-  },
-  'trash.empty': async () => {
-    const count = db.countMessages({ folderRole: 'trash', spam: null }).n;
-    broadcast('folder.empty.started', { kind: 'trash', count });
-    try {
-      const result = await emptyTrash({
-        source: 'empty-trash',
-        onProgress: progress => broadcast('folder.empty.progress', { kind: 'trash', ...progress }),
-      });
-      broadcast('folder.empty.done', { kind: 'trash', count: result.deleted, errors: result.errors });
-      return result;
-    } catch (error) {
-      broadcast('folder.empty.error', { kind: 'trash', error: error.message });
-      throw error;
-    }
-  },
+  'spam.empty': async () => withFolderMaintenance('spam', async () => {
+      const messages = db.listSpamMessages();
+      broadcast('folder.empty.started', { kind: 'spam', count: messages.length });
+      try {
+        const result = await moveMessagesToTrash(messages, {
+          source: 'empty-spam',
+          onProgress: progress => broadcast('folder.empty.progress', { kind: 'spam', ...progress }),
+        });
+        broadcast('folder.empty.done', { kind: 'spam', count: result.processed, errors: result.errors });
+        return result;
+      } catch (error) {
+        broadcast('folder.empty.error', { kind: 'spam', error: error.message });
+        throw error;
+      }
+    }),
+  'trash.empty': async () => withFolderMaintenance('trash', async () => {
+      const count = db.countMessages({ folderRole: 'trash', spam: null }).n;
+      broadcast('folder.empty.started', { kind: 'trash', count });
+      try {
+        const result = await emptyTrash({
+          source: 'empty-trash',
+          onProgress: progress => broadcast('folder.empty.progress', { kind: 'trash', ...progress }),
+        });
+        broadcast('folder.empty.done', { kind: 'trash', count: result.deleted, errors: result.errors });
+        return result;
+      } catch (error) {
+        broadcast('folder.empty.error', { kind: 'trash', error: error.message });
+        throw error;
+      }
+    }),
 
   // ---------- Contacts ----------
   'contacts.list': async params => ({

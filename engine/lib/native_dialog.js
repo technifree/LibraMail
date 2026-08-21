@@ -163,4 +163,85 @@ async function showBackupDialog({ mode, defaultName = '', title = '' } = {}) {
   return path.resolve(selected);
 }
 
-module.exports = { showBackupDialog };
+function splitSelectedPaths(output) {
+  return String(output || '')
+    .split(/\r?\n/)
+    .map(value => value.trim())
+    .filter(Boolean)
+    .map(value => path.resolve(value));
+}
+
+function linuxEmlCandidates({ title }) {
+  const directory = `${defaultDirectory()}${path.sep}`;
+  const common = [
+    '--file-selection',
+    '--multiple',
+    '--separator=\n',
+    `--title=${title}`,
+    '--file-filter=Messages EML | *.eml *.EML',
+    '--file-filter=Tous les fichiers | *',
+    `--filename=${directory}`,
+  ];
+  return [
+    { command: 'zenity', args: common },
+    { command: 'yad', args: common },
+    {
+      command: 'kdialog',
+      args: ['--title', title, '--getopenfilename', defaultDirectory(), 'Messages EML (*.eml)', '--multiple', '--separate-output'],
+    },
+  ];
+}
+
+function macEmlCandidates({ title }) {
+  const escapedTitle = String(title).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const script = [
+    `set selectedFiles to choose file with prompt "${escapedTitle}" with multiple selections allowed`,
+    'set output to ""',
+    'repeat with selectedFile in selectedFiles',
+    'set output to output & (POSIX path of selectedFile) & linefeed',
+    'end repeat',
+    'return output',
+  ].join('\n');
+  return [{ command: 'osascript', args: ['-e', script] }];
+}
+
+function windowsEmlCandidates({ title }) {
+  const script = [
+    'Add-Type -AssemblyName System.Windows.Forms',
+    '$dialog = New-Object System.Windows.Forms.OpenFileDialog',
+    `$dialog.Title = ${JSON.stringify(String(title))}`,
+    '$dialog.Filter = "Messages EML (*.eml)|*.eml|Tous les fichiers (*.*)|*.*"',
+    `$dialog.InitialDirectory = ${JSON.stringify(defaultDirectory())}`,
+    '$dialog.Multiselect = $true',
+    'if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $dialog.FileNames | ForEach-Object { Write-Output $_ } }',
+  ].join('; ');
+  return [
+    { command: 'powershell.exe', args: ['-NoProfile', '-STA', '-Command', script] },
+    { command: 'pwsh', args: ['-NoProfile', '-STA', '-Command', script] },
+  ];
+}
+
+async function showEmlDialog({ title = 'Importer des messages EML' } = {}) {
+  let candidates;
+  if (process.platform === 'linux') {
+    candidates = linuxEmlCandidates({ title });
+  } else if (process.platform === 'darwin') {
+    candidates = macEmlCandidates({ title });
+  } else if (process.platform === 'win32') {
+    candidates = windowsEmlCandidates({ title });
+  } else {
+    throw new Error(`Sélecteur de fichiers non pris en charge sur ${process.platform}`);
+  }
+
+  for (const candidate of candidates) {
+    const result = await runCommand(candidate.command, candidate.args);
+    if (!result.available) continue;
+    if (result.cancelled) return [];
+    return splitSelectedPaths(result.output);
+  }
+  throw new Error(
+    'Aucun sélecteur de fichiers graphique n’est disponible. Installez zenity, yad ou kdialog.'
+  );
+}
+
+module.exports = { showBackupDialog, showEmlDialog };

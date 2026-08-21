@@ -30,6 +30,7 @@ const App = (() => {
   let unseenActivityCount = 0;
   let manualSyncPending = false;
   const activeSyncActivities = new Map();
+  const activeSyncRunIds = new Map();
   const activeMaintenanceActivities = new Map();
   let pendingConfirmAction = null;
   let backupBusy = false;
@@ -84,12 +85,15 @@ const App = (() => {
 
   function renderSyncButtonState() {
     const button = document.getElementById('btn-sync');
+    const menuButton = document.getElementById('btn-sync-menu');
     if (!button) return;
     const syncing = manualSyncPending || activeSyncActivities.size > 0;
-    // Une relève automatique doit être aussi visible qu'une relève manuelle.
-    // On ne désactive toutefois le bouton que pendant la requête manuelle :
-    // le moteur conserve ainsi ses garde-fous habituels contre les doublons.
+
+    // En 0.4.2, la durée de l'animation dépend des événements sync.* réels.
+    // manualSyncPending ne couvre que les quelques millisecondes du RPC de
+    // démarrage et ne peut donc plus rester bloqué sur une promesse réseau.
     button.disabled = manualSyncPending;
+    if (menuButton) menuButton.disabled = manualSyncPending;
     button.setAttribute('aria-busy', syncing ? 'true' : 'false');
     button.classList.toggle('sync-pending', syncing);
     button.querySelector('i')?.classList.toggle('fa-spin', syncing);
@@ -100,12 +104,79 @@ const App = (() => {
     renderSyncButtonState();
   }
 
-  async function runManualSync() {
+  function syncMenuStrings() {
+    const english = String(I18N.locale || 'fr').toLowerCase().startsWith('en');
+    return english
+      ? { all: 'All mailboxes', choose: 'Retrieve a mailbox', current: 'Mail retrieval already in progress' }
+      : { all: 'Toutes les boîtes', choose: 'Relever une boîte', current: 'Une relève est déjà en cours' };
+  }
+
+  function closeSyncMenu() {
+    const menu = document.getElementById('sync-account-menu');
+    const toggle = document.getElementById('btn-sync-menu');
+    menu?.classList.add('hidden');
+    toggle?.setAttribute('aria-expanded', 'false');
+  }
+
+  function renderSyncMenu() {
+    const menu = document.getElementById('sync-account-menu');
+    if (!menu) return;
+    const labels = syncMenuStrings();
+    menu.innerHTML = '';
+
+    const addItem = (label, accountId = null, iconClass = 'fa-solid fa-inbox') => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'sync-account-menu-item';
+      button.setAttribute('role', 'menuitem');
+      button.innerHTML = `<i class="${iconClass}"></i><span>${esc(label)}</span>`;
+      button.onclick = event => {
+        event.stopPropagation();
+        closeSyncMenu();
+        runManualSync(accountId);
+      };
+      menu.appendChild(button);
+    };
+
+    addItem(labels.all, null, 'fa-solid fa-inbox');
+    if (accounts.length) {
+      const separator = document.createElement('div');
+      separator.className = 'sync-account-menu-separator';
+      menu.appendChild(separator);
+    }
+    for (const account of accounts) {
+      addItem(account.displayName || account.email || account.id, account.id, 'fa-regular fa-envelope');
+    }
+  }
+
+  function toggleSyncMenu(event) {
+    event?.stopPropagation?.();
+    const menu = document.getElementById('sync-account-menu');
+    const toggle = document.getElementById('btn-sync-menu');
+    if (!menu || !toggle) return;
+    const opening = menu.classList.contains('hidden');
+    if (!opening) {
+      closeSyncMenu();
+      return;
+    }
+    renderSyncMenu();
+    menu.classList.remove('hidden');
+    toggle.setAttribute('aria-expanded', 'true');
+    toggle.title = syncMenuStrings().choose;
+  }
+
+  async function runManualSync(accountId = null) {
     if (manualSyncPending) return;
+    closeSyncMenu();
     setManualSyncBusy(true);
     status(t('status.syncRequested'), 'busy');
     try {
-      await rpc('sync.all');
+      const result = accountId
+        ? await rpc('sync.start', { accountId })
+        : await rpc('sync.startAll');
+      if (result?.alreadyRunning) {
+        status(syncMenuStrings().current, 'info');
+      }
     } catch (error) {
       status(`${t('error')} : ${error.message}`, 'error');
     } finally {
@@ -410,6 +481,20 @@ const App = (() => {
 
   function beginSyncActivity(data) {
     const key = data.accountId || `batch-${Date.now()}`;
+    const currentRunId = activeSyncRunIds.get(key);
+    if (data.runId && currentRunId && currentRunId !== data.runId) {
+      const previousId = activeSyncActivities.get(key);
+      if (previousId) {
+        updateActivity(previousId, {
+          state: 'cancelled',
+          title: t('activity.syncCancelled', { account: accountLabel(data.accountId) }),
+          detail: t('activity.syncCancelledDetail', { source: syncSourceLabel(data.source) }),
+        });
+      }
+      activeSyncActivities.delete(key);
+    }
+    if (data.runId) activeSyncRunIds.set(key, data.runId);
+
     const currentId = activeSyncActivities.get(key);
     const title = t('activity.syncStarted', { account: accountLabel(data.accountId) });
     const detail = t('activity.syncSource', { source: syncSourceLabel(data.source) });
@@ -419,6 +504,14 @@ const App = (() => {
 
   function updateSyncActivity(data) {
     const key = data.accountId;
+    const currentRunId = activeSyncRunIds.get(key);
+    if (data.runId && currentRunId && currentRunId !== data.runId) return;
+
+    // Depuis 0.4.2, une vraie relève possède toujours un runId. Un événement
+    // de progression interne sans relève active ne doit jamais créer à lui
+    // seul une activité "Relever" fantôme.
+    if (!data.runId && !activeSyncActivities.has(key)) return;
+
     let id = activeSyncActivities.get(key);
     if (!id) id = beginSyncActivity(data)?.id;
     if (!id) return;
@@ -443,8 +536,14 @@ const App = (() => {
 
   function finishSyncActivity(data, failed = false) {
     const key = data.accountId;
+    const currentRunId = activeSyncRunIds.get(key);
+    if (data.runId && currentRunId && currentRunId !== data.runId) return;
+
     let id = activeSyncActivities.get(key);
-    if (!id) id = beginSyncActivity(data)?.id;
+    if (!id) {
+      if (data.runId) return;
+      id = beginSyncActivity(data)?.id;
+    }
     if (!id) return;
     const account = accountLabel(data.accountId);
     updateActivity(id, failed ? {
@@ -462,13 +561,20 @@ const App = (() => {
       }),
     });
     activeSyncActivities.delete(key);
+    if (!data.runId || activeSyncRunIds.get(key) === data.runId) activeSyncRunIds.delete(key);
     renderActivity();
   }
 
   function cancelSyncActivity(data) {
     const key = data.accountId;
+    const currentRunId = activeSyncRunIds.get(key);
+    if (data.runId && currentRunId && currentRunId !== data.runId) return;
+
     let id = activeSyncActivities.get(key);
-    if (!id) id = beginSyncActivity(data)?.id;
+    if (!id) {
+      if (data.runId) return;
+      id = beginSyncActivity(data)?.id;
+    }
     if (!id) return;
     const account = accountLabel(data.accountId);
     updateActivity(id, {
@@ -477,13 +583,18 @@ const App = (() => {
       detail: t('activity.syncCancelledDetail', { source: syncSourceLabel(data.source) }),
     });
     activeSyncActivities.delete(key);
+    if (!data.runId || activeSyncRunIds.get(key) === data.runId) activeSyncRunIds.delete(key);
     renderActivity();
   }
 
   async function stopSync(accountId = null) {
-    const ids = accountId
-      ? [activeSyncActivities.get(accountId)].filter(Boolean)
-      : [...activeSyncActivities.values()];
+    const targets = (accountId ? [accountId] : [...activeSyncActivities.keys()])
+      .filter(Boolean)
+      .map(id => ({ accountId: id, runId: activeSyncRunIds.get(id) || null }));
+    const ids = targets
+      .map(target => activeSyncActivities.get(target.accountId))
+      .filter(Boolean);
+
     for (const id of ids) {
       updateActivity(id, {
         state: 'stopping',
@@ -491,10 +602,31 @@ const App = (() => {
       });
     }
     renderActivity();
+    setManualSyncBusy(false);
     status(t('status.syncStopping'), 'busy');
+
     try {
       const result = await rpc('sync.cancel', accountId ? { accountId } : {});
       if (Number(result?.cancelled) <= 0) status(t('status.noSyncToStop'), 'info');
+
+      const delay = Math.max(4200, Number(result?.watchdogMs || 3500) + 700);
+      setTimeout(async () => {
+        try {
+          const state = await rpc('sync.status');
+          const serverRuns = new Map((state?.runs || []).map(run => [String(run.accountId), run.runId]));
+          for (const target of targets) {
+            const id = String(target.accountId);
+            if (activeSyncRunIds.get(id) !== target.runId) continue;
+            if (serverRuns.get(id) === target.runId) continue;
+            cancelSyncActivity({
+              accountId: id,
+              runId: target.runId,
+              source: 'manual',
+              forced: true,
+            });
+          }
+        } catch {}
+      }, delay);
     } catch (error) {
       status(error.message, 'error');
     }
@@ -766,6 +898,18 @@ const App = (() => {
         state: 'error',
       });
       setBackupOperationStatus(`${t('error')} : ${data.error || t('error')}`, 'error');
+    } else if (event === 'eml.import.progress') {
+      const completed = Math.max(0, Number(data.completed) || 0);
+      const total = Math.max(0, Number(data.total) || 0);
+      const rawName = String(data.name || '').replace(/\\/g, '/');
+      const name = rawName ? rawName.split('/').pop() : '';
+      setBackupProgress({
+        label: t('emlImport.progress', { completed, total }),
+        percent: total ? (completed / total) * 100 : 0,
+        detail: name ? t('backup.progress.currentFile', { name }) : '',
+        state: 'busy',
+      });
+      setBackupOperationStatus(t('emlImport.progress', { completed, total }), 'busy');
     } else if (event === 'storage.migration.progress') {
       status(t('storage.migrationProgress', {
         current: Number(data.encrypted) || 0,
@@ -848,7 +992,7 @@ const App = (() => {
   };
 
   function applyAppVersion() {
-    const rawVersion = String(window.NL_APPVERSION || '0.4.1').replace(/^v/i, '');
+    const rawVersion = String(window.NL_APPVERSION || '0.4.2').replace(/^v/i, '');
     const badge = document.getElementById('app-version');
     if (badge) {
       badge.textContent = `v${rawVersion}`;
@@ -5258,7 +5402,7 @@ const App = (() => {
       status(t(editingAccountId ? 'account.updated' : 'account.added'), 'success');
       const wasNew = !editingAccountId;
       editingAccountId = null;
-      if (wasNew) rpc('sync.folder', { accountId: account.id }).catch(error => status(error.message, 'error'));
+      if (wasNew) rpc('sync.start', { accountId: account.id }).catch(error => status(error.message, 'error'));
     } catch (error) {
       setAccountStatus('✗ ' + error.message, 'error');
     } finally {
@@ -5508,7 +5652,7 @@ const App = (() => {
 
   // ---------- Mise à jour et À propos ----------
   function appVersion() {
-    return String(window.NL_APPVERSION || '0.4.1').replace(/^v/i, '');
+    return String(window.NL_APPVERSION || '0.4.2').replace(/^v/i, '');
   }
 
   function compareVersions(a, b) {
@@ -5739,10 +5883,32 @@ const App = (() => {
     backupBusy = Boolean(value);
     const card = document.querySelector('.backup-settings-card');
     card?.classList.toggle('is-busy', backupBusy);
-    ['btn-export-backup', 'btn-import-backup', 'backup-password', 'backup-password-confirm'].forEach(id => {
-      const button = document.getElementById(id);
-      if (button) button.disabled = backupBusy;
+    [
+      'btn-export-backup', 'btn-import-backup', 'backup-password', 'backup-password-confirm',
+      'btn-import-eml', 'eml-import-account', 'eml-import-mode',
+    ].forEach(id => {
+      const control = document.getElementById(id);
+      if (control) control.disabled = backupBusy || (id === 'btn-import-eml' && !accounts.length);
     });
+  }
+
+  function populateEmlImportAccounts() {
+    const select = document.getElementById('eml-import-account');
+    const button = document.getElementById('btn-import-eml');
+    if (!select) return;
+
+    select.innerHTML = accounts.length
+      ? accounts.map(account =>
+          `<option value="${esc(account.id)}">${esc(account.displayName || account.email)} — ${esc(account.email)}</option>`
+        ).join('')
+      : `<option value="">${esc(t('emlImport.noAccounts'))}</option>`;
+
+    const preferred = config.defaultAccountId && accounts.some(account => account.id === config.defaultAccountId)
+      ? config.defaultAccountId
+      : accounts[0]?.id;
+    if (preferred) select.value = preferred;
+    select.disabled = backupBusy || !accounts.length;
+    if (button) button.disabled = backupBusy || !accounts.length;
   }
 
   function backupRecoveryPassword({ confirm = false } = {}) {
@@ -5898,6 +6064,79 @@ const App = (() => {
       status(`${t('error')} : ${error.message}`, 'error');
     } finally {
       setBackupBusy(false);
+    }
+  }
+
+
+  async function importEmlMessages() {
+    if (backupBusy || !accounts.length) return;
+    const accountId = String(document.getElementById('eml-import-account')?.value || '');
+    const mode = String(document.getElementById('eml-import-mode')?.value || 'auto');
+    if (!accountId) {
+      status(t('emlImport.noAccounts'), 'error');
+      return;
+    }
+
+    resetBackupProgress();
+    setBackupBusy(true);
+    try {
+      setBackupOperationStatus(t('status.connectingEngine'), 'busy');
+      await waitForEngine();
+
+      setBackupOperationStatus(t('emlImport.selecting'), 'busy');
+      setBackupProgress({
+        label: t('emlImport.selecting'),
+        percent: 0,
+        indeterminate: true,
+        state: 'busy',
+      });
+
+      const selection = await rpc('eml.selectImportPaths');
+      const paths = Array.isArray(selection?.paths) ? selection.paths : [];
+      if (!paths.length) {
+        setBackupOperationStatus('');
+        resetBackupProgress();
+        return;
+      }
+
+      setBackupOperationStatus(t('emlImport.importing', { count: paths.length }), 'busy');
+      setBackupProgress({
+        label: t('emlImport.importing', { count: paths.length }),
+        percent: 0,
+        detail: '',
+        state: 'busy',
+      });
+
+      const result = await rpc('eml.import', { accountId, paths, mode });
+      const message = t('emlImport.done', {
+        imported: Number(result.imported) || 0,
+        duplicates: Number(result.duplicates) || 0,
+        failed: Number(result.failed) || 0,
+      });
+      const state = Number(result.failed) > 0 ? 'info' : 'success';
+      setBackupProgress({
+        label: t('emlImport.complete'),
+        percent: 100,
+        detail: message,
+        state: Number(result.failed) > 0 ? 'error' : 'success',
+      });
+      setBackupOperationStatus(message, state);
+      status(message, state);
+      await refreshVisibleList({ preserveListState: true });
+      await refreshSidebarCounts();
+    } catch (error) {
+      console.error('[LibraMail] Import EML :', error);
+      setBackupProgress({
+        label: t('emlImport.failed'),
+        percent: null,
+        detail: error.message,
+        state: 'error',
+      });
+      setBackupOperationStatus(`${t('error')} : ${error.message}`, 'error');
+      status(`${t('error')} : ${error.message}`, 'error');
+    } finally {
+      setBackupBusy(false);
+      populateEmlImportAccounts();
     }
   }
 
@@ -6064,6 +6303,7 @@ const App = (() => {
     defaultAccount.innerHTML = accounts.map(account =>
       `<option value="${esc(account.id)}" ${account.id === config.defaultAccountId ? 'selected' : ''}>${esc(account.email)}</option>`).join('');
     populateSignatureAccountSelect();
+    populateEmlImportAccounts();
 
     const syncList = document.getElementById('sync-account-list');
     syncList.innerHTML = accounts.length ? accounts.map(account => `
@@ -6531,7 +6771,11 @@ const App = (() => {
     });
 
     document.getElementById('btn-compose').onclick = () => openCompose(null, 'new');
-    document.getElementById('btn-sync').onclick = runManualSync;
+    document.getElementById('btn-sync').onclick = () => runManualSync(null);
+    document.getElementById('btn-sync-menu').onclick = toggleSyncMenu;
+    document.addEventListener('click', event => {
+      if (!event.target.closest('#sync-split')) closeSyncMenu();
+    });
     document.getElementById('btn-select-all').onclick = () => list.selectAll();
     document.getElementById('btn-clear-selection').onclick = () => list.clearSelection();
     document.getElementById('btn-bulk-read').onclick = () => runBulkFlag('seen', true);
@@ -6707,6 +6951,7 @@ const App = (() => {
     });
     document.getElementById('btn-export-backup').onclick = exportCompleteBackup;
     document.getElementById('btn-import-backup').onclick = importCompleteBackup;
+    document.getElementById('btn-import-eml').onclick = importEmlMessages;
     document.getElementById('btn-allow-remote').onclick = openRemoteContentDialog;
     document.getElementById('btn-display-selected-remote').onclick = displaySelectedRemoteContent;
     document.getElementById('btn-display-all-remote').onclick = () => {

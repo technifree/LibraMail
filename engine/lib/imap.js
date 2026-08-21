@@ -27,6 +27,11 @@ function throwIfAborted(signal) {
   if (signal?.aborted) throw new SyncCancelledError();
 }
 
+async function yieldToEventLoop(signal) {
+  await new Promise(resolve => setImmediate(resolve));
+  throwIfAborted(signal);
+}
+
 function isSyncCancelled(error) {
   return error?.code === 'SYNC_CANCELLED' || error?.name === 'SyncCancelledError';
 }
@@ -73,6 +78,37 @@ function interruptClient(client) {
 }
 
 
+const IMAP_LOGOUT_TIMEOUT_MS = 2000;
+
+async function closeClientGracefully(client, timeoutMs = IMAP_LOGOUT_TIMEOUT_MS) {
+  if (!client) return;
+  let settled = false;
+  const logoutPromise = Promise.resolve()
+    .then(() => client.logout())
+    .catch(error => {
+      if (!isExpectedCancellationError(error) && error?.code !== 'NoConnection') {
+        console.warn('[LibraMail] Fermeture IMAP :', error?.message || error);
+      }
+    })
+    .finally(() => { settled = true; });
+
+  let timer = null;
+  await Promise.race([
+    logoutPromise,
+    new Promise(resolve => {
+      timer = setTimeout(resolve, Math.max(250, Number(timeoutMs) || IMAP_LOGOUT_TIMEOUT_MS));
+      timer.unref?.();
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+
+  // Certains serveurs gardent LOGOUT en attente alors que tout le travail utile
+  // est terminé. On ne laisse plus cette politesse réseau bloquer l'interface.
+  if (!settled) interruptClient(client);
+}
+
+
+
 function makeClient(account) {
   return new ImapFlow({
     host: account.imap.host,
@@ -81,8 +117,8 @@ function makeClient(account) {
     auth: { user: account.imap.user, pass: account.imap.pass },
     logger: false,
     qresync: true,
-    connectionTimeout: 45000,
-    socketTimeout: 180000,
+    connectionTimeout: 30000,
+    socketTimeout: 90000,
   });
 }
 
@@ -291,6 +327,10 @@ async function storeNewMessages(client, account, folder, dataDir, firstUid, last
     added.push(id);
     maxUid = Math.max(maxUid, Number(message.uid) || 0);
 
+    if (added.length % 10 === 0) {
+      await yieldToEventLoop(signal);
+    }
+
     // Un arrêt ne doit pas obliger à retraiter les milliers de messages déjà
     // enregistrés lors de la prochaine relève.
     if (added.length % 25 === 0) {
@@ -443,6 +483,7 @@ async function syncFolders(account, jobs, dataDir, onProgress,
         if (!continueOnError) throw error;
         results.push({ folder, role, added: 0, changed: 0, removed: 0, error: error.message });
       }
+      await yieldToEventLoop(signal);
     }
 
     const totalMs = Date.now() - syncStartedAt;
@@ -469,7 +510,7 @@ async function syncFolders(account, jobs, dataDir, onProgress,
     if (signal?.aborted) {
       interruptClient(client);
     } else {
-      await client.logout().catch(() => {});
+      await closeClientGracefully(client);
     }
   }
 }
@@ -524,7 +565,7 @@ async function listFolders(account, { signal = null } = {}) {
     if (signal?.aborted) {
       interruptClient(client);
     } else {
-      await client.logout().catch(() => {});
+      await closeClientGracefully(client);
     }
   }
 }
@@ -552,7 +593,7 @@ async function serverAction(account, folder, uid, action) {
       lock.release();
     }
   } finally {
-    await client.logout().catch(() => {});
+    await closeClientGracefully(client);
   }
 }
 
@@ -569,7 +610,7 @@ async function moveUids(account, sourceFolder, uids, targetFolder) {
       lock.release();
     }
   } finally {
-    await client.logout().catch(() => {});
+    await closeClientGracefully(client);
   }
   return unique.length;
 }
@@ -587,7 +628,7 @@ async function deleteUids(account, folder, uids) {
       lock.release();
     }
   } finally {
-    await client.logout().catch(() => {});
+    await closeClientGracefully(client);
   }
   return unique.length;
 }
@@ -606,7 +647,7 @@ async function emptyFolder(account, folder) {
       lock.release();
     }
   } finally {
-    await client.logout().catch(() => {});
+    await closeClientGracefully(client);
   }
 }
 
@@ -632,7 +673,7 @@ async function appendSentCopy(account, folder, raw, messageId = null) {
     await client.append(folder, raw, ['\\Seen'], new Date());
     return { appended: true };
   } finally {
-    await client.logout().catch(() => {});
+    await closeClientGracefully(client);
   }
 }
 

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LibraMail 0.4.1</title>
+  <title>LibraMail 0.4.2</title>
   <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
   <link rel="stylesheet" href="themes/dark.css">
   <link rel="stylesheet" href="themes/light.css">
@@ -23,6 +23,60 @@
     .startup-message { min-height: 20px; color: #c7ccd6; font-size: 13px; }
     .startup-spinner { width: 28px; height: 28px; border: 3px solid rgba(255,255,255,.18); border-top-color: #a879da; border-radius: 50%; animation: startup-spin .85s linear infinite; }
     @keyframes startup-spin { to { transform: rotate(360deg); } }
+
+    /* LibraMail 0.4.2 — bouton scindé de relève manuelle. */
+    .sync-split { position: relative; display: inline-flex; align-items: stretch; }
+    .sync-split #btn-sync { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+    .sync-split #btn-sync-menu {
+      min-width: 26px; padding-inline: 7px; margin-left: -1px;
+      border-top-left-radius: 0; border-bottom-left-radius: 0;
+    }
+    .sync-account-menu {
+      position: absolute; top: calc(100% + 6px); left: 0; z-index: 10050;
+      min-width: 220px; max-width: 320px; padding: 5px;
+      border: 1px solid var(--border, #d7dce8); border-radius: 5px;
+      background: var(--bg-panel, #fff); box-shadow: 0 8px 24px rgba(0,0,0,.14);
+    }
+    .sync-account-menu-item {
+      width: 100%; display: grid; grid-template-columns: 22px minmax(0,1fr);
+      align-items: center; gap: 7px; padding: 7px 8px; border: 0; border-radius: 3px;
+      background: transparent; color: var(--fg-strong, #1d2433); text-align: left; cursor: pointer;
+    }
+    .sync-account-menu-item:hover { background: var(--bg-hover, rgba(100,110,140,.08)); }
+    .sync-account-menu-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sync-account-menu-separator { height: 1px; margin: 4px 3px; background: var(--border-soft, var(--border, #d7dce8)); }
+
+    /* LibraMail 0.4.2 — organisation claire de Sauvegarde / Import EML. */
+    #settings-modal .backup-settings-card { display:flex; flex-direction:column; gap:0; }
+    #settings-modal .backup-operation-section { display:flex; flex-direction:column; gap:12px; min-width:0; padding:2px 0 16px; }
+    #settings-modal .backup-operation-section + .backup-operation-section { border-top:1px solid var(--border-soft,var(--border,#d7dce8)); padding-top:16px; }
+    #settings-modal .backup-operation-heading { display:flex; align-items:center; gap:8px; font-weight:700; line-height:1.25; }
+    #settings-modal .backup-operation-heading i { width:18px; text-align:center; opacity:.82; }
+    #settings-modal .backup-operation-section .backup-settings-copy { display:block; min-width:0; }
+    #settings-modal .backup-operation-section .backup-settings-copy p { margin:5px 0 0; max-width:none; }
+    #settings-modal .backup-operation-section .backup-security-warning { margin-top:9px; }
+    #settings-modal .backup-operation-section .backup-key-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px 12px; width:100%; }
+    #settings-modal .backup-operation-section .backup-key-fields > .field-hint { grid-column:1/-1; }
+    #settings-modal .backup-operation-section .backup-settings-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; width:100%; }
+    #settings-modal .backup-operation-section .backup-settings-actions .btn { width:auto; min-width:190px; }
+    #settings-modal .eml-import-controls { display:grid; grid-template-columns:minmax(230px,1.15fr) minmax(190px,.85fr) auto; gap:12px; align-items:end; width:100%; }
+    #settings-modal .eml-import-controls .field { min-width:0; margin:0; }
+    #settings-modal .eml-import-action { display:flex; align-items:end; }
+    #settings-modal .eml-import-action .btn { white-space:nowrap; min-height:36px; }
+    #settings-modal .eml-import-section > .field-hint { margin-top:-2px; }
+    @media (max-width:760px) {
+      #settings-modal .eml-import-controls { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      #settings-modal .eml-import-action { grid-column:1/-1; }
+      #settings-modal .backup-operation-section .backup-settings-actions .btn { min-width:0; }
+    }
+    @media (max-width:560px) {
+      #settings-modal .backup-operation-section .backup-key-fields,
+      #settings-modal .eml-import-controls { grid-template-columns:1fr; }
+      #settings-modal .eml-import-action { grid-column:auto; }
+      #settings-modal .backup-operation-section .backup-settings-actions { align-items:stretch; }
+      #settings-modal .backup-operation-section .backup-settings-actions .btn,
+      #settings-modal .eml-import-action .btn { width:100%; }
+    }
   </style>
 </head>
 <body>
@@ -37,20 +91,27 @@
 <div id="app" data-layout="vertical">
 
   <div id="topbar">
-    <button id="brand" class="brand-button" type="button" title="LibraMail 0.4.1" data-i18n-title="about.open">
+    <button id="brand" class="brand-button" type="button" title="LibraMail 0.4.2" data-i18n-title="about.open">
       <span class="brand-logo-box" aria-hidden="true">
         <img class="brand-logo brand-logo-light" src="assets/logo-light.png" alt="">
         <img class="brand-logo brand-logo-dark" src="assets/logo-dark.png" alt="">
       </span>
       <span class="brand-name">LibraMail</span>
-      <span class="version-badge" id="app-version">v0.4.1</span>
+      <span class="version-badge" id="app-version">v0.4.2</span>
     </button>
     <button class="btn primary" id="btn-compose">
       <i class="fa-solid fa-pen"></i><span data-i18n="compose"></span>
     </button>
-    <button class="btn" id="btn-sync" data-i18n-title="sync">
-      <i class="fa-solid fa-rotate"></i><span data-i18n="sync"></span>
-    </button>
+    <div class="sync-split" id="sync-split">
+      <button class="btn" id="btn-sync" data-i18n-title="sync">
+        <i class="fa-solid fa-rotate"></i><span data-i18n="sync"></span>
+      </button>
+      <button class="btn" id="btn-sync-menu" type="button" aria-haspopup="menu" aria-expanded="false"
+              data-i18n-title="sync">
+        <i class="fa-solid fa-chevron-down"></i>
+      </button>
+      <div id="sync-account-menu" class="sync-account-menu hidden" role="menu"></div>
+    </div>
     <div id="searchbox">
       <i class="fa-solid fa-magnifying-glass"></i>
       <input id="search-input" data-i18n-ph="search.placeholder" autocomplete="off">
@@ -779,24 +840,45 @@
         <span data-i18n="backup.sectionTitle"></span>
       </div>
       <div class="backup-settings-card">
-        <div class="backup-settings-copy">
-          <strong data-i18n="backup.completeTitle"></strong>
-          <p data-i18n="backup.description"></p>
-          <p class="backup-security-warning"><i class="fa-solid fa-key"></i><span data-i18n="backup.credentialsWarning"></span></p>
-        </div>
-        <div class="backup-key-fields">
-          <label class="field"><span data-i18n="backup.recoveryPassword"></span><input id="backup-password" type="password" minlength="8" autocomplete="new-password" data-i18n-ph="backup.recoveryPasswordPlaceholder"></label>
-          <label class="field"><span data-i18n="backup.recoveryPasswordConfirm"></span><input id="backup-password-confirm" type="password" minlength="8" autocomplete="new-password" data-i18n-ph="backup.recoveryPasswordConfirmPlaceholder"></label>
-          <div class="field-hint" data-i18n="backup.recoveryPasswordHint"></div>
-        </div>
-        <div class="backup-settings-actions">
-          <button class="btn primary" id="btn-export-backup" type="button">
-            <i class="fa-solid fa-file-export"></i><span data-i18n="backup.export"></span>
-          </button>
-          <button class="btn" id="btn-import-backup" type="button">
-            <i class="fa-solid fa-file-import"></i><span data-i18n="backup.import"></span>
-          </button>
-        </div>
+        <section class="backup-operation-section backup-complete-section">
+          <div class="backup-settings-copy">
+            <strong class="backup-operation-heading"><i class="fa-solid fa-box-archive"></i><span data-i18n="backup.completeTitle"></span></strong>
+            <p data-i18n="backup.description"></p>
+            <p class="backup-security-warning"><i class="fa-solid fa-key"></i><span data-i18n="backup.credentialsWarning"></span></p>
+          </div>
+          <div class="backup-key-fields">
+            <label class="field"><span data-i18n="backup.recoveryPassword"></span><input id="backup-password" type="password" minlength="8" autocomplete="new-password" data-i18n-ph="backup.recoveryPasswordPlaceholder"></label>
+            <label class="field"><span data-i18n="backup.recoveryPasswordConfirm"></span><input id="backup-password-confirm" type="password" minlength="8" autocomplete="new-password" data-i18n-ph="backup.recoveryPasswordConfirmPlaceholder"></label>
+            <div class="field-hint" data-i18n="backup.recoveryPasswordHint"></div>
+          </div>
+          <div class="backup-settings-actions">
+            <button class="btn primary" id="btn-export-backup" type="button"><i class="fa-solid fa-file-export"></i><span data-i18n="backup.export"></span></button>
+            <button class="btn" id="btn-import-backup" type="button"><i class="fa-solid fa-file-import"></i><span data-i18n="backup.import"></span></button>
+          </div>
+        </section>
+
+        <section class="backup-operation-section eml-import-section">
+          <div class="backup-settings-copy">
+            <strong class="backup-operation-heading"><i class="fa-regular fa-envelope"></i><span data-i18n="emlImport.title"></span></strong>
+            <p data-i18n="emlImport.description"></p>
+          </div>
+          <div class="eml-import-controls">
+            <div class="field"><label for="eml-import-account" data-i18n="emlImport.account"></label><select id="eml-import-account"></select></div>
+            <div class="field">
+              <label for="eml-import-mode" data-i18n="emlImport.type"></label>
+              <select id="eml-import-mode">
+                <option value="auto" data-i18n="emlImport.typeAuto"></option>
+                <option value="inbox" data-i18n="emlImport.typeInbox"></option>
+                <option value="sent" data-i18n="emlImport.typeSent"></option>
+              </select>
+            </div>
+            <div class="eml-import-action">
+              <button class="btn" id="btn-import-eml" type="button"><i class="fa-solid fa-envelope-open-text"></i><span data-i18n="emlImport.button"></span></button>
+            </div>
+          </div>
+          <div class="field-hint" data-i18n="emlImport.localHint"></div>
+        </section>
+
         <div id="backup-progress" class="backup-progress hidden" role="progressbar"
              aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
           <div class="backup-progress-heading">
