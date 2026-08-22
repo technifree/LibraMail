@@ -587,6 +587,7 @@ function buildFilter({
   spam = 0,
   labelId = null,
   localFolderId = null,
+  excludeLocalFolders = false,
 } = {}) {
   const join = labelId
     ? 'JOIN message_labels mlf ON mlf.message_id = m.id AND mlf.label_id = @labelId'
@@ -626,6 +627,14 @@ function buildFilter({
        WHERE mlocal.message_id = m.id AND mlocal.folder_id = @localFolderId
     )`);
     params.localFolderId = normalizedLocalFolderId;
+  }
+
+  // LibraMail 0.4.4 — masquer des vues standard les messages classés localement.
+  if (excludeLocalFolders) {
+    where.push(`NOT EXISTS (
+      SELECT 1 FROM message_local_folder mhidden
+       WHERE mhidden.message_id = m.id
+    )`);
   }
 
   return { join, where: where.length ? where.join(' AND ') : '1=1', params };

@@ -117,6 +117,10 @@ class VirtualMailList {
     div.classList.toggle('active-message', String(row.id) === String(this.activeMessageId));
     div.dataset.messageId = row.id || '';
     div.dataset.threadKey = row.thread_key || row.parent_thread_key || '';
+    // Le drag de classement est géré par Pointer Events. Cela évite de
+    // dépendre du moteur HTML5 DnD de WebKitGTK, tout en restant indépendant
+    // du drag & drop natif Neutralino utilisé par les pièces jointes.
+    div.draggable = false;
 
     const sender = this.senderLabel(row);
     const subject = row.subject || window.t?.('mail.noSubject') || '(sans objet)';
@@ -141,6 +145,11 @@ class VirtualMailList {
         <button class="iconbtn" data-action="seen" type="button"><i class="${this.isUnread(row) ? 'fa-regular fa-envelope-open' : 'fa-solid fa-envelope'}"></i></button>
         <button class="iconbtn" data-action="flag" type="button"><i class="${row.flagged ? 'fa-solid' : 'fa-regular'} fa-star"></i></button>
         <button class="iconbtn" data-action="label" type="button"><i class="fa-solid fa-tag"></i></button>
+        <button class="iconbtn" data-action="local-folder" type="button"
+                title="${this.escapeAttr(window.t?.('localFolder.classify') || 'Classer dans un dossier local')}"
+                aria-label="${this.escapeAttr(window.t?.('localFolder.classify') || 'Classer dans un dossier local')}">
+          <i class="fa-solid fa-folder-open"></i>
+        </button>
         <button class="iconbtn" data-action="spam" type="button"><i class="fa-solid fa-ban"></i></button>
         <button class="iconbtn del" data-action="delete" type="button"><i class="fa-solid fa-trash"></i></button>
       </span>
@@ -174,7 +183,93 @@ class VirtualMailList {
         this.callbacks.onQuickAction?.(row, button.dataset.action, button);
       });
     });
-    div.addEventListener('click', () => this.callbacks.onOpen?.(row));
+    // LibraMail 0.4.4 — drag interne dossiers locaux compatible WebKit.
+    const localFolderDragPayload = () => {
+      const currentItem = this.selectionItem(row);
+      const currentKey = this.itemKey(currentItem);
+      const items = this.selectedKeys.has(currentKey)
+        ? this.visibleRows
+            .map(visibleRow => this.selectionItem(visibleRow))
+            .filter(item => this.selectedKeys.has(this.itemKey(item)))
+        : [currentItem];
+      return items.map(item => ({
+        type: item.type,
+        id: Number(item.id),
+        threadKey: item.threadKey || undefined,
+      })).filter(item => Number.isInteger(item.id) && item.id > 0);
+    };
+
+    let pointerDrag = null;
+    let suppressOpenAfterPointerDrag = false;
+
+    div.addEventListener('pointerdown', event => {
+      if (event.button !== 0) return;
+      if (event.target.closest?.('button, input, select, textarea, a')) return;
+      const items = localFolderDragPayload();
+      if (!items.length) return;
+      pointerDrag = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        started: false,
+        items,
+      };
+      try { div.setPointerCapture?.(event.pointerId); } catch {}
+    });
+
+    div.addEventListener('pointermove', event => {
+      if (!pointerDrag || event.pointerId !== pointerDrag.pointerId) return;
+      const distance = Math.hypot(
+        event.clientX - pointerDrag.startX,
+        event.clientY - pointerDrag.startY
+      );
+      if (!pointerDrag.started && distance < 7) return;
+
+      if (!pointerDrag.started) {
+        pointerDrag.started = true;
+        try { window.getSelection?.()?.removeAllRanges?.(); } catch {}
+        div.classList.add('local-folder-drag-source');
+        document.dispatchEvent(new CustomEvent('libramail:local-folder-drag-start', {
+          detail: { items: pointerDrag.items, x: event.clientX, y: event.clientY },
+        }));
+      }
+
+      event.preventDefault();
+      document.dispatchEvent(new CustomEvent('libramail:local-folder-drag-move', {
+        detail: { items: pointerDrag.items, x: event.clientX, y: event.clientY },
+      }));
+    });
+
+    const finishPointerDrag = (event, cancelled = false) => {
+      if (!pointerDrag || event.pointerId !== pointerDrag.pointerId) return;
+      const drag = pointerDrag;
+      pointerDrag = null;
+      try { div.releasePointerCapture?.(event.pointerId); } catch {}
+
+      if (!drag.started) return;
+
+      suppressOpenAfterPointerDrag = true;
+      div.classList.remove('local-folder-drag-source');
+      event.preventDefault();
+      event.stopPropagation();
+
+      document.dispatchEvent(new CustomEvent(
+        cancelled ? 'libramail:local-folder-drag-cancel' : 'libramail:local-folder-drop',
+        { detail: { items: drag.items, x: event.clientX, y: event.clientY } }
+      ));
+    };
+
+    div.addEventListener('pointerup', event => finishPointerDrag(event, false));
+    div.addEventListener('pointercancel', event => finishPointerDrag(event, true));
+    div.addEventListener('click', event => {
+      if (suppressOpenAfterPointerDrag) {
+        suppressOpenAfterPointerDrag = false;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      this.callbacks.onOpen?.(row);
+    });
     div.addEventListener('dblclick', event => {
       event.preventDefault();
       this.callbacks.onOpenTab?.(row);

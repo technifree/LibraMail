@@ -101,7 +101,7 @@ function safeDate(parsed, stats) {
   return mtime > 0 ? mtime : Date.now();
 }
 
-async function importOne(account, filePath, mode) {
+async function importOne(account, filePath, mode, localFolderId = null) {
   const resolved = path.resolve(String(filePath || ''));
   if (path.extname(resolved).toLowerCase() !== '.eml') {
     throw new Error('Extension de fichier invalide (attendu : .eml)');
@@ -175,7 +175,15 @@ async function importOne(account, filePath, mode) {
     db.indexBody(id, row, '', {
       secureTokens: mailStore.searchTokens(text),
     });
-    return { imported: true, id, role, folder };
+
+    // LibraMail 0.4.4 — import EML vers dossier local.
+    // L'association n'est faite que pour un message réellement importé.
+    // Un doublon existant n'est donc jamais reclassé silencieusement.
+    if (localFolderId != null) {
+      db.setMessageLocalFolder(id, localFolderId);
+    }
+
+    return { imported: true, id, role, folder, localFolderId };
   } catch (error) {
     if (id != null) {
       try {
@@ -194,7 +202,7 @@ async function importOne(account, filePath, mode) {
   }
 }
 
-async function importFiles({ account, paths = [], mode = 'auto', onProgress = null } = {}) {
+async function importFiles({ account, paths = [], mode = 'auto', localFolderId = null, onProgress = null } = {}) {
   if (!account?.id) throw new Error('Compte de destination introuvable');
   const selected = [...new Set(
     (Array.isArray(paths) ? paths : [])
@@ -207,6 +215,17 @@ async function importFiles({ account, paths = [], mode = 'auto', onProgress = nu
   }
 
   const normalizedMode = ['auto', 'inbox', 'sent'].includes(mode) ? mode : 'auto';
+
+  let normalizedLocalFolderId = null;
+  if (localFolderId !== null && localFolderId !== undefined && String(localFolderId) !== '') {
+    normalizedLocalFolderId = Number(localFolderId);
+    if (!Number.isInteger(normalizedLocalFolderId) || normalizedLocalFolderId <= 0) {
+      throw new Error('Dossier local de destination invalide');
+    }
+    const localFolderExists = db.listLocalFolders()
+      .some(item => Number(item.id) === normalizedLocalFolderId);
+    if (!localFolderExists) throw new Error('Dossier local de destination introuvable');
+  }
   let imported = 0;
   let duplicates = 0;
   let failed = 0;
@@ -215,7 +234,7 @@ async function importFiles({ account, paths = [], mode = 'auto', onProgress = nu
   for (let index = 0; index < selected.length; index++) {
     const file = selected[index];
     try {
-      const result = await importOne(account, file, normalizedMode);
+      const result = await importOne(account, file, normalizedMode, normalizedLocalFolderId);
       if (result.duplicate) duplicates++;
       else if (result.imported) imported++;
     } catch (error) {
@@ -248,6 +267,7 @@ async function importFiles({ account, paths = [], mode = 'auto', onProgress = nu
     failed,
     total: selected.length,
     errors,
+    localFolderId: normalizedLocalFolderId,
   };
 }
 

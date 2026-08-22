@@ -1921,18 +1921,25 @@ const methods = {
     }),
   }),
 
-  'eml.import': async ({ accountId, paths = [], mode = 'auto' } = {}) => {
+  'eml.import': async ({ accountId, paths = [], mode = 'auto', localFolderId = null } = {}) => {
     const account = getAccount(String(accountId || ''));
     if (!account) throw new Error('Compte de destination introuvable');
-    return withEmlImportMaintenance(() => emlImport.importFiles({
+
+    const result = await withEmlImportMaintenance(() => emlImport.importFiles({
       account,
       paths,
       mode,
+      localFolderId,
       onProgress: progress => broadcast('eml.import.progress', {
         accountId: account.id,
         ...progress,
       }),
     }));
+
+    return {
+      ...result,
+      folders: db.listLocalFolders(),
+    };
   },
 
   'accounts.add': async input => {
@@ -2595,6 +2602,11 @@ const methods = {
     db.setMessageLocalFolder(messageId, folderId),
   'localFolders.batchAssign': async ({ messageIds = [], folderId = null } = {}) =>
     db.setMessagesLocalFolder(messageIds, folderId),
+  'localFolders.assignSelection': async ({ items = [], folderId = null } = {}) => {
+    const messages = resolveSelection(items);
+    const result = db.setMessagesLocalFolder(messages.map(message => message.id), folderId);
+    return { ...result, folders: db.listLocalFolders() };
+  },
 
   // ---------- Étiquettes ----------
   'labels.list': async () => db.listLabels(),

@@ -1106,8 +1106,301 @@ const App = (() => {
   }
 
 
+  // LibraMail 0.4.4 — classement dans les dossiers locaux.
+  // Ces opérations modifient exclusivement message_local_folder. Aucun MOVE,
+  // COPY ou DELETE n'est envoyé aux serveurs IMAP/POP.
+  const LOCAL_FOLDER_DRAG_TYPE = 'application/x-libramail-selection';
+
+  function closeLocalFolderMenu() {
+    const menu = document.getElementById('local-folder-classify-menu');
+    if (!menu) return;
+    if (menu._outsideHandler) {
+      document.removeEventListener('pointerdown', menu._outsideHandler, true);
+    }
+    menu.remove();
+  }
+
+  function positionLocalFolderMenu(menu, anchor) {
+    if (!menu || !anchor?.isConnected) return;
+    const rect = anchor.getBoundingClientRect();
+    const margin = 8;
+    const width = Math.max(240, Math.min(menu.offsetWidth || 260, window.innerWidth - margin * 2));
+    const height = Math.min(menu.scrollHeight || 320, 360);
+    let left = rect.right - width;
+    left = Math.max(margin, Math.min(left, window.innerWidth - width - margin));
+    let top = rect.bottom + 5;
+    if (top + height > window.innerHeight - margin) {
+      top = Math.max(margin, rect.top - height - 5);
+    }
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+  }
+
+  function normalizeLocalFolderSelection(items) {
+    return (Array.isArray(items) ? items : [])
+      .filter(item => item && ['message', 'thread'].includes(item.type))
+      .map(item => ({
+        type: item.type,
+        id: Number(item.id),
+        threadKey: item.threadKey || undefined,
+      }))
+      .filter(item => Number.isInteger(item.id) && item.id > 0);
+  }
+
+  function parseLocalFolderDrop(dataTransfer) {
+    if (!dataTransfer) return [];
+    try {
+      return normalizeLocalFolderSelection(
+        JSON.parse(dataTransfer.getData(LOCAL_FOLDER_DRAG_TYPE) || '[]')
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  function localFolderDragAvailable(dataTransfer) {
+    return Array.from(dataTransfer?.types || []).includes(LOCAL_FOLDER_DRAG_TYPE);
+  }
+
+  // LibraMail 0.4.4 — classement local réactif.
+  // LibraMail 0.4.4 — retrait immédiat de la liste après classement local.
+  function removeLocalFolderItemsFromVisibleList(items) {
+    if (!list || !Array.isArray(list.rows)) return false;
+
+    const normalized = normalizeLocalFolderSelection(items);
+    if (!normalized.length) return false;
+
+    const messageIds = new Set(
+      normalized
+        .filter(item => item.type === 'message')
+        .map(item => Number(item.id))
+        .filter(id => Number.isInteger(id) && id > 0)
+    );
+    const threadKeys = new Set(
+      normalized
+        .filter(item => item.type === 'thread')
+        .map(item => String(item.threadKey || ''))
+        .filter(Boolean)
+    );
+
+    const matches = row => {
+      if (messageIds.has(Number(row?.id))) return true;
+      const rowThreadKey = String(row?.thread_key || row?.parent_thread_key || '');
+      return Boolean(rowThreadKey && threadKeys.has(rowThreadKey));
+    };
+
+    const nextRows = list.rows.filter(row => !matches(row));
+    if (nextRows.length === list.rows.length) return false;
+
+    list.setData(nextRows, mailListOptions(true));
+    updateCurrentListCacheRows(nextRows);
+    return true;
+  }
+
+  async function assignItemsToLocalFolder(items, folder = null) {
+    const payload = normalizeLocalFolderSelection(items);
+    if (!payload.length) return;
+
+    closeLocalFolderMenu();
+
+    const sourceLocalFolderId = view.type === 'localFolder'
+      ? String(view.localFolderId)
+      : null;
+    const targetLocalFolderId = folder ? String(folder.id) : null;
+    const currentLocalFolderContentChanges = sourceLocalFolderId !== null
+      && sourceLocalFolderId !== targetLocalFolderId;
+    const currentStandardViewHidesClassified = sourceLocalFolderId === null
+      && Boolean(folder)
+      && ['unified', 'account', 'sent'].includes(view.type);
+    const currentListContentChanges = currentLocalFolderContentChanges
+      || currentStandardViewHidesClassified;
+
+    status(folder
+      ? t('localFolder.classifying', { name: folder.name })
+      : t('localFolder.unclassifying'),
+    'busy');
+
+    try {
+      const result = await rpc('localFolders.assignSelection', {
+        items: payload,
+        folderId: folder?.id ?? null,
+      });
+
+      const count = Number(result?.processed) || 0;
+
+      if (Array.isArray(result?.folders)) {
+        renderLocalFolders(result.folders);
+      } else {
+        rpc('localFolders.list').then(renderLocalFolders).catch(() => {});
+      }
+
+      list?.clearSelection();
+
+      if (currentListContentChanges) {
+        closeReaderTabsForItems(payload);
+        clearReader();
+
+        // Mise à jour optimiste locale : la ligne disparaît dès que SQLite a
+        // confirmé le classement, sans attendre une seconde requête réseau.
+        removeLocalFolderItemsFromVisibleList(payload);
+
+        // Réconciliation asynchrone avec la source de vérité.
+        refreshVisibleList({ preserveListState: true }).catch(error => {
+          console.warn('[LibraMail] Réconciliation après classement local :', error);
+        });
+      }
+
+      status(folder
+        ? t('localFolder.classified', { count, name: folder.name })
+        : t('localFolder.unclassified', { count }),
+      'success');
+    } catch (error) {
+      status(`${t('error')} : ${error.message}`, 'error');
+    }
+  }
+
+  function openLocalFolderMenu(anchor, items) {
+    const normalizedItems = normalizeLocalFolderSelection(items);
+    if (!anchor || !normalizedItems.length) return;
+
+    closeQuickLabelMenu();
+    closeBulkLabelMenu();
+    closeLocalFolderMenu();
+
+    const menu = document.createElement('div');
+    menu.id = 'local-folder-classify-menu';
+    menu.className = 'popover local-folder-classify-menu';
+    menu.setAttribute('role', 'menu');
+
+    const title = document.createElement('div');
+    title.className = 'local-folder-classify-title';
+    title.innerHTML = `<i class="fa-solid fa-folder-tree"></i><span>${esc(t('localFolder.choose'))}</span>`;
+    menu.appendChild(title);
+
+    if (!currentLocalFolders.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty-hint local-folder-classify-empty';
+      empty.textContent = t('localFolder.noFolders');
+      menu.appendChild(empty);
+
+      const create = document.createElement('button');
+      create.type = 'button';
+      create.className = 'side-item local-folder-menu-create';
+      create.innerHTML = `<i class="fa-solid fa-folder-plus"></i><span>${esc(t('localFolder.createAction'))}</span>`;
+      create.onclick = async event => {
+        event.stopPropagation();
+        closeLocalFolderMenu();
+        await createLocalFolder();
+      };
+      menu.appendChild(create);
+    } else {
+      for (const folder of currentLocalFolders) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'side-item local-folder-menu-item';
+        button.setAttribute('role', 'menuitem');
+        button.innerHTML = `
+          <i class="fa-solid fa-folder" style="color:${safeColor(folder.color || '#4f8bd6')}"></i>
+          <span>${esc(folder.name)}</span>
+          <span class="count">${Number(folder.message_count || 0) || ''}</span>`;
+        button.onclick = event => {
+          event.stopPropagation();
+          assignItemsToLocalFolder(normalizedItems, folder);
+        };
+        menu.appendChild(button);
+      }
+
+      const separator = document.createElement('div');
+      separator.className = 'local-folder-menu-separator';
+      menu.appendChild(separator);
+
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'side-item local-folder-menu-remove';
+      remove.setAttribute('role', 'menuitem');
+      remove.innerHTML = `<i class="fa-solid fa-folder-minus"></i><span>${esc(t('localFolder.removeAssignment'))}</span>`;
+      remove.onclick = event => {
+        event.stopPropagation();
+        assignItemsToLocalFolder(normalizedItems, null);
+      };
+      menu.appendChild(remove);
+    }
+
+    document.body.appendChild(menu);
+    positionLocalFolderMenu(menu, anchor);
+
+    const outsideHandler = event => {
+      if (menu.contains(event.target) || anchor.contains?.(event.target)) return;
+      closeLocalFolderMenu();
+    };
+    menu._outsideHandler = outsideHandler;
+    setTimeout(() => document.addEventListener('pointerdown', outsideHandler, true), 0);
+  }
+
+  let localFolderPointerDropRow = null;
+
+  function clearLocalFolderPointerDragUi() {
+    document.querySelectorAll('.local-folder-drop-target')
+      .forEach(element => element.classList.remove('local-folder-drop-target'));
+    localFolderPointerDropRow = null;
+    document.getElementById('local-folder-drag-ghost')?.remove();
+    document.body.classList.remove('local-folder-pointer-dragging');
+  }
+
+  function localFolderFromPoint(x, y) {
+    const target = document.elementFromPoint(Number(x) || 0, Number(y) || 0);
+    const button = target?.closest?.('[data-local-folder-id]');
+    if (!button) return null;
+    return currentLocalFolders.find(folder =>
+      String(folder.id) === String(button.dataset.localFolderId)
+    ) || null;
+  }
+
+  function updateLocalFolderPointerDragUi(detail = {}) {
+    const items = normalizeLocalFolderSelection(detail.items);
+    if (!items.length) return;
+
+    document.body.classList.add('local-folder-pointer-dragging');
+
+    const folder = localFolderFromPoint(detail.x, detail.y);
+    const nextRow = folder
+      ? document.querySelector(`[data-local-folder-id="${CSS.escape(String(folder.id))}"]`)?.closest('.local-folder-sidebar-row')
+      : null;
+
+    if (localFolderPointerDropRow !== nextRow) {
+      localFolderPointerDropRow?.classList.remove('local-folder-drop-target');
+      localFolderPointerDropRow = nextRow || null;
+      localFolderPointerDropRow?.classList.add('local-folder-drop-target');
+    }
+
+    let ghost = document.getElementById('local-folder-drag-ghost');
+    if (!ghost) {
+      ghost = document.createElement('div');
+      ghost.id = 'local-folder-drag-ghost';
+      ghost.className = 'local-folder-drag-ghost';
+      document.body.appendChild(ghost);
+    }
+
+    ghost.innerHTML = folder
+      ? `<i class="fa-solid fa-folder-open"></i><span>${esc(folder.name)}</span>`
+      : `<i class="fa-solid fa-envelope"></i><span>${esc(t('localFolder.dragging', { count: items.length }))}</span>`;
+    ghost.classList.toggle('can-drop', Boolean(folder));
+    ghost.style.left = `${Math.round((Number(detail.x) || 0) + 14)}px`;
+    ghost.style.top = `${Math.round((Number(detail.y) || 0) + 14)}px`;
+  }
+
+  async function finishLocalFolderPointerDrop(detail = {}, cancelled = false) {
+    const items = normalizeLocalFolderSelection(detail.items);
+    const folder = cancelled ? null : localFolderFromPoint(detail.x, detail.y);
+    clearLocalFolderPointerDragUi();
+    if (!cancelled && folder && items.length) {
+      await assignItemsToLocalFolder(items, folder);
+    }
+  }
+
   function renderLocalFolders(folders) {
     currentLocalFolders = Array.isArray(folders) ? folders : [];
+    populateEmlImportLocalFolders();
     const element = document.getElementById('local-folder-list');
     if (!element) return;
     element.innerHTML = '';
@@ -1143,6 +1436,31 @@ const App = (() => {
         clearReader();
         refresh();
       };
+
+      button.addEventListener('dragenter', event => {
+        if (!localFolderDragAvailable(event.dataTransfer)) return;
+        event.preventDefault();
+        row.classList.add('local-folder-drop-target');
+      });
+      button.addEventListener('dragover', event => {
+        if (!localFolderDragAvailable(event.dataTransfer)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+        row.classList.add('local-folder-drop-target');
+      });
+      button.addEventListener('dragleave', event => {
+        if (row.contains(event.relatedTarget)) return;
+        row.classList.remove('local-folder-drop-target');
+      });
+      button.addEventListener('drop', event => {
+        if (!localFolderDragAvailable(event.dataTransfer)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        row.classList.remove('local-folder-drop-target');
+        const items = parseLocalFolderDrop(event.dataTransfer);
+        if (items.length) assignItemsToLocalFolder(items, folder);
+      });
 
       const editButton = document.createElement('button');
       editButton.className = 'iconbtn local-folder-action';
@@ -1390,7 +1708,10 @@ const App = (() => {
   // ---------- Liste ----------
   function listParams() {
     const params = {
-      folderRole: 'inbox', spam: 0, limit: 500,
+      folderRole: 'inbox', spam: 0,
+      // LibraMail 0.4.4 — déplacement virtuel vers les dossiers locaux.
+      excludeLocalFolders: true,
+      limit: 500,
       sortBy: config.sortBy || 'date',
       sortDirection: config.sortDirection || 'desc',
     };
@@ -1402,14 +1723,17 @@ const App = (() => {
       params.folderRole = 'sent';
       params.spam = null;
     } else if (view.type === 'trash') {
+      params.excludeLocalFolders = false;
       params.folderRole = 'trash';
       params.spam = null;
     } else if (view.type === 'localFolder') {
+      params.excludeLocalFolders = false;
       delete params.folderRole;
       params.folderRoles = ['inbox', 'sent', 'other'];
       params.spam = 0;
       params.localFolderId = view.localFolderId;
     } else if (view.type === 'label') {
+      params.excludeLocalFolders = false;
       // Une étiquette est transversale : elle peut être appliquée à un message
       // reçu, envoyé, indésirable ou placé dans la corbeille. Ne pas conserver
       // ici le filtre par défaut sur la seule boîte de réception.
@@ -1503,19 +1827,30 @@ const App = (() => {
     }, delay);
   }
 
-  async function refresh({ preserveListState = false } = {}) {
-    if (!preserveListState) closeQuickLabelMenu();
-    if (!list || !ws || ws.readyState !== WebSocket.OPEN) return;
-    const params = listParams();
-    const conversationMode = config.conversationView !== false;
-    const result = await rpc(conversationMode ? 'conversations.list' : 'messages.list', params);
-    result.rows = decorateRows(result.rows);
-    updateFolderActionButton();
-    list.setData(result.rows, mailListOptions(preserveListState));
-    hydrateSenderIcons(result.rows).catch(() => {});
+  // LibraMail 0.4.4 — navigation instantanée avec cache de vues.
+  //
+  // Une vue déjà visitée est réaffichée immédiatement depuis la mémoire puis
+  // réconciliée avec SQLite en arrière-plan. Un token empêche une réponse
+  // ancienne d'écraser la vue si l'utilisateur clique rapidement ailleurs.
+  const listViewCache = new Map();
+  let listRefreshToken = 0;
+  let sidebarCountsTimer = null;
+  let sidebarCountsBusy = false;
+  let sidebarCountsAgain = false;
 
-    const counts = result.counts || {};
-    document.getElementById('list-sub').textContent = conversationMode
+  function listViewCacheKey(params = null, conversationMode = null) {
+    const effectiveParams = params || listParams();
+    const effectiveConversationMode = conversationMode === null
+      ? config.conversationView !== false
+      : Boolean(conversationMode);
+    return JSON.stringify({
+      mode: effectiveConversationMode ? 'conversations' : 'messages',
+      params: effectiveParams,
+    });
+  }
+
+  function listSubtitle(counts = {}, conversationMode = config.conversationView !== false) {
+    return conversationMode
       ? (counts.messages
           ? t('list.conversationCount', {
               conversations: counts.n || 0,
@@ -1524,10 +1859,103 @@ const App = (() => {
             })
           : t('list.empty'))
       : (counts.n
-          ? t('list.messageCount', { messages: counts.n, unread: counts.unread || 0 })
+          ? t('list.messageCount', {
+              messages: counts.n,
+              unread: counts.unread || 0,
+            })
           : t('list.empty'));
+  }
 
-    await refreshSidebarCounts();
+  function renderListResult(result, {
+    preserveListState = false,
+    conversationMode = config.conversationView !== false,
+  } = {}) {
+    const rows = Array.isArray(result?.rows) ? result.rows : [];
+    const counts = result?.counts || {};
+    updateFolderActionButton();
+    list.setData(rows, mailListOptions(preserveListState));
+    document.getElementById('list-sub').textContent = listSubtitle(counts, conversationMode);
+    hydrateSenderIcons(rows).catch(() => {});
+  }
+
+  function updateCurrentListCacheRows(rows) {
+    if (!list) return;
+    const params = listParams();
+    const conversationMode = config.conversationView !== false;
+    const key = listViewCacheKey(params, conversationMode);
+    const cached = listViewCache.get(key);
+    if (!cached) return;
+    listViewCache.set(key, {
+      ...cached,
+      rows: Array.isArray(rows) ? [...rows] : [],
+      cachedAt: Date.now(),
+    });
+  }
+
+  function scheduleSidebarCountsRefresh(delay = 180) {
+    if (sidebarCountsTimer) clearTimeout(sidebarCountsTimer);
+    sidebarCountsTimer = setTimeout(async () => {
+      sidebarCountsTimer = null;
+      if (sidebarCountsBusy) {
+        sidebarCountsAgain = true;
+        return;
+      }
+      sidebarCountsBusy = true;
+      try {
+        await refreshSidebarCounts();
+      } catch (error) {
+        console.warn('[LibraMail] Actualisation des compteurs :', error);
+      } finally {
+        sidebarCountsBusy = false;
+        if (sidebarCountsAgain) {
+          sidebarCountsAgain = false;
+          scheduleSidebarCountsRefresh(120);
+        }
+      }
+    }, Math.max(0, Number(delay) || 0));
+  }
+
+  async function refresh({
+    preserveListState = false,
+    preferCache = true,
+  } = {}) {
+    if (!preserveListState) closeQuickLabelMenu();
+    if (!list || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+    const params = listParams();
+    const conversationMode = config.conversationView !== false;
+    const method = conversationMode ? 'conversations.list' : 'messages.list';
+    const cacheKey = listViewCacheKey(params, conversationMode);
+    const token = ++listRefreshToken;
+    const cached = preferCache ? listViewCache.get(cacheKey) : null;
+
+    if (cached) {
+      renderListResult(cached, { preserveListState, conversationMode });
+    } else {
+      list.setData([], mailListOptions(false));
+      document.getElementById('list-sub').textContent = t('list.loading');
+    }
+
+    try {
+      const result = await rpc(method, params);
+      result.rows = decorateRows(result.rows);
+      const snapshot = {
+        rows: result.rows,
+        counts: result.counts || {},
+        cachedAt: Date.now(),
+      };
+      listViewCache.set(cacheKey, snapshot);
+
+      if (token !== listRefreshToken) return;
+
+      renderListResult(snapshot, { preserveListState: true, conversationMode });
+      scheduleSidebarCountsRefresh();
+    } catch (error) {
+      if (token === listRefreshToken && !cached) {
+        document.getElementById('list-sub').textContent = `${t('error')} : ${error.message}`;
+      }
+      throw error;
+    }
   }
 
   function setCount(id, number) {
@@ -1538,9 +1966,9 @@ const App = (() => {
   async function refreshSidebarCounts() {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     const [unified, spamBox, sentBox, trashBox, localFolders, labels] = await Promise.all([
-      rpc('messages.list', { folderRole: 'inbox', spam: 0, limit: 1 }),
+      rpc('messages.list', { folderRole: 'inbox', spam: 0, excludeLocalFolders: true, limit: 1 }),
       rpc('messages.list', { folderRoles: ['inbox', 'junk'], spam: 1, limit: 1 }),
-      rpc('messages.list', { folderRole: 'sent', spam: null, limit: 1 }),
+      rpc('messages.list', { folderRole: 'sent', spam: null, excludeLocalFolders: true, limit: 1 }),
       rpc('messages.list', { folderRole: 'trash', spam: null, limit: 1 }),
       rpc('localFolders.list'),
       rpc('labels.list'),
@@ -1556,7 +1984,7 @@ const App = (() => {
     const accountCounts = await Promise.all(accounts.map(async account => {
       try {
         const result = await rpc('messages.list', {
-          folderRole: 'inbox', spam: 0, accountId: account.id, limit: 1,
+          folderRole: 'inbox', spam: 0, excludeLocalFolders: true, accountId: account.id, limit: 1,
         });
         return { account, counts: result.counts || {} };
       } catch (error) {
@@ -3007,6 +3435,7 @@ const App = (() => {
   // ---------- Actions ----------
   async function quickAction(row, action, sourceElement = null) {
     if (action !== 'label') closeQuickLabelMenu();
+    if (action !== 'local-folder') closeLocalFolderMenu();
     if (action === 'toggle-thread') {
       // LibraMail 0.2.24 UI v18 — action dédiée émise par la flèche.
       await toggleConversation(row);
@@ -3046,6 +3475,8 @@ const App = (() => {
       await refreshVisibleList({ preserveListState: true });
     } else if (action === 'label') {
       await toggleQuickLabelMenu(row, sourceElement);
+    } else if (action === 'local-folder') {
+      openLocalFolderMenu(sourceElement, [selectionItemFromRow(row)]);
     } else if (action === 'spam') {
       const result = await rpc('messages.batchMarkSpam', {
         items: [selectionItemFromRow(row)],
@@ -3246,6 +3677,7 @@ const App = (() => {
 
     if (!count) {
       closeBulkLabelMenu();
+      closeLocalFolderMenu();
       return;
     }
 
@@ -6246,11 +6678,32 @@ const App = (() => {
     card?.classList.toggle('is-busy', backupBusy);
     [
       'btn-export-backup', 'btn-import-backup', 'backup-password', 'backup-password-confirm',
-      'btn-import-eml', 'eml-import-account', 'eml-import-mode',
+      'btn-import-eml', 'eml-import-account', 'eml-import-mode', 'eml-import-local-folder',
     ].forEach(id => {
       const control = document.getElementById(id);
       if (control) control.disabled = backupBusy || (id === 'btn-import-eml' && !accounts.length);
     });
+  }
+
+  function populateEmlImportLocalFolders() {
+    const select = document.getElementById('eml-import-local-folder');
+    if (!select) return;
+
+    const previous = String(select.value || '');
+    const options = [
+      `<option value="">${esc(t('emlImport.localFolderNone'))}</option>`,
+      ...currentLocalFolders.map(folder =>
+        `<option value="${esc(folder.id)}">${esc(folder.name)}</option>`
+      ),
+    ];
+
+    select.innerHTML = options.join('');
+    if (previous && currentLocalFolders.some(folder => String(folder.id) === previous)) {
+      select.value = previous;
+    } else {
+      select.value = '';
+    }
+    select.disabled = backupBusy;
   }
 
   function populateEmlImportAccounts() {
@@ -6270,6 +6723,7 @@ const App = (() => {
     if (preferred) select.value = preferred;
     select.disabled = backupBusy || !accounts.length;
     if (button) button.disabled = backupBusy || !accounts.length;
+    populateEmlImportLocalFolders();
   }
 
   function backupRecoveryPassword({ confirm = false } = {}) {
@@ -6433,6 +6887,8 @@ const App = (() => {
     if (backupBusy || !accounts.length) return;
     const accountId = String(document.getElementById('eml-import-account')?.value || '');
     const mode = String(document.getElementById('eml-import-mode')?.value || 'auto');
+    const rawLocalFolderId = String(document.getElementById('eml-import-local-folder')?.value || '');
+    const localFolderId = rawLocalFolderId ? Number(rawLocalFolderId) : null;
     if (!accountId) {
       status(t('emlImport.noAccounts'), 'error');
       return;
@@ -6468,7 +6924,7 @@ const App = (() => {
         state: 'busy',
       });
 
-      const result = await rpc('eml.import', { accountId, paths, mode });
+      const result = await rpc('eml.import', { accountId, paths, mode, localFolderId });
       const message = t('emlImport.done', {
         imported: Number(result.imported) || 0,
         duplicates: Number(result.duplicates) || 0,
@@ -6483,8 +6939,14 @@ const App = (() => {
       });
       setBackupOperationStatus(message, state);
       status(message, state);
-      await refreshVisibleList({ preserveListState: true });
-      await refreshSidebarCounts();
+
+      if (Array.isArray(result?.folders)) {
+        renderLocalFolders(result.folders);
+      }
+
+      listViewCache.clear();
+      await refresh({ preserveListState: true, preferCache: false });
+      scheduleSidebarCountsRefresh(0);
     } catch (error) {
       console.error('[LibraMail] Import EML :', error);
       setBackupProgress({
@@ -7108,6 +7570,21 @@ const App = (() => {
       onSelectionChange: updateBulkSelection,
     });
 
+    document.addEventListener('libramail:local-folder-drag-start', event => {
+      updateLocalFolderPointerDragUi(event.detail || {});
+    });
+    document.addEventListener('libramail:local-folder-drag-move', event => {
+      updateLocalFolderPointerDragUi(event.detail || {});
+    });
+    document.addEventListener('libramail:local-folder-drop', event => {
+      finishLocalFolderPointerDrop(event.detail || {}, false).catch(error =>
+        status(`${t('error')} : ${error.message}`, 'error')
+      );
+    });
+    document.addEventListener('libramail:local-folder-drag-cancel', event => {
+      finishLocalFolderPointerDrop(event.detail || {}, true).catch(() => {});
+    });
+
     document.getElementById('sidebar').addEventListener('click', event => {
       const item = event.target.closest('[data-view]');
       if (!item) return;
@@ -7115,6 +7592,7 @@ const App = (() => {
       item.classList.add('active');
       const selected = item.dataset.view;
       closeQuickLabelMenu();
+      closeLocalFolderMenu();
       view = selected.startsWith('account:')
         ? { type: 'account', accountId: selected.slice(8) }
         : { type: selected };
@@ -7144,6 +7622,11 @@ const App = (() => {
     document.getElementById('btn-bulk-flag').onclick = event =>
       runBulkFlag('flagged', event.currentTarget.dataset.value !== '0');
     document.getElementById('btn-bulk-label').onclick = toggleBulkLabelMenu;
+    document.getElementById('btn-bulk-local-folder').onclick = event => {
+      event.stopPropagation();
+      if (!bulkSelection.length) return;
+      openLocalFolderMenu(event.currentTarget, bulkSelection);
+    };
     document.getElementById('btn-bulk-spam').onclick = runBulkSpam;
     document.getElementById('btn-bulk-restore').onclick = runBulkRestore;
     document.getElementById('btn-bulk-delete').onclick = runBulkDelete;

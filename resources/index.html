@@ -254,6 +254,10 @@
         </button>
         <div id="bulk-label-menu" class="popover bulk-label-menu hidden"></div>
       </div>
+      <button class="iconbtn" id="btn-bulk-local-folder" type="button"
+              data-i18n-title="localFolder.classifySelection">
+        <i class="fa-solid fa-folder-open"></i>
+      </button>
       <button class="iconbtn" id="btn-bulk-spam" type="button" data-i18n-title="action.spam">
         <i class="fa-solid fa-ban"></i>
       </button>
@@ -881,6 +885,10 @@
                 <option value="inbox" data-i18n="emlImport.typeInbox"></option>
                 <option value="sent" data-i18n="emlImport.typeSent"></option>
               </select>
+            </div>
+            <div class="field">
+              <label for="eml-import-local-folder" data-i18n="emlImport.localFolder"></label>
+              <select id="eml-import-local-folder"></select>
             </div>
             <div class="eml-import-action">
               <button class="btn" id="btn-import-eml" type="button"><i class="fa-solid fa-envelope-open-text"></i><span data-i18n="emlImport.button"></span></button>
