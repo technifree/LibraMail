@@ -115,6 +115,7 @@ const defaultConfig = {
   sidebarWidth: 240,
   listWidth: 380,
   listPaneHeight: 330,
+  sidebarLocalFoldersCollapsed: false,
   trustedSenders: [],
 };
 
@@ -2572,6 +2573,28 @@ const methods = {
     }
     return result;
   },
+
+
+  // ---------- Dossiers locaux ----------
+  'localFolders.list': async () => db.listLocalFolders(),
+  'localFolders.add': async ({ name, color } = {}) => {
+    db.addLocalFolder(name, color);
+    return db.listLocalFolders();
+  },
+  'localFolders.update': async ({ id, name, color } = {}) => {
+    db.updateLocalFolder(id, name, color);
+    return db.listLocalFolders();
+  },
+  'localFolders.remove': async ({ id } = {}) => {
+    const removed = db.removeLocalFolder(id);
+    return { removed, folders: db.listLocalFolders() };
+  },
+  'localFolders.ofMessage': async ({ messageId } = {}) =>
+    db.getMessageLocalFolder(messageId),
+  'localFolders.assign': async ({ messageId, folderId = null } = {}) =>
+    db.setMessageLocalFolder(messageId, folderId),
+  'localFolders.batchAssign': async ({ messageIds = [], folderId = null } = {}) =>
+    db.setMessagesLocalFolder(messageIds, folderId),
 
   // ---------- Étiquettes ----------
   'labels.list': async () => db.listLabels(),

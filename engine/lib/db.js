@@ -234,6 +234,22 @@ function init(dataDir) {
     PRIMARY KEY (message_id, label_id)
   );
 
+
+  CREATE TABLE IF NOT EXISTS local_folders (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    color TEXT NOT NULL DEFAULT '#4f8bd6',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS message_local_folder (
+    message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    folder_id INTEGER NOT NULL REFERENCES local_folders(id) ON DELETE CASCADE,
+    assigned_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_message_local_folder_folder
+    ON message_local_folder(folder_id, message_id);
+
   CREATE TABLE IF NOT EXISTS message_remote_permissions (
     message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
     url TEXT NOT NULL,
@@ -570,6 +586,7 @@ function buildFilter({
   folderRoles = null,
   spam = 0,
   labelId = null,
+  localFolderId = null,
 } = {}) {
   const join = labelId
     ? 'JOIN message_labels mlf ON mlf.message_id = m.id AND mlf.label_id = @labelId'
@@ -599,6 +616,17 @@ function buildFilter({
     params.accountId = accountId;
   }
   if (labelId) params.labelId = labelId;
+  if (localFolderId !== null && localFolderId !== undefined && localFolderId !== '') {
+    const normalizedLocalFolderId = Number(localFolderId);
+    if (!Number.isInteger(normalizedLocalFolderId) || normalizedLocalFolderId <= 0) {
+      throw new Error('Dossier local invalide');
+    }
+    where.push(`EXISTS(
+      SELECT 1 FROM message_local_folder mlocal
+       WHERE mlocal.message_id = m.id AND mlocal.folder_id = @localFolderId
+    )`);
+    params.localFolderId = normalizedLocalFolderId;
+  }
 
   return { join, where: where.length ? where.join(' AND ') : '1=1', params };
 }
@@ -1198,6 +1226,128 @@ function getStatistics(options = {}) {
     unreadAge,
     largestMessages,
   };
+}
+
+
+// LibraMail 0.4.4 — dossiers locaux multi-comptes.
+// Cette couche est purement locale : elle ne modifie jamais messages.folder,
+// messages.folder_role ni les dossiers IMAP/POP.
+function normalizeLocalFolderInput(name, color) {
+  const cleanName = String(name || '').trim().replace(/\s+/g, ' ');
+  if (!cleanName) throw new Error('Le nom du dossier local est obligatoire');
+  if (cleanName.length > 100) throw new Error('Le nom du dossier local est trop long');
+  const cleanColor = /^#[0-9a-f]{6}$/i.test(String(color || '').trim())
+    ? String(color).trim().toLowerCase()
+    : '#4f8bd6';
+  return { name: cleanName, color: cleanColor };
+}
+
+function listLocalFolders() {
+  return db.prepare(`
+    SELECT lf.id, lf.name, lf.color, lf.created_at, lf.updated_at,
+           COALESCE(SUM(CASE
+             WHEN m.id IS NOT NULL
+              AND m.folder_role IN ('inbox','sent','other')
+              AND m.is_spam=0 THEN 1 ELSE 0 END), 0) AS message_count,
+           COALESCE(SUM(CASE
+             WHEN m.id IS NOT NULL
+              AND m.folder_role IN ('inbox','sent','other')
+              AND m.is_spam=0
+              AND m.seen=0 THEN 1 ELSE 0 END), 0) AS unread_count
+      FROM local_folders lf
+      LEFT JOIN message_local_folder mlf ON mlf.folder_id=lf.id
+      LEFT JOIN messages m ON m.id=mlf.message_id
+     GROUP BY lf.id, lf.name, lf.color, lf.created_at, lf.updated_at
+     ORDER BY lf.name COLLATE NOCASE, lf.id
+  `).all();
+}
+
+function addLocalFolder(name, color = '') {
+  const clean = normalizeLocalFolderInput(name, color);
+  const now = Date.now();
+  return db.prepare(`
+    INSERT INTO local_folders(name,color,created_at,updated_at)
+    VALUES(?,?,?,?)
+  `).run(clean.name, clean.color, now, now);
+}
+
+function updateLocalFolder(id, name, color = '') {
+  const folderId = Number(id);
+  if (!Number.isInteger(folderId) || folderId <= 0) throw new Error('Dossier local invalide');
+  const existing = db.prepare('SELECT * FROM local_folders WHERE id=?').get(folderId);
+  if (!existing) throw new Error('Dossier local introuvable');
+  const clean = normalizeLocalFolderInput(name, color || existing.color);
+  db.prepare(`
+    UPDATE local_folders SET name=?, color=?, updated_at=? WHERE id=?
+  `).run(clean.name, clean.color, Date.now(), folderId);
+  return db.prepare('SELECT * FROM local_folders WHERE id=?').get(folderId);
+}
+
+function removeLocalFolder(id) {
+  const folderId = Number(id);
+  if (!Number.isInteger(folderId) || folderId <= 0) throw new Error('Dossier local invalide');
+  return db.prepare('DELETE FROM local_folders WHERE id=?').run(folderId).changes > 0;
+}
+
+function getMessageLocalFolder(messageId) {
+  const id = Number(messageId);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  return db.prepare(`
+    SELECT lf.id, lf.name, lf.color, mlf.assigned_at
+      FROM message_local_folder mlf
+      JOIN local_folders lf ON lf.id=mlf.folder_id
+     WHERE mlf.message_id=?
+  `).get(id) || null;
+}
+
+function setMessagesLocalFolder(messageIds, folderId = null) {
+  const ids = [...new Set(
+    (Array.isArray(messageIds) ? messageIds : [messageIds])
+      .map(Number)
+      .filter(id => Number.isInteger(id) && id > 0)
+  )];
+  if (!ids.length) return { processed: 0, changed: 0, folderId: null };
+
+  const normalizedFolderId = folderId === null || folderId === undefined || folderId === ''
+    ? null
+    : Number(folderId);
+
+  if (normalizedFolderId !== null) {
+    if (!Number.isInteger(normalizedFolderId) || normalizedFolderId <= 0) {
+      throw new Error('Dossier local invalide');
+    }
+    if (!db.prepare('SELECT id FROM local_folders WHERE id=?').get(normalizedFolderId)) {
+      throw new Error('Dossier local introuvable');
+    }
+  }
+
+  const existingMessage = db.prepare('SELECT id FROM messages WHERE id=?');
+  const remove = db.prepare('DELETE FROM message_local_folder WHERE message_id=?');
+  const assign = db.prepare(`
+    INSERT INTO message_local_folder(message_id,folder_id,assigned_at)
+    VALUES(?,?,?)
+    ON CONFLICT(message_id) DO UPDATE SET
+      folder_id=excluded.folder_id,
+      assigned_at=excluded.assigned_at
+  `);
+
+  return db.transaction(items => {
+    let changed = 0;
+    let processed = 0;
+    const now = Date.now();
+    for (const messageId of items) {
+      if (!existingMessage.get(messageId)) continue;
+      processed++;
+      changed += normalizedFolderId === null
+        ? remove.run(messageId).changes
+        : assign.run(messageId, normalizedFolderId, now).changes;
+    }
+    return { processed, changed, folderId: normalizedFolderId };
+  })(ids);
+}
+
+function setMessageLocalFolder(messageId, folderId = null) {
+  return setMessagesLocalFolder([messageId], folderId);
 }
 
 // ---------- Étiquettes ----------
@@ -2177,6 +2327,13 @@ module.exports = {
   listSpamMessages,
   listMessagesByRole,
   getStatistics,
+  listLocalFolders,
+  addLocalFolder,
+  updateLocalFolder,
+  removeLocalFolder,
+  getMessageLocalFolder,
+  setMessageLocalFolder,
+  setMessagesLocalFolder,
   listLabels,
   addLabel,
   updateLabel,

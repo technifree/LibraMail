@@ -22,6 +22,7 @@ const App = (() => {
   let currentReadTimer = null;
   let currentMessageToken = 0;
   let currentLabels = [];
+  let currentLocalFolders = [];
   let editingAccountId = null;
   let editingLabelId = null;
   let pendingLabelDeleteId = null;
@@ -982,6 +983,13 @@ const App = (() => {
       contentId: 'account-list',
       labelKey: 'accounts',
     },
+    localFolders: {
+      configKey: 'sidebarLocalFoldersCollapsed',
+      headerId: 'local-folders-section-header',
+      buttonId: 'btn-toggle-local-folders',
+      contentId: 'local-folder-list',
+      labelKey: 'localFolder.section',
+    },
     labels: {
       configKey: 'sidebarLabelsCollapsed',
       headerId: 'labels-section-header',
@@ -1019,6 +1027,7 @@ const App = (() => {
 
   function applySidebarSectionStates() {
     applySidebarSectionState('accounts');
+    applySidebarSectionState('localFolders');
     applySidebarSectionState('labels');
   }
 
@@ -1092,7 +1101,262 @@ const App = (() => {
       row.append(button, editButton);
       element.appendChild(row);
     }
+    rpc('localFolders.list').then(renderLocalFolders).catch(() => {});
     rpc('labels.list').then(renderLabels).catch(() => {});
+  }
+
+
+  function renderLocalFolders(folders) {
+    currentLocalFolders = Array.isArray(folders) ? folders : [];
+    const element = document.getElementById('local-folder-list');
+    if (!element) return;
+    element.innerHTML = '';
+
+    for (const folder of currentLocalFolders) {
+      const row = document.createElement('div');
+      row.className = 'local-folder-sidebar-row';
+      if (view.type === 'localFolder' && String(view.localFolderId) === String(folder.id)) {
+        row.classList.add('active');
+      }
+
+      const button = document.createElement('button');
+      button.className = 'side-item';
+      button.dataset.localFolderId = String(folder.id);
+      if (view.type === 'localFolder' && String(view.localFolderId) === String(folder.id)) {
+        button.classList.add('active');
+      }
+
+      const messageCount = Number(folder.message_count || 0);
+      const unreadCount = Number(folder.unread_count || 0);
+      button.innerHTML = `
+        <i class="fa-solid fa-folder local-folder-icon" style="color:${safeColor(folder.color || '#4f8bd6')}"></i>
+        <span class="local-folder-sidebar-name">${esc(folder.name)}</span>
+        ${messageCount ? `<span class="count${unreadCount ? ' has-unread' : ''}"
+          title="${esc(t('localFolder.messageCount', { count: messageCount, unread: unreadCount }))}">${messageCount}</span>` : ''}`;
+
+      button.onclick = () => {
+        closeQuickLabelMenu();
+        document.querySelectorAll('.side-item').forEach(item => item.classList.remove('active'));
+        button.classList.add('active');
+        view = { type: 'localFolder', localFolderId: folder.id };
+        document.getElementById('list-title').textContent = folder.name;
+        clearReader();
+        refresh();
+      };
+
+      const editButton = document.createElement('button');
+      editButton.className = 'iconbtn local-folder-action';
+      editButton.type = 'button';
+      editButton.title = t('localFolder.rename');
+      editButton.setAttribute('aria-label', t('localFolder.rename'));
+      editButton.innerHTML = '<i class="fa-solid fa-pen"></i>';
+      editButton.onclick = event => {
+        event.stopPropagation();
+        renameLocalFolder(folder);
+      };
+
+      const deleteButton = document.createElement('button');
+      deleteButton.className = 'iconbtn local-folder-action danger';
+      deleteButton.type = 'button';
+      deleteButton.title = t('localFolder.delete');
+      deleteButton.setAttribute('aria-label', t('localFolder.delete'));
+      deleteButton.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
+      deleteButton.onclick = event => {
+        event.stopPropagation();
+        deleteLocalFolder(folder);
+      };
+
+      row.append(button, editButton, deleteButton);
+      element.appendChild(row);
+    }
+  }
+
+  // LibraMail 0.4.4 — modale de nom des dossiers locaux.
+  // On évite prompt(), dont le rendu dépend du WebView et tranche fortement
+  // avec le reste de l'interface. La même boîte sert à la création et au renommage.
+  function normalizeLocalFolderName(value) {
+    return String(value || '').trim().replace(/\s+/g, ' ');
+  }
+
+  function localFolderNameExists(name, excludedId = null) {
+    const wanted = normalizeLocalFolderName(name).toLocaleLowerCase(I18N.locale || 'fr');
+    return currentLocalFolders.some(folder =>
+      Number(folder.id) !== Number(excludedId)
+      && normalizeLocalFolderName(folder.name).toLocaleLowerCase(I18N.locale || 'fr') === wanted
+    );
+  }
+
+  function localFolderNameDialog({ folder = null } = {}) {
+    return new Promise(resolve => {
+      document.getElementById('local-folder-name-modal')?.remove();
+
+      const editing = Boolean(folder);
+      const veil = document.createElement('div');
+      veil.id = 'local-folder-name-modal';
+      veil.className = 'modal-veil open local-folder-name-veil';
+      veil.innerHTML = `
+        <div class="modal local-folder-name-modal-box"
+             role="dialog" aria-modal="true"
+             aria-labelledby="local-folder-name-title">
+          <header>
+            <span class="local-folder-name-title-row">
+              <span class="local-folder-name-icon">
+                <i class="fa-solid ${editing ? 'fa-folder-tree' : 'fa-folder-plus'}"></i>
+              </span>
+              <span id="local-folder-name-title">${esc(t(editing ? 'localFolder.renameTitle' : 'localFolder.createTitle'))}</span>
+            </span>
+            <button class="iconbtn" id="btn-local-folder-name-close" type="button"
+                    title="${esc(t('close'))}" aria-label="${esc(t('close'))}">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </header>
+          <div class="body local-folder-name-body">
+            <div class="local-folder-name-intro">
+              <i class="fa-solid fa-box-archive"></i>
+              <span>${esc(t('localFolder.localHint'))}</span>
+            </div>
+            <div class="field">
+              <label for="local-folder-name-input">${esc(t('localFolder.name'))}</label>
+              <input id="local-folder-name-input" type="text" maxlength="100"
+                     autocomplete="off" spellcheck="false"
+                     placeholder="${esc(t('localFolder.namePlaceholder'))}">
+              <div id="local-folder-name-error" class="local-folder-name-error"
+                   role="alert" aria-live="polite"></div>
+            </div>
+          </div>
+          <footer class="local-folder-name-footer">
+            <button class="btn" id="btn-local-folder-name-cancel" type="button">${esc(t('cancel'))}</button>
+            <button class="btn primary" id="btn-local-folder-name-submit" type="button">
+              <i class="fa-solid ${editing ? 'fa-pen' : 'fa-folder-plus'}"></i>
+              <span>${esc(t(editing ? 'localFolder.renameAction' : 'localFolder.createAction'))}</span>
+            </button>
+          </footer>
+        </div>`;
+
+      document.body.appendChild(veil);
+
+      const input = veil.querySelector('#local-folder-name-input');
+      const errorBox = veil.querySelector('#local-folder-name-error');
+      const submit = veil.querySelector('#btn-local-folder-name-submit');
+      let settled = false;
+
+      input.value = folder?.name || '';
+
+      const close = value => {
+        if (settled) return;
+        settled = true;
+        veil.remove();
+        resolve(value);
+      };
+
+      const validate = () => {
+        const name = normalizeLocalFolderName(input.value);
+        let error = '';
+        if (!name) error = t('localFolder.errorName');
+        else if (name.length > 100) error = t('localFolder.errorLength');
+        else if (localFolderNameExists(name, folder?.id)) error = t('localFolder.errorDuplicate');
+        errorBox.textContent = error;
+        errorBox.classList.toggle('visible', Boolean(error));
+        input.classList.toggle('invalid', Boolean(error));
+        submit.disabled = Boolean(error);
+        return error ? '' : name;
+      };
+
+      const accept = () => {
+        const name = validate();
+        if (!name) {
+          input.focus();
+          return;
+        }
+        close(name);
+      };
+
+      input.addEventListener('input', validate);
+      input.addEventListener('keydown', event => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          event.stopPropagation();
+          accept();
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          close(null);
+        }
+      });
+
+      veil.querySelector('#btn-local-folder-name-submit').addEventListener('click', accept);
+      veil.querySelector('#btn-local-folder-name-cancel').addEventListener('click', () => close(null));
+      veil.querySelector('#btn-local-folder-name-close').addEventListener('click', () => close(null));
+      veil.addEventListener('mousedown', event => {
+        if (event.target === veil) close(null);
+      });
+
+      validate();
+      requestAnimationFrame(() => {
+        input.focus();
+        if (editing) input.select();
+      });
+    });
+  }
+
+  async function createLocalFolder() {
+    const name = await localFolderNameDialog();
+    if (!name) return;
+    try {
+      renderLocalFolders(await rpc('localFolders.add', { name }));
+      status(t('localFolder.created', { name }), 'success');
+    } catch (error) {
+      status(`${t('error')} : ${error.message}`, 'error');
+    }
+  }
+
+  async function renameLocalFolder(folder) {
+    const name = await localFolderNameDialog({ folder });
+    if (!name || name === normalizeLocalFolderName(folder?.name)) return;
+    try {
+      const folders = await rpc('localFolders.update', {
+        id: folder.id,
+        name,
+        color: folder.color,
+      });
+      renderLocalFolders(folders);
+      if (view.type === 'localFolder' && String(view.localFolderId) === String(folder.id)) {
+        document.getElementById('list-title').textContent = name;
+      }
+      status(t('localFolder.renamed', { name }), 'success');
+    } catch (error) {
+      status(`${t('error')} : ${error.message}`, 'error');
+    }
+  }
+
+  async function deleteLocalFolder(folder) {
+    const accepted = await confirmAction({
+      title: t('localFolder.deleteTitle'),
+      message: t('localFolder.deleteConfirm', { name: folder.name }),
+      confirmLabel: t('localFolder.delete'),
+      icon: 'fa-folder-minus',
+      danger: true,
+      note: t('localFolder.deleteNote'),
+    });
+    if (!accepted) return;
+
+    try {
+      const result = await rpc('localFolders.remove', { id: folder.id });
+      const deletedSelected = view.type === 'localFolder'
+        && String(view.localFolderId) === String(folder.id);
+      if (deletedSelected) {
+        view = { type: 'unified' };
+        document.getElementById('list-title').textContent = t('unified.inbox');
+        document.querySelectorAll('.side-item').forEach(item => item.classList.remove('active'));
+        document.querySelector('[data-view="unified"]')?.classList.add('active');
+        clearReader();
+      }
+      renderLocalFolders(result.folders || []);
+      status(t('localFolder.deleted', { name: folder.name }), 'success');
+      await refresh();
+    } catch (error) {
+      status(`${t('error')} : ${error.message}`, 'error');
+    }
   }
 
   function renderLabels(labels) {
@@ -1140,6 +1404,11 @@ const App = (() => {
     } else if (view.type === 'trash') {
       params.folderRole = 'trash';
       params.spam = null;
+    } else if (view.type === 'localFolder') {
+      delete params.folderRole;
+      params.folderRoles = ['inbox', 'sent', 'other'];
+      params.spam = 0;
+      params.localFolderId = view.localFolderId;
     } else if (view.type === 'label') {
       // Une étiquette est transversale : elle peut être appliquée à un message
       // reçu, envoyé, indésirable ou placé dans la corbeille. Ne pas conserver
@@ -1268,16 +1537,17 @@ const App = (() => {
 
   async function refreshSidebarCounts() {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    const [unified, spamBox, sentBox, trashBox, labels] = await Promise.all([
+    const [unified, spamBox, sentBox, trashBox, localFolders, labels] = await Promise.all([
       rpc('messages.list', { folderRole: 'inbox', spam: 0, limit: 1 }),
       rpc('messages.list', { folderRoles: ['inbox', 'junk'], spam: 1, limit: 1 }),
       rpc('messages.list', { folderRole: 'sent', spam: null, limit: 1 }),
       rpc('messages.list', { folderRole: 'trash', spam: null, limit: 1 }),
+      rpc('localFolders.list'),
       rpc('labels.list'),
     ]);
-    // Les compteurs d'étiquettes font partie de l'état courant de la barre
-    // latérale. Les laisser figés jusqu'au redémarrage était assez créatif,
-    // mais peu pratique.
+    // Les dossiers locaux et les étiquettes font partie de l'état courant
+    // de la barre latérale ; leurs compteurs sont rafraîchis ensemble.
+    renderLocalFolders(localFolders);
     renderLabels(labels);
     setCount('count-unified', unified.counts.unread);
     setCount('count-spam', spamBox.counts.n);
@@ -6962,8 +7232,10 @@ const App = (() => {
     document.getElementById('compose-from').onchange = () => updateComposeSignature({ resetChoice: true });
     document.getElementById('compose-use-signature').onchange = () => updateComposeSignature();
     document.getElementById('btn-toggle-accounts').onclick = () => toggleSidebarSection('accounts');
+    document.getElementById('btn-toggle-local-folders').onclick = () => toggleSidebarSection('localFolders');
     document.getElementById('btn-toggle-labels').onclick = () => toggleSidebarSection('labels');
     document.getElementById('btn-add-account').onclick = openNewAccount;
+    document.getElementById('btn-add-local-folder').onclick = createLocalFolder;
     document.getElementById('btn-add-label').onclick = openLabelManager;
     document.getElementById('btn-save-label').onclick = saveLabel;
     document.getElementById('btn-cancel-label-edit').onclick = () => resetLabelEditor({ focus: true });

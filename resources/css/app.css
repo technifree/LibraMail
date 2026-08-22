@@ -4155,3 +4155,119 @@ html[data-theme="light"] #reader-empty.reader-empty-brand .reader-empty-logo-lig
 .planner-editor-heading {
   padding-bottom: 6px;
 }
+
+/* Dossiers locaux — LibraMail 0.4.4 */
+.local-folder-sidebar-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 26px 26px;
+  align-items: center;
+  gap: 2px;
+  border-radius: var(--radius);
+}
+.local-folder-sidebar-row .side-item { min-width: 0; }
+.local-folder-sidebar-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.local-folder-icon { width: 14px; flex: none; text-align: center; }
+.local-folder-sidebar-row .local-folder-action {
+  width: 25px;
+  height: 25px;
+  opacity: 0;
+  color: var(--fg-faint);
+}
+.local-folder-sidebar-row:hover .local-folder-action,
+.local-folder-sidebar-row .local-folder-action:focus-visible,
+.local-folder-sidebar-row.active .local-folder-action {
+  opacity: .78;
+}
+.local-folder-sidebar-row .local-folder-action:hover {
+  opacity: 1;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.local-folder-sidebar-row .local-folder-action.danger:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.local-folder-sidebar-row .count.has-unread {
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 700;
+}
+
+/* Dossiers locaux — modale de création / renommage — LibraMail 0.4.4 */
+#local-folder-name-modal { z-index: 90; }
+.local-folder-name-modal-box {
+  width: min(500px, 92vw);
+  overflow: hidden;
+}
+.local-folder-name-modal-box > header {
+  align-items: center;
+}
+.local-folder-name-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.local-folder-name-icon {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+.local-folder-name-body {
+  display: grid;
+  gap: 16px;
+  padding-top: 16px !important;
+  padding-bottom: 18px !important;
+}
+.local-folder-name-intro {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel-2);
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.local-folder-name-intro > i {
+  flex: none;
+  margin-top: 2px;
+  color: var(--accent);
+}
+#local-folder-name-input {
+  width: 100%;
+  min-height: 38px;
+  font-size: 13px;
+}
+#local-folder-name-input.invalid {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 18%, transparent);
+}
+.local-folder-name-error {
+  min-height: 16px;
+  margin-top: 5px;
+  color: var(--danger);
+  font-size: 10.5px;
+  opacity: 0;
+}
+.local-folder-name-error.visible { opacity: 1; }
+.local-folder-name-footer {
+  justify-content: flex-end;
+  gap: 7px;
+}
+.local-folder-name-footer .btn {
+  min-width: 92px;
+}
