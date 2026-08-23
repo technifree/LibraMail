@@ -12,6 +12,11 @@ const mailStore = require('./mail_store');
 
 const clients = new Map();
 const syncClients = new Map();
+
+// LibraMail 0.4.4 — garde-fou des connexions IDLE persistantes
+const watchRetryTimers = new Map();
+const watchStoppingClients = new WeakSet();
+const WATCH_RETRY_MS = 5000;
 const closingClients = new WeakSet();
 const interruptedConnections = new Map();
 
@@ -34,6 +39,71 @@ async function yieldToEventLoop(signal) {
 
 function isSyncCancelled(error) {
   return error?.code === 'SYNC_CANCELLED' || error?.name === 'SyncCancelledError';
+}
+
+// LibraMail 0.4.4 — garde-fous contre les relèves IMAP bloquées.
+//
+// Les relèves automatiques doivent rester courtes et prévisibles. Une relève
+// manuelle conserve des limites plus larges pour laisser le temps aux grosses
+// boîtes ou aux connexions lentes de terminer normalement.
+class SyncTimeoutError extends Error {
+  constructor(message, { phase = 'operation', role = null, timeoutMs = 0 } = {}) {
+    super(message);
+    this.name = 'SyncTimeoutError';
+    this.code = 'SYNC_TIMEOUT';
+    this.phase = phase;
+    this.role = role;
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+function syncTimeoutPolicy(source = 'other') {
+  switch (String(source || 'other')) {
+    case 'idle':
+      return { connectMs: 10000, folderMs: 15000, totalMs: 30000 };
+    case 'timer':
+    case 'startup':
+      return { connectMs: 12000, folderMs: 18000, totalMs: 45000 };
+    case 'manual':
+      return { connectMs: 20000, folderMs: 45000, totalMs: 180000 };
+    default:
+      return { connectMs: 15000, folderMs: 30000, totalMs: 90000 };
+  }
+}
+
+function runWithSyncTimeout(action, timeoutMs, makeTimeoutError, onTimeout = null) {
+  const limit = Math.max(1, Number(timeoutMs) || 1);
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { onTimeout?.(); } catch {}
+      reject(makeTimeoutError());
+    }, limit);
+    timer.unref?.();
+
+    Promise.resolve()
+      .then(action)
+      .then(
+        value => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(value);
+        },
+        error => {
+          // Une opération IMAP interrompue peut rejeter après que le timeout a
+          // déjà rendu la main. Cette rejection reste consommée ici et ne
+          // devient donc pas une unhandledRejection.
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          reject(error);
+        }
+      );
+  });
 }
 
 function isExpectedCancellationError(error) {
@@ -449,52 +519,239 @@ async function syncFolders(account, jobs, dataDir, onProgress,
                            { signal = null, continueOnError = false, source = 'other' } = {}) {
   if (!account) throw new Error('Compte introuvable');
   throwIfAborted(signal);
-  const client = makeClient(account);
-  syncClients.set(account.id, client);
-  const abort = () => { interruptClient(client); };
+
+  const policy = syncTimeoutPolicy(source);
+  const syncStartedAt = Date.now();
+  const deadline = syncStartedAt + policy.totalMs;
+  const folderTimings = [];
+  const connectTimings = [];
+  const results = [];
+
+  let client = null;
+
+  const label = account.displayName || account.email || account.id || 'compte';
+  const seconds = value => `${(Math.max(0, Number(value) || 0) / 1000).toFixed(2)}s`;
+  const remainingMs = () => Math.max(0, deadline - Date.now());
+  const automaticSource = ['timer', 'startup', 'idle'].includes(String(source || ''));
+
+  const abort = () => {
+    if (client) interruptClient(client);
+  };
   signal?.addEventListener('abort', abort, { once: true });
 
-  const syncStartedAt = Date.now();
-  let connectMs = 0;
-  const folderTimings = [];
-
-  try {
-    const connectStartedAt = Date.now();
-    await client.connect();
-    connectMs = Date.now() - connectStartedAt;
+  const connectClient = async () => {
     throwIfAborted(signal);
 
-    const results = [];
-    for (const job of jobs || []) {
+    const remaining = remainingMs();
+    if (remaining <= 0) {
+      throw new SyncTimeoutError(
+        `Délai global de relève atteint (${seconds(policy.totalMs)})`,
+        { phase: 'total', timeoutMs: policy.totalMs }
+      );
+    }
+
+    const nextClient = makeClient(account);
+    client = nextClient;
+    syncClients.set(account.id, nextClient);
+
+    const startedAt = Date.now();
+    const budget = Math.max(1, Math.min(policy.connectMs, remaining));
+
+    try {
+      await runWithSyncTimeout(
+        () => nextClient.connect(),
+        budget,
+        () => new SyncTimeoutError(
+          `Connexion IMAP trop lente (${seconds(budget)})`,
+          { phase: 'connect', timeoutMs: budget }
+        ),
+        () => interruptClient(nextClient)
+      );
+
+      connectTimings.push(Date.now() - startedAt);
       throwIfAborted(signal);
+      return nextClient;
+    } catch (error) {
+      connectTimings.push(Date.now() - startedAt);
+
+      if (syncClients.get(account.id) === nextClient) {
+        syncClients.delete(account.id);
+      }
+      interruptClient(nextClient);
+      if (client === nextClient) client = null;
+
+      if (error?.code === 'SYNC_TIMEOUT') {
+        console.warn(
+          `[LibraMail][IMAP][TIMEOUT] ${label} · ${source}`
+          + ` · connexion · limite ${seconds(error.timeoutMs)}`
+        );
+      }
+
+      throw error;
+    }
+  };
+
+  try {
+    await connectClient();
+
+    const selectedJobs = (jobs || []).filter(job =>
+      Boolean(Array.isArray(job) ? job[1] : job?.folder)
+    );
+
+    for (let index = 0; index < selectedJobs.length; index++) {
+      throwIfAborted(signal);
+
+      const job = selectedJobs[index];
       const role = Array.isArray(job) ? job[0] : job.role;
       const folder = Array.isArray(job) ? job[1] : job.folder;
       if (!folder) continue;
 
-      const folderStartedAt = Date.now();
-      try {
-        results.push(await syncFolderWithClient(client, account, folder, dataDir, onProgress, {
-          role, signal,
-        }));
-        folderTimings.push({ role, ms: Date.now() - folderStartedAt });
-      } catch (error) {
-        folderTimings.push({ role, ms: Date.now() - folderStartedAt });
-        if (signal?.aborted || isSyncCancelled(error)) throw new SyncCancelledError();
-        if (!continueOnError) throw error;
-        results.push({ folder, role, added: 0, changed: 0, removed: 0, error: error.message });
+      const remaining = remainingMs();
+      if (remaining <= 0) {
+        const message = `Délai global de relève atteint (${seconds(policy.totalMs)})`;
+        console.warn(
+          `[LibraMail][IMAP][TIMEOUT] ${label} · ${source}`
+          + ` · total · limite ${seconds(policy.totalMs)}`
+        );
+
+        for (let pendingIndex = index; pendingIndex < selectedJobs.length; pendingIndex++) {
+          const pending = selectedJobs[pendingIndex];
+          const pendingRole = Array.isArray(pending) ? pending[0] : pending.role;
+          const pendingFolder = Array.isArray(pending) ? pending[1] : pending.folder;
+          results.push({
+            folder: pendingFolder,
+            role: pendingRole,
+            added: 0,
+            changed: 0,
+            removed: 0,
+            error: message,
+            timeout: true,
+            skipped: true,
+          });
+        }
+        break;
       }
+
+      if (!client) await connectClient();
+      const activeClient = client;
+
+      const folderStartedAt = Date.now();
+      const folderBudget = Math.max(1, Math.min(policy.folderMs, remainingMs()));
+      const folderController = new AbortController();
+      let currentPhase = 'open';
+
+      const propagateAbort = () => folderController.abort();
+      if (signal?.aborted) folderController.abort();
+      else signal?.addEventListener('abort', propagateAbort, { once: true });
+
+      const progress = data => {
+        currentPhase = String(data?.phase || currentPhase || 'operation');
+        onProgress?.(data);
+      };
+
+      try {
+        const result = await runWithSyncTimeout(
+          () => syncFolderWithClient(
+            activeClient,
+            account,
+            folder,
+            dataDir,
+            progress,
+            { role, signal: folderController.signal }
+          ),
+          folderBudget,
+          () => new SyncTimeoutError(
+            `Dossier IMAP trop lent (${seconds(folderBudget)})`,
+            { phase: currentPhase, role, timeoutMs: folderBudget }
+          ),
+          () => {
+            folderController.abort();
+            interruptClient(activeClient);
+          }
+        );
+
+        results.push(result);
+        folderTimings.push({
+          role,
+          ms: Date.now() - folderStartedAt,
+          phase: currentPhase,
+          timeout: false,
+        });
+      } catch (error) {
+        const elapsed = Date.now() - folderStartedAt;
+        const timedOut = error?.code === 'SYNC_TIMEOUT';
+
+        folderTimings.push({
+          role,
+          ms: elapsed,
+          phase: error?.phase || currentPhase,
+          timeout: timedOut,
+        });
+
+        if (signal?.aborted) throw new SyncCancelledError();
+
+        if (timedOut) {
+          console.warn(
+            `[LibraMail][IMAP][TIMEOUT] ${label} · ${source}`
+            + ` · ${role} · phase ${error.phase || currentPhase}`
+            + ` · limite ${seconds(error.timeoutMs)}`
+          );
+
+          if (syncClients.get(account.id) === activeClient) {
+            syncClients.delete(account.id);
+          }
+          if (client === activeClient) client = null;
+
+          results.push({
+            folder,
+            role,
+            added: 0,
+            changed: 0,
+            removed: 0,
+            error: error.message,
+            timeout: true,
+            phase: error.phase || currentPhase,
+          });
+
+          // Les relèves automatiques privilégient la disponibilité : après un
+          // dossier bloqué, on repart sur une connexion neuve pour le suivant.
+          if (!automaticSource && !continueOnError) throw error;
+        } else {
+          if (isSyncCancelled(error)) throw new SyncCancelledError();
+          if (!continueOnError) throw error;
+
+          results.push({
+            folder,
+            role,
+            added: 0,
+            changed: 0,
+            removed: 0,
+            error: error.message,
+          });
+        }
+      } finally {
+        signal?.removeEventListener('abort', propagateAbort);
+      }
+
       await yieldToEventLoop(signal);
     }
 
     const totalMs = Date.now() - syncStartedAt;
     if (source === 'manual' || totalMs >= 1500) {
-      const label = account.displayName || account.email || account.id || 'compte';
-      const seconds = value => `${(Math.max(0, Number(value) || 0) / 1000).toFixed(2)}s`;
+      const connectMs = connectTimings.reduce((sum, value) => sum + value, 0);
+      const reconnectDetail = connectTimings.length > 1
+        ? ` (${connectTimings.length} connexions)`
+        : '';
       const detail = folderTimings
-        .map(item => `${item.role}:${seconds(item.ms)}`)
+        .map(item =>
+          `${item.role}:${seconds(item.ms)}`
+          + (item.timeout ? `[timeout:${item.phase || 'operation'}]` : '')
+        )
         .join(' · ');
+
       console.log(
-        `[LibraMail][IMAP] ${label} · ${source} · connexion ${seconds(connectMs)}`
+        `[LibraMail][IMAP] ${label} · ${source}`
+        + ` · connexion ${seconds(connectMs)}${reconnectDetail}`
         + (detail ? ` · ${detail}` : '')
         + ` · total ${seconds(totalMs)}`
       );
@@ -506,11 +763,20 @@ async function syncFolders(account, jobs, dataDir, onProgress,
     throw error;
   } finally {
     signal?.removeEventListener('abort', abort);
-    if (syncClients.get(account.id) === client) syncClients.delete(account.id);
-    if (signal?.aborted) {
-      interruptClient(client);
-    } else {
-      await closeClientGracefully(client);
+
+    const finalClient = client;
+    if (finalClient && syncClients.get(account.id) === finalClient) {
+      syncClients.delete(account.id);
+    }
+
+    if (finalClient) {
+      if (signal?.aborted) {
+        interruptClient(finalClient);
+      } else {
+        // closeClientGracefully() existait déjà dans la branche actuelle et
+        // borne LOGOUT à 2 secondes : on le conserve tel quel.
+        await closeClientGracefully(finalClient);
+      }
     }
   }
 }
@@ -681,29 +947,128 @@ async function appendSentCopy(account, folder, raw, messageId = null) {
  * Maintient une connexion IDLE. Le moteur central décide ensuite quand lancer
  * la synchronisation, ce qui évite les relèves concurrentes avec le minuteur.
  */
-async function watchInbox(account, onExists) {
-  stopWatch(account.id);
-  const client = makeClient(account);
-  clients.set(account.id, client);
-  client.on('close', () => clients.delete(account.id));
-  await client.connect();
-  const inbox = account.folderMap?.inbox || 'INBOX';
-  await client.getMailboxLock(inbox).then(lock => lock.release());
-  client.on('exists', () => {
-    try { onExists(account.id); } catch {}
-  });
+function clearWatchRetry(accountId) {
+  const timer = watchRetryTimers.get(accountId);
+  if (timer) clearTimeout(timer);
+  watchRetryTimers.delete(accountId);
 }
 
-function stopWatch(accountId) {
-  const client = clients.get(accountId);
-  if (client) {
-    client.logout().catch(() => {});
-    clients.delete(accountId);
+function isTransientWatchError(error) {
+  const code = String(error?.code || '').toUpperCase();
+  if ([
+    'ETIMEDOUT', 'ECONNRESET', 'ECONNABORTED', 'EPIPE',
+    'ENETDOWN', 'ENETUNREACH', 'EHOSTUNREACH', 'EAI_AGAIN',
+  ].includes(code)) return true;
+  return /timeout|timed out|connection (?:closed|lost|reset)|socket (?:closed|ended)/i
+    .test(String(error?.message || ''));
+}
+
+function scheduleWatchRetry(account, onExists, error = null) {
+  const accountId = account?.id;
+  if (!accountId || watchRetryTimers.has(accountId) || clients.has(accountId)) return;
+
+  const label = account.displayName || account.email || accountId;
+  const timer = setTimeout(() => {
+    watchRetryTimers.delete(accountId);
+    if (clients.has(accountId)) return;
+
+    watchInbox(account, onExists).catch(retryError => {
+      console.warn(
+        `[LibraMail][IMAP][IDLE] ${label} · reconnexion impossible : ${retryError.message}`
+      );
+      scheduleWatchRetry(account, onExists, retryError);
+    });
+  }, WATCH_RETRY_MS);
+
+  timer.unref?.();
+  watchRetryTimers.set(accountId, timer);
+
+  console.warn(
+    `[LibraMail][IMAP][IDLE] ${label}`
+    + (error?.code ? ` · ${error.code}` : '')
+    + ` · reconnexion dans ${(WATCH_RETRY_MS / 1000).toFixed(0)}s`
+  );
+}
+
+async function watchInbox(account, onExists) {
+  stopWatch(account.id);
+
+  const client = makeClient(account);
+  const accountId = account.id;
+  const label = account.displayName || account.email || accountId;
+  let ready = false;
+  let failed = false;
+
+  clients.set(accountId, client);
+
+  const removeCurrent = () => {
+    if (clients.get(accountId) === client) clients.delete(accountId);
+  };
+
+  const handleUnexpectedDisconnect = error => {
+    if (watchStoppingClients.has(client)) {
+      removeCurrent();
+      return;
+    }
+
+    removeCurrent();
+    if (failed) return;
+    failed = true;
+
+    console.warn(
+      `[LibraMail][IMAP][IDLE] ${label} · connexion perdue`
+      + (error?.code ? ` (${error.code})` : '')
+      + (error?.message ? ` : ${error.message}` : '')
+    );
+
+    interruptClient(client);
+
+    if (ready && (!error || isTransientWatchError(error))) {
+      scheduleWatchRetry(account, onExists, error);
+    }
+  };
+
+  client.on('error', handleUnexpectedDisconnect);
+  client.on('close', () => handleUnexpectedDisconnect(null));
+
+  try {
+    await client.connect();
+    const inbox = account.folderMap?.inbox || 'INBOX';
+    await client.getMailboxLock(inbox).then(lock => lock.release());
+    ready = true;
+
+    client.on('exists', () => {
+      try { onExists(account.id); } catch {}
+    });
+  } catch (error) {
+    removeCurrent();
+    watchStoppingClients.add(client);
+    interruptClient(client);
+    throw error;
   }
 }
 
+function stopWatch(accountId) {
+  clearWatchRetry(accountId);
+
+  const client = clients.get(accountId);
+  if (!client) return;
+
+  clients.delete(accountId);
+  watchStoppingClients.add(client);
+
+  closeClientGracefully(client).catch(() => {
+    interruptClient(client);
+  });
+}
+
 function stopAllWatches() {
-  for (const accountId of [...clients.keys()]) stopWatch(accountId);
+  for (const accountId of [...new Set([
+    ...clients.keys(),
+    ...watchRetryTimers.keys(),
+  ])]) {
+    stopWatch(accountId);
+  }
 }
 
 module.exports = {
