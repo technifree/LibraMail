@@ -1,3 +1,53 @@
+# LibraMail 0.4.4 - 2026-08-23
+
+LibraMail 0.4.4 étend l'organisation locale des messages, améliore la gestion des pièces jointes et renforce la robustesse des relèves IMAP.
+
+## Dossiers locaux
+
+- Ajout de dossiers locaux indépendants des comptes de messagerie.
+- Classement de messages dans des dossiers locaux sans déplacement côté serveur IMAP.
+- Arborescence multi-niveaux avec sous-dossiers de profondeur libre.
+- Compteurs récursifs : un dossier parent affiche le total de toute sa branche.
+- Déplacement des messages vers un dossier local par glisser-déposer.
+- Déplacement d'un dossier local complet dans l'arborescence par glisser-déposer.
+- Retour d'un dossier à la racine par glisser-déposer.
+- Protection contre les cycles et les déplacements créant des doublons entre dossiers frères.
+- Autorisation de noms identiques dans des branches différentes.
+- Navigation accélérée entre dossiers locaux grâce au cache, à la révalidation différée et au préchargement des dossiers voisins.
+- Sauvegarde et restauration de la hiérarchie et des affectations de messages.
+
+## Import EML
+
+- Possibilité de choisir directement un dossier local lors de l'import de messages EML.
+- Les messages importés restent stockés localement et chiffrés.
+- Les doublons détectés lors de l'import ne sont pas reclassés automatiquement.
+
+## Pièces jointes
+
+- Ouverture directe d'une pièce jointe avec l'application associée du système.
+- Conservation de l'action « Enregistrer sous ».
+- Blocage de l'ouverture directe pour les extensions potentiellement dangereuses ; l'enregistrement reste disponible.
+- Correction de l'indicateur de pièce jointe dans la liste des messages afin qu'il reste visible au survol.
+
+## Interface
+
+- Les dates des anciens messages affichent désormais l'année.
+- Mise en évidence et organisation améliorées autour des dossiers locaux.
+- Correction du comportement responsive du volet Planning afin d'éviter les textes et boutons tronqués sur les fenêtres étroites.
+
+## IMAP
+
+- Ajout de limites de temps sur les différentes phases de synchronisation IMAP.
+- Interruption et reconnexion contrôlées lorsqu'une opération IMAP reste bloquée.
+- Meilleure récupération après arrêt ou perte de connexion.
+- Gestion locale des erreurs réseau des connexions IDLE persistantes (`ETIMEDOUT`, `ECONNRESET`, etc.).
+- Reconnexion automatique d'une connexion IDLE interrompue sans remontée en erreur non interceptée.
+
+## Tests et robustesse
+
+- Ajout de tests dédiés à l'arborescence, aux compteurs récursifs, à l'unicité des noms par parent, au déplacement des dossiers, à la navigation locale, à la sauvegarde/restauration et au comportement responsive.
+- Ajout d'un test spécifique de récupération des connexions IMAP IDLE.
+
 # LibraMail 0.4.3 - 2026-08-21
 
 LibraMail 0.4.3 est une version corrective qui rétablit le glisser-déposer des pièces jointes dans la fenêtre de rédaction.

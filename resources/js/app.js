@@ -1000,7 +1000,7 @@ const App = (() => {
   };
 
   function applyAppVersion() {
-    const rawVersion = String(window.NL_APPVERSION || '0.4.3').replace(/^v/i, '');
+    const rawVersion = String(window.NL_APPVERSION || '0.4.4').replace(/^v/i, '');
     const badge = document.getElementById('app-version');
     if (badge) {
       badge.textContent = `v${rawVersion}`;
@@ -6995,7 +6995,7 @@ const App = (() => {
 
   // ---------- Mise à jour et À propos ----------
   function appVersion() {
-    return String(window.NL_APPVERSION || '0.4.3').replace(/^v/i, '');
+    return String(window.NL_APPVERSION || '0.4.4').replace(/^v/i, '');
   }
 
   function compareVersions(a, b) {
