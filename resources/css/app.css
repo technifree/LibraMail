@@ -32,13 +32,13 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
   --list-width: 380px;
   --list-height: 330px;
   --splitter-size: 6px;
-  --planner-main-width: 290px;
+  --planner-main-width: clamp(170px, 20vw, 290px);
   --planner-main-current-width: var(--planner-main-width);
   display: grid;
   grid-template-columns:
-    var(--sidebar-width) var(--splitter-size)
-    var(--list-width) var(--splitter-size)
-    minmax(320px, 1fr) var(--planner-main-current-width);
+    clamp(150px, var(--sidebar-width), 24vw) var(--splitter-size)
+    clamp(190px, var(--list-width), 32vw) var(--splitter-size)
+    minmax(100px, 1fr) var(--planner-main-current-width);
   grid-template-rows: 46px minmax(0, 1fr) 30px;
   grid-template-areas:
     "topbar topbar topbar topbar topbar topbar"
@@ -50,7 +50,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 #app.planner-pane-collapsed { --planner-main-current-width: 38px; }
 /* Disposition horizontale : la deuxième poignée règle la hauteur liste/lecture. */
 #app[data-layout="horizontal"] {
-  grid-template-columns: var(--sidebar-width) var(--splitter-size) minmax(0, 1fr) var(--planner-main-current-width);
+  grid-template-columns:
+    clamp(150px, var(--sidebar-width), 24vw) var(--splitter-size)
+    minmax(100px, 1fr) var(--planner-main-current-width);
   grid-template-rows: 46px var(--list-height) var(--splitter-size) minmax(0, 1fr) 30px;
   grid-template-areas:
     "topbar topbar topbar topbar"
@@ -2283,14 +2285,18 @@ body.resizing-panes.resize-rows { cursor: row-resize; }
   font-size:9.5px; font-weight:800; text-transform:uppercase; letter-spacing:.45px;
 }
 .planner-main-section-title strong { margin-left:auto; color:var(--fg-faint); font-size:9px; font-weight:600; text-transform:none; letter-spacing:0; }
-.planner-main-events { display:flex; min-height:0; flex-direction:column; gap:0; overflow:auto; }
+.planner-main-events {
+  display:flex; min-width:0; min-height:0; flex-direction:column; gap:0;
+  overflow-y:auto; overflow-x:hidden;
+}
 .planner-main-upcoming-section .planner-main-events { flex:1; }
 /* Vue agenda compacte : un rendez-vous est une ligne, pas une carte. */
 .planner-main-event {
   --event-color:var(--accent);
-  width:100%; min-height:34px;
-  display:grid; grid-template-columns:44px minmax(0,1fr); gap:8px; align-items:start;
-  padding:5px 5px 5px 7px;
+  width:100%; max-width:100%; min-width:0; min-height:38px;
+  display:grid; grid-template-columns:42px minmax(0,1fr); gap:6px; align-items:start;
+  padding:6px 4px 6px 6px;
+  overflow:hidden;
   border:0; border-left:2px solid var(--event-color); border-bottom:1px solid var(--border-soft,var(--border));
   border-radius:0; background:transparent; text-align:left;
   transition:background .12s ease;
@@ -2301,18 +2307,39 @@ body.resizing-panes.resize-rows { cursor: row-resize; }
   outline-offset:-1px;
 }
 .planner-main-event-time {
-  padding-top:1px; color:var(--event-color); font-size:9px; font-weight:800; line-height:1.25; white-space:nowrap;
+  min-width:0; padding-top:1px; color:var(--event-color);
+  font-size:9px; font-weight:800; line-height:1.25; white-space:nowrap;
 }
-.planner-main-event-main { min-width:0; }
-.planner-main-event-main strong,.planner-main-event-main small {
-  display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+.planner-main-event-main {
+  min-width:0; max-width:100%; overflow:hidden;
 }
-.planner-main-event-main strong { color:var(--fg-strong); font-size:10.5px; line-height:1.25; }
-.planner-main-event-main small { margin-top:1px; color:var(--fg-faint); font-size:8.8px; line-height:1.2; }
+.planner-main-event-main strong,
+.planner-main-event-main small {
+  display:block;
+  min-width:0; max-width:100%;
+  white-space:normal;
+  overflow:visible;
+  text-overflow:clip;
+  overflow-wrap:anywhere;
+  word-break:normal;
+}
+.planner-main-event-main strong {
+  color:var(--fg-strong); font-size:10.5px; line-height:1.3;
+}
+.planner-main-event-main small {
+  margin-top:2px; color:var(--fg-faint); font-size:8.8px; line-height:1.25;
+}
 .planner-main-date-separator { padding:8px 3px 3px; color:var(--fg-faint); font-size:9px; font-weight:700; }
 .planner-main-empty { flex:1; min-height:120px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:7px; color:var(--fg-faint); font-size:10px; text-align:center; }
 .planner-main-empty i { font-size:22px; opacity:.6; }
-.planner-main-open-full { flex:none; justify-content:center; margin-top:8px; font-size:10px; }
+.planner-main-open-full {
+  flex:none; width:100%; max-width:100%; min-width:0;
+  justify-content:center; margin-top:8px; padding-inline:8px;
+  overflow:hidden; font-size:10px; text-align:center; white-space:normal;
+}
+.planner-main-open-full > span {
+  min-width:0; white-space:normal; overflow-wrap:anywhere; line-height:1.2;
+}
 #app.planner-pane-collapsed #planner-main-pane { align-items:center; }
 #app.planner-pane-collapsed .planner-main-pane-header { width:100%; justify-content:center; border-bottom:0; }
 #app.planner-pane-collapsed .planner-main-pane-toggle i { transform:rotate(180deg); }
@@ -4366,4 +4393,76 @@ body.local-folder-pointer-dragging .mail-row * {
 .local-folder-drag-ghost i {
   flex: none;
   color: var(--accent);
+}
+
+/* Arborescence des dossiers locaux — LibraMail 0.4.4 */
+.local-folder-sidebar-row {
+  grid-template-columns: 20px minmax(0, 1fr) 25px 25px 25px;
+  padding-left: calc(var(--local-folder-depth, 0) * 12px);
+  transition: background .12s ease, transform .12s ease;
+}
+.local-folder-tree-toggle { width: 20px; height: 25px; padding: 0; color: var(--fg-faint); }
+.local-folder-tree-toggle:disabled { opacity: 1; background: transparent; cursor: default; }
+.local-folder-tree-toggle:not(:disabled):hover { color: var(--accent); background: var(--accent-soft); }
+.local-folder-tree-toggle i { font-size: 9px; }
+.local-folder-tree-spacer { display: block; width: 8px; height: 8px; }
+.local-folder-sidebar-row .local-folder-action.create-child:hover { color: var(--accent); background: var(--accent-soft); }
+.local-folder-sidebar-row .local-folder-action:disabled { opacity: .22 !important; cursor: not-allowed; color: var(--fg-faint); background: transparent; }
+.local-folder-parent-hint { display: flex; align-items: center; gap: 8px; margin-top: -6px; padding: 7px 10px; border-left: 2px solid color-mix(in srgb, var(--accent) 45%, var(--border)); color: var(--fg-muted); font-size: 10.5px; }
+.local-folder-parent-hint i { color: var(--accent); flex: none; }
+
+/* LibraMail 0.4.4 — grille principale responsive stabilisée */
+/* Les dimensions sauvegardées restent les préférences nominales.
+   La grille les plafonne seulement lorsque le viewport est plus étroit. */
+#planner-main-pane,
+.planner-main-pane-content,
+.planner-main-events,
+.planner-main-event,
+.planner-main-event-main,
+.planner-main-open-full {
+  min-width: 0;
+  max-width: 100%;
+}
+.planner-main-pane-content,
+.planner-main-events {
+  overflow-x: hidden;
+}
+
+/* LibraMail 0.4.4 — déplacement des dossiers locaux */
+body.local-folder-tree-dragging {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+body.local-folder-tree-dragging,
+body.local-folder-tree-dragging * {
+  cursor: grabbing !important;
+}
+.local-folder-sidebar-row.local-folder-tree-drag-source {
+  opacity: .52;
+}
+.local-folder-sidebar-row.local-folder-tree-drop-target {
+  background: color-mix(in srgb, var(--accent-soft) 88%, var(--bg-panel-2));
+  box-shadow:
+    inset 3px 0 0 var(--accent),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 75%, transparent);
+}
+.local-folder-sidebar-row.local-folder-tree-drop-invalid {
+  box-shadow:
+    inset 3px 0 0 var(--danger),
+    inset 0 0 0 1px color-mix(in srgb, var(--danger) 70%, transparent);
+}
+#local-folders-section-header.local-folder-tree-root-drop-target,
+#local-folder-list.local-folder-tree-root-drop-target {
+  outline: 1px dashed var(--accent);
+  outline-offset: -2px;
+  background: color-mix(in srgb, var(--accent-soft) 45%, transparent);
+}
+#local-folders-section-header.local-folder-tree-root-drop-invalid,
+#local-folder-list.local-folder-tree-root-drop-invalid {
+  outline: 1px dashed var(--danger);
+  outline-offset: -2px;
+}
+.local-folder-tree-drag-ghost.invalid-drop {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+  color: var(--fg-faint);
 }

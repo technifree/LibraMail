@@ -2584,12 +2584,12 @@ const methods = {
 
   // ---------- Dossiers locaux ----------
   'localFolders.list': async () => db.listLocalFolders(),
-  'localFolders.add': async ({ name, color } = {}) => {
-    db.addLocalFolder(name, color);
+  'localFolders.add': async ({ name, color, parentId = null } = {}) => {
+    db.addLocalFolder(name, color, parentId);
     return db.listLocalFolders();
   },
-  'localFolders.update': async ({ id, name, color } = {}) => {
-    db.updateLocalFolder(id, name, color);
+  'localFolders.update': async ({ id, name, color, parentId = undefined } = {}) => {
+    db.updateLocalFolder(id, name, color, parentId);
     return db.listLocalFolders();
   },
   'localFolders.remove': async ({ id } = {}) => {

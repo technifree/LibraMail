@@ -1228,6 +1228,11 @@ const App = (() => {
 
       const count = Number(result?.processed) || 0;
 
+      invalidateLocalFolderCachedViews([
+        sourceLocalFolderId,
+        targetLocalFolderId,
+      ]);
+
       if (Array.isArray(result?.folders)) {
         renderLocalFolders(result.folders);
       } else {
@@ -1294,14 +1299,14 @@ const App = (() => {
       };
       menu.appendChild(create);
     } else {
-      for (const folder of currentLocalFolders) {
+      for (const { folder, path } of flattenLocalFolderTree({ respectCollapsed: false })) {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'side-item local-folder-menu-item';
         button.setAttribute('role', 'menuitem');
         button.innerHTML = `
           <i class="fa-solid fa-folder" style="color:${safeColor(folder.color || '#4f8bd6')}"></i>
-          <span>${esc(folder.name)}</span>
+          <span>${esc(path)}</span>
           <span class="count">${Number(folder.message_count || 0) || ''}</span>`;
         button.onclick = event => {
           event.stopPropagation();
@@ -1398,6 +1403,376 @@ const App = (() => {
     }
   }
 
+  // LibraMail 0.4.4 — arborescence des dossiers locaux.
+  const localFolderCollapsedIds = new Set();
+
+  function flattenLocalFolderTree({ respectCollapsed = false } = {}) {
+    const folders = Array.isArray(currentLocalFolders) ? currentLocalFolders : [];
+    const byId = new Map(folders.map(folder => [Number(folder.id), folder]));
+    const children = new Map();
+    const pushChild = (parentId, folder) => {
+      const key = parentId === null ? 'root' : String(parentId);
+      if (!children.has(key)) children.set(key, []);
+      children.get(key).push(folder);
+    };
+    for (const folder of folders) {
+      const parentId = Number(folder.parent_id);
+      const validParentId = Number.isInteger(parentId) && parentId > 0 && byId.has(parentId) ? parentId : null;
+      pushChild(validParentId, folder);
+    }
+    for (const list of children.values()) {
+      list.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), I18N.locale || 'fr', { sensitivity: 'base', numeric: true }));
+    }
+    const rows = [];
+    const visited = new Set();
+    const walk = (folder, depth, parentPath = [], ancestors = new Set()) => {
+      const id = Number(folder.id);
+      if (!Number.isInteger(id) || ancestors.has(id) || visited.has(id)) return;
+      visited.add(id);
+      const pathParts = [...parentPath, String(folder.name || '')];
+      const directChildren = children.get(String(id)) || [];
+      rows.push({ folder, depth, path: pathParts.join(' / '), hasChildren: directChildren.length > 0 });
+      if (respectCollapsed && localFolderCollapsedIds.has(id)) return;
+      const nextAncestors = new Set(ancestors);
+      nextAncestors.add(id);
+      for (const child of directChildren) walk(child, depth + 1, pathParts, nextAncestors);
+    };
+    // LibraMail 0.4.4 — correction du repli des dossiers locaux.
+    //
+    // Les descendants cachés d'un dossier replié ne doivent pas être traités
+    // comme des dossiers orphelins. On calcule donc séparément la structure
+    // réellement accessible, sans tenir compte de l'état replié.
+    const structurallyReachable = new Set();
+
+    const markReachable = (folder, ancestors = new Set()) => {
+      const id = Number(folder?.id);
+      if (!Number.isInteger(id) || structurallyReachable.has(id) || ancestors.has(id)) return;
+
+      structurallyReachable.add(id);
+      const nextAncestors = new Set(ancestors);
+      nextAncestors.add(id);
+
+      for (const child of children.get(String(id)) || []) {
+        markReachable(child, nextAncestors);
+      }
+    };
+
+    const roots = children.get('root') || [];
+    for (const root of roots) markReachable(root);
+    for (const root of roots) walk(root, 0, []);
+
+    // Seuls les dossiers réellement hors d'une arborescence valide passent
+    // dans ce fallback. Un enfant d'un dossier replié reste donc masqué.
+    for (const folder of folders) {
+      if (!structurallyReachable.has(Number(folder.id))
+          && !visited.has(Number(folder.id))) {
+        walk(folder, 0, []);
+      }
+    }
+
+    return rows;
+
+  }
+
+  function localFolderPath(folderId) {
+    return flattenLocalFolderTree({ respectCollapsed: false })
+      .find(item => String(item.folder.id) === String(folderId))?.path || '';
+  }
+
+  // LibraMail 0.4.4 — déplacement des dossiers locaux par Pointer Events.
+  //
+  // Ce mécanisme est volontairement séparé du drag des messages
+  // (libramail:local-folder-drag-*). Il ne touche donc ni au classement des
+  // messages, ni au drag natif Neutralino utilisé par les pièces jointes.
+  function localFolderNumericParentId(folder) {
+    const id = Number(folder?.parent_id);
+    return Number.isInteger(id) && id > 0 ? id : null;
+  }
+
+  function localFolderIsDescendantOf(candidateId, ancestorId) {
+    const candidate = Number(candidateId);
+    const ancestor = Number(ancestorId);
+    if (!Number.isInteger(candidate) || !Number.isInteger(ancestor)) return false;
+
+    const byId = new Map(
+      currentLocalFolders.map(folder => [Number(folder.id), folder])
+    );
+    const seen = new Set();
+    let cursor = byId.get(candidate);
+
+    while (cursor) {
+      const id = Number(cursor.id);
+      if (seen.has(id)) return false;
+      seen.add(id);
+
+      const parentId = localFolderNumericParentId(cursor);
+      if (parentId === ancestor) return true;
+      cursor = parentId ? byId.get(parentId) : null;
+    }
+
+    return false;
+  }
+
+  function localFolderTreeDropTargetAtPoint(x, y, sourceFolder) {
+    const sourceId = Number(sourceFolder?.id);
+    if (!Number.isInteger(sourceId) || sourceId <= 0) return null;
+
+    const hit = document.elementFromPoint(Number(x) || 0, Number(y) || 0);
+    if (!hit) return null;
+
+    const row = hit.closest?.('.local-folder-sidebar-row');
+    if (row) {
+      const targetButton = row.querySelector('[data-local-folder-id]');
+      const targetId = Number(targetButton?.dataset?.localFolderId);
+      const targetFolder = currentLocalFolders.find(
+        folder => Number(folder.id) === targetId
+      ) || null;
+
+      if (!targetFolder) return null;
+
+      const currentParentId = localFolderNumericParentId(sourceFolder);
+      const duplicate = localFolderNameExists(
+        sourceFolder.name,
+        targetId,
+        sourceId
+      );
+
+      const valid = targetId !== sourceId
+        && !localFolderIsDescendantOf(targetId, sourceId)
+        && currentParentId !== targetId
+        && !duplicate;
+
+      return {
+        type: 'folder',
+        folder: targetFolder,
+        row,
+        valid,
+      };
+    }
+
+    const rootZone = hit.closest?.('#local-folders-section-header, #local-folder-list');
+    if (rootZone) {
+      const currentParentId = localFolderNumericParentId(sourceFolder);
+      const duplicate = localFolderNameExists(
+        sourceFolder.name,
+        null,
+        sourceId
+      );
+
+      return {
+        type: 'root',
+        folder: null,
+        row: null,
+        rootZone,
+        valid: currentParentId !== null && !duplicate,
+      };
+    }
+
+    return null;
+  }
+
+  function clearLocalFolderTreeDragUi() {
+    document.querySelectorAll(
+      '.local-folder-tree-drop-target, .local-folder-tree-drop-invalid'
+    ).forEach(element => {
+      element.classList.remove(
+        'local-folder-tree-drop-target',
+        'local-folder-tree-drop-invalid'
+      );
+    });
+
+    document.getElementById('local-folders-section-header')
+      ?.classList.remove(
+        'local-folder-tree-root-drop-target',
+        'local-folder-tree-root-drop-invalid'
+      );
+    document.getElementById('local-folder-list')
+      ?.classList.remove(
+        'local-folder-tree-root-drop-target',
+        'local-folder-tree-root-drop-invalid'
+      );
+
+    document.getElementById('local-folder-tree-drag-ghost')?.remove();
+    document.body.classList.remove('local-folder-tree-dragging');
+  }
+
+  function updateLocalFolderTreeDragUi(sourceFolder, x, y) {
+    clearLocalFolderTreeDragUi();
+    document.body.classList.add('local-folder-tree-dragging');
+
+    const target = localFolderTreeDropTargetAtPoint(x, y, sourceFolder);
+
+    if (target?.type === 'folder' && target.row) {
+      target.row.classList.add(
+        target.valid
+          ? 'local-folder-tree-drop-target'
+          : 'local-folder-tree-drop-invalid'
+      );
+    } else if (target?.type === 'root' && target.rootZone) {
+      target.rootZone.classList.add(
+        target.valid
+          ? 'local-folder-tree-root-drop-target'
+          : 'local-folder-tree-root-drop-invalid'
+      );
+    }
+
+    let ghost = document.getElementById('local-folder-tree-drag-ghost');
+    if (!ghost) {
+      ghost = document.createElement('div');
+      ghost.id = 'local-folder-tree-drag-ghost';
+      ghost.className = 'local-folder-drag-ghost local-folder-tree-drag-ghost';
+      document.body.appendChild(ghost);
+    }
+
+    let destination = t('localFolder.moveDragging');
+    if (target?.type === 'folder') {
+      destination = target.valid
+        ? t('localFolder.moveInto', { name: target.folder.name })
+        : t('localFolder.moveUnavailable');
+    } else if (target?.type === 'root') {
+      destination = target.valid
+        ? t('localFolder.moveToRoot')
+        : t('localFolder.moveUnavailable');
+    }
+
+    ghost.innerHTML = `
+      <i class="fa-solid fa-folder-tree"></i>
+      <span>${esc(sourceFolder.name)} → ${esc(destination)}</span>`;
+    ghost.classList.toggle('can-drop', Boolean(target?.valid));
+    ghost.classList.toggle('invalid-drop', Boolean(target && !target.valid));
+    ghost.style.left = `${Math.round((Number(x) || 0) + 14)}px`;
+    ghost.style.top = `${Math.round((Number(y) || 0) + 14)}px`;
+  }
+
+  async function moveLocalFolderTreeFolder(sourceFolder, parentFolder = null) {
+    if (!sourceFolder) return;
+
+    const currentParentId = localFolderNumericParentId(sourceFolder);
+    const nextParentId = parentFolder ? Number(parentFolder.id) : null;
+    if (currentParentId === nextParentId) return;
+
+    status(
+      t('localFolder.moving', { name: sourceFolder.name }),
+      'busy'
+    );
+
+    try {
+      const folders = await rpc('localFolders.update', {
+        id: sourceFolder.id,
+        name: sourceFolder.name,
+        color: sourceFolder.color,
+        parentId: nextParentId,
+      });
+
+      if (parentFolder) {
+        localFolderCollapsedIds.delete(Number(parentFolder.id));
+      }
+
+      renderLocalFolders(folders);
+
+      if (view.type === 'localFolder') {
+        const title = localFolderPath(view.localFolderId);
+        if (title) document.getElementById('list-title').textContent = title;
+      }
+
+      status(
+        parentFolder
+          ? t('localFolder.movedInto', {
+              name: sourceFolder.name,
+              parent: parentFolder.name,
+            })
+          : t('localFolder.movedRoot', { name: sourceFolder.name }),
+        'success'
+      );
+    } catch (error) {
+      status(`${t('error')} : ${error.message}`, 'error');
+    }
+  }
+
+  function wireLocalFolderTreePointerDrag(button, row, folder) {
+    if (!button || !row || !folder) return;
+
+    let drag = null;
+    let suppressClick = false;
+
+    button.addEventListener('pointerdown', event => {
+      if (event.button !== 0) return;
+
+      drag = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        started: false,
+      };
+
+      try { button.setPointerCapture?.(event.pointerId); } catch {}
+    });
+
+    button.addEventListener('pointermove', event => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+
+      const distance = Math.hypot(
+        event.clientX - drag.startX,
+        event.clientY - drag.startY
+      );
+
+      if (!drag.started && distance < 7) return;
+
+      if (!drag.started) {
+        drag.started = true;
+        row.classList.add('local-folder-tree-drag-source');
+      }
+
+      event.preventDefault();
+      updateLocalFolderTreeDragUi(folder, event.clientX, event.clientY);
+    });
+
+    const finish = async (event, cancelled = false) => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+
+      const previous = drag;
+      drag = null;
+
+      try { button.releasePointerCapture?.(event.pointerId); } catch {}
+
+      if (!previous.started) return;
+
+      suppressClick = true;
+      row.classList.remove('local-folder-tree-drag-source');
+
+      const target = cancelled
+        ? null
+        : localFolderTreeDropTargetAtPoint(
+            event.clientX,
+            event.clientY,
+            folder
+          );
+
+      clearLocalFolderTreeDragUi();
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (!cancelled && target?.valid) {
+        await moveLocalFolderTreeFolder(
+          folder,
+          target.type === 'folder' ? target.folder : null
+        );
+      }
+    };
+
+    button.addEventListener('pointerup', event => finish(event, false));
+    button.addEventListener('pointercancel', event => finish(event, true));
+
+    button.addEventListener('click', event => {
+      if (!suppressClick) return;
+      suppressClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+    }, true);
+  }
+
   function renderLocalFolders(folders) {
     currentLocalFolders = Array.isArray(folders) ? folders : [];
     populateEmlImportLocalFolders();
@@ -1405,37 +1780,58 @@ const App = (() => {
     if (!element) return;
     element.innerHTML = '';
 
-    for (const folder of currentLocalFolders) {
+    for (const { folder, depth, hasChildren } of flattenLocalFolderTree({ respectCollapsed: true })) {
       const row = document.createElement('div');
       row.className = 'local-folder-sidebar-row';
-      if (view.type === 'localFolder' && String(view.localFolderId) === String(folder.id)) {
-        row.classList.add('active');
+      row.style.setProperty('--local-folder-depth', String(depth));
+      if (depth > 0) row.classList.add('is-child');
+      const selected = view.type === 'localFolder' && String(view.localFolderId) === String(folder.id);
+      if (selected) row.classList.add('active');
+
+      const toggleButton = document.createElement('button');
+      toggleButton.className = 'iconbtn local-folder-tree-toggle';
+      toggleButton.type = 'button';
+      toggleButton.tabIndex = hasChildren ? 0 : -1;
+      toggleButton.disabled = !hasChildren;
+      if (hasChildren) {
+        const collapsed = localFolderCollapsedIds.has(Number(folder.id));
+        toggleButton.title = t(collapsed ? 'localFolder.expand' : 'localFolder.collapse');
+        toggleButton.setAttribute('aria-label', toggleButton.title);
+        toggleButton.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        toggleButton.innerHTML = `<i class="fa-solid fa-chevron-${collapsed ? 'right' : 'down'}"></i>`;
+        toggleButton.onclick = event => {
+          event.stopPropagation();
+          const id = Number(folder.id);
+          if (localFolderCollapsedIds.has(id)) localFolderCollapsedIds.delete(id);
+          else localFolderCollapsedIds.add(id);
+          renderLocalFolders(currentLocalFolders);
+        };
+      } else {
+        toggleButton.innerHTML = '<span class="local-folder-tree-spacer"></span>';
       }
 
       const button = document.createElement('button');
       button.className = 'side-item';
       button.dataset.localFolderId = String(folder.id);
-      if (view.type === 'localFolder' && String(view.localFolderId) === String(folder.id)) {
-        button.classList.add('active');
-      }
-
+      if (selected) button.classList.add('active');
       const messageCount = Number(folder.message_count || 0);
       const unreadCount = Number(folder.unread_count || 0);
       button.innerHTML = `
         <i class="fa-solid fa-folder local-folder-icon" style="color:${safeColor(folder.color || '#4f8bd6')}"></i>
         <span class="local-folder-sidebar-name">${esc(folder.name)}</span>
-        ${messageCount ? `<span class="count${unreadCount ? ' has-unread' : ''}"
-          title="${esc(t('localFolder.messageCount', { count: messageCount, unread: unreadCount }))}">${messageCount}</span>` : ''}`;
-
+        ${messageCount ? `<span class="count${unreadCount ? ' has-unread' : ''}" title="${esc(t('localFolder.messageCount', { count: messageCount, unread: unreadCount }))}">${messageCount}</span>` : ''}`;
       button.onclick = () => {
         closeQuickLabelMenu();
+        closeLocalFolderMenu();
         document.querySelectorAll('.side-item').forEach(item => item.classList.remove('active'));
         button.classList.add('active');
         view = { type: 'localFolder', localFolderId: folder.id };
-        document.getElementById('list-title').textContent = folder.name;
+        document.getElementById('list-title').textContent = localFolderPath(folder.id) || folder.name;
         clearReader();
-        refresh();
+        refresh({ localFolderNavigation: true });
       };
+
+      wireLocalFolderTreePointerDrag(button, row, folder);
 
       button.addEventListener('dragenter', event => {
         if (!localFolderDragAvailable(event.dataTransfer)) return;
@@ -1462,167 +1858,141 @@ const App = (() => {
         if (items.length) assignItemsToLocalFolder(items, folder);
       });
 
+      const addChildButton = document.createElement('button');
+      addChildButton.className = 'iconbtn local-folder-action create-child';
+      addChildButton.type = 'button';
+      addChildButton.title = t('localFolder.addSubfolder');
+      addChildButton.setAttribute('aria-label', t('localFolder.addSubfolder'));
+      addChildButton.innerHTML = '<i class="fa-solid fa-folder-plus"></i>';
+      addChildButton.onclick = event => { event.stopPropagation(); createLocalFolder(folder); };
+
       const editButton = document.createElement('button');
       editButton.className = 'iconbtn local-folder-action';
       editButton.type = 'button';
       editButton.title = t('localFolder.rename');
       editButton.setAttribute('aria-label', t('localFolder.rename'));
       editButton.innerHTML = '<i class="fa-solid fa-pen"></i>';
-      editButton.onclick = event => {
-        event.stopPropagation();
-        renameLocalFolder(folder);
-      };
+      editButton.onclick = event => { event.stopPropagation(); renameLocalFolder(folder); };
 
       const deleteButton = document.createElement('button');
       deleteButton.className = 'iconbtn local-folder-action danger';
       deleteButton.type = 'button';
-      deleteButton.title = t('localFolder.delete');
-      deleteButton.setAttribute('aria-label', t('localFolder.delete'));
       deleteButton.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
-      deleteButton.onclick = event => {
-        event.stopPropagation();
-        deleteLocalFolder(folder);
-      };
+      deleteButton.disabled = hasChildren;
+      deleteButton.title = hasChildren ? t('localFolder.deleteHasChildren') : t('localFolder.delete');
+      deleteButton.setAttribute('aria-label', deleteButton.title);
+      deleteButton.onclick = event => { event.stopPropagation(); if (!hasChildren) deleteLocalFolder(folder); };
 
-      row.append(button, editButton, deleteButton);
+      row.append(toggleButton, button, addChildButton, editButton, deleteButton);
       element.appendChild(row);
     }
   }
 
-  // LibraMail 0.4.4 — modale de nom des dossiers locaux.
-  // On évite prompt(), dont le rendu dépend du WebView et tranche fortement
-  // avec le reste de l'interface. La même boîte sert à la création et au renommage.
   function normalizeLocalFolderName(value) {
     return String(value || '').trim().replace(/\s+/g, ' ');
   }
 
-  function localFolderNameExists(name, excludedId = null) {
-    const wanted = normalizeLocalFolderName(name).toLocaleLowerCase(I18N.locale || 'fr');
-    return currentLocalFolders.some(folder =>
-      Number(folder.id) !== Number(excludedId)
-      && normalizeLocalFolderName(folder.name).toLocaleLowerCase(I18N.locale || 'fr') === wanted
-    );
+  // LibraMail 0.4.4 — doublons autorisés dans des branches différentes.
+  function localFolderNameExists(name, parentId = null, excludedId = null) {
+    const wanted = normalizeLocalFolderName(name)
+      .toLocaleLowerCase(I18N.locale || 'fr');
+    const wantedParentId = Number(parentId) > 0 ? Number(parentId) : null;
+
+    return currentLocalFolders.some(folder => {
+      if (Number(folder.id) === Number(excludedId)) return false;
+
+      const candidateParentId = Number(folder.parent_id) > 0
+        ? Number(folder.parent_id)
+        : null;
+
+      return candidateParentId === wantedParentId
+        && normalizeLocalFolderName(folder.name)
+          .toLocaleLowerCase(I18N.locale || 'fr') === wanted;
+    });
   }
 
-  function localFolderNameDialog({ folder = null } = {}) {
+  function localFolderNameDialog({ folder = null, parentFolder = null } = {}) {
     return new Promise(resolve => {
       document.getElementById('local-folder-name-modal')?.remove();
-
       const editing = Boolean(folder);
+      const creatingChild = !editing && Boolean(parentFolder);
       const veil = document.createElement('div');
       veil.id = 'local-folder-name-modal';
       veil.className = 'modal-veil open local-folder-name-veil';
+      const titleKey = editing ? 'localFolder.renameTitle' : (creatingChild ? 'localFolder.createSubfolderTitle' : 'localFolder.createTitle');
       veil.innerHTML = `
-        <div class="modal local-folder-name-modal-box"
-             role="dialog" aria-modal="true"
-             aria-labelledby="local-folder-name-title">
+        <div class="modal local-folder-name-modal-box" role="dialog" aria-modal="true" aria-labelledby="local-folder-name-title">
           <header>
             <span class="local-folder-name-title-row">
-              <span class="local-folder-name-icon">
-                <i class="fa-solid ${editing ? 'fa-folder-tree' : 'fa-folder-plus'}"></i>
-              </span>
-              <span id="local-folder-name-title">${esc(t(editing ? 'localFolder.renameTitle' : 'localFolder.createTitle'))}</span>
+              <span class="local-folder-name-icon"><i class="fa-solid ${editing ? 'fa-folder-tree' : 'fa-folder-plus'}"></i></span>
+              <span id="local-folder-name-title">${esc(t(titleKey))}</span>
             </span>
-            <button class="iconbtn" id="btn-local-folder-name-close" type="button"
-                    title="${esc(t('close'))}" aria-label="${esc(t('close'))}">
-              <i class="fa-solid fa-xmark"></i>
-            </button>
+            <button class="iconbtn" id="btn-local-folder-name-close" type="button" title="${esc(t('close'))}" aria-label="${esc(t('close'))}"><i class="fa-solid fa-xmark"></i></button>
           </header>
           <div class="body local-folder-name-body">
-            <div class="local-folder-name-intro">
-              <i class="fa-solid fa-box-archive"></i>
-              <span>${esc(t('localFolder.localHint'))}</span>
-            </div>
+            <div class="local-folder-name-intro"><i class="fa-solid fa-box-archive"></i><span>${esc(t('localFolder.localHint'))}</span></div>
+            ${creatingChild ? `<div class="local-folder-parent-hint"><i class="fa-solid fa-turn-up fa-rotate-90"></i><span>${esc(t('localFolder.childOf', { name: localFolderPath(parentFolder.id) || parentFolder.name }))}</span></div>` : ''}
             <div class="field">
               <label for="local-folder-name-input">${esc(t('localFolder.name'))}</label>
-              <input id="local-folder-name-input" type="text" maxlength="100"
-                     autocomplete="off" spellcheck="false"
-                     placeholder="${esc(t('localFolder.namePlaceholder'))}">
-              <div id="local-folder-name-error" class="local-folder-name-error"
-                   role="alert" aria-live="polite"></div>
+              <input id="local-folder-name-input" type="text" maxlength="100" autocomplete="off" spellcheck="false" placeholder="${esc(t('localFolder.namePlaceholder'))}">
+              <div id="local-folder-name-error" class="local-folder-name-error" role="alert" aria-live="polite"></div>
             </div>
           </div>
           <footer class="local-folder-name-footer">
             <button class="btn" id="btn-local-folder-name-cancel" type="button">${esc(t('cancel'))}</button>
-            <button class="btn primary" id="btn-local-folder-name-submit" type="button">
-              <i class="fa-solid ${editing ? 'fa-pen' : 'fa-folder-plus'}"></i>
-              <span>${esc(t(editing ? 'localFolder.renameAction' : 'localFolder.createAction'))}</span>
-            </button>
+            <button class="btn primary" id="btn-local-folder-name-submit" type="button"><i class="fa-solid ${editing ? 'fa-pen' : 'fa-folder-plus'}"></i><span>${esc(t(editing ? 'localFolder.renameAction' : 'localFolder.createAction'))}</span></button>
           </footer>
         </div>`;
-
       document.body.appendChild(veil);
-
       const input = veil.querySelector('#local-folder-name-input');
       const errorBox = veil.querySelector('#local-folder-name-error');
       const submit = veil.querySelector('#btn-local-folder-name-submit');
       let settled = false;
-
       input.value = folder?.name || '';
-
-      const close = value => {
-        if (settled) return;
-        settled = true;
-        veil.remove();
-        resolve(value);
-      };
-
+      const close = value => { if (settled) return; settled = true; veil.remove(); resolve(value); };
       const validate = () => {
         const name = normalizeLocalFolderName(input.value);
         let error = '';
         if (!name) error = t('localFolder.errorName');
         else if (name.length > 100) error = t('localFolder.errorLength');
-        else if (localFolderNameExists(name, folder?.id)) error = t('localFolder.errorDuplicate');
+        else {
+          const targetParentId = editing
+            ? (Number(folder?.parent_id) > 0 ? Number(folder.parent_id) : null)
+            : (Number(parentFolder?.id) > 0 ? Number(parentFolder.id) : null);
+
+          if (localFolderNameExists(name, targetParentId, folder?.id)) {
+            error = t('localFolder.errorDuplicate');
+          }
+        }
         errorBox.textContent = error;
         errorBox.classList.toggle('visible', Boolean(error));
         input.classList.toggle('invalid', Boolean(error));
         submit.disabled = Boolean(error);
         return error ? '' : name;
       };
-
-      const accept = () => {
-        const name = validate();
-        if (!name) {
-          input.focus();
-          return;
-        }
-        close(name);
-      };
-
+      const accept = () => { const name = validate(); if (!name) return input.focus(); close(name); };
       input.addEventListener('input', validate);
       input.addEventListener('keydown', event => {
-        if (event.key === 'Enter') {
-          event.preventDefault();
-          event.stopPropagation();
-          accept();
-        } else if (event.key === 'Escape') {
-          event.preventDefault();
-          event.stopPropagation();
-          close(null);
-        }
+        if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); accept(); }
+        else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(null); }
       });
-
       veil.querySelector('#btn-local-folder-name-submit').addEventListener('click', accept);
       veil.querySelector('#btn-local-folder-name-cancel').addEventListener('click', () => close(null));
       veil.querySelector('#btn-local-folder-name-close').addEventListener('click', () => close(null));
-      veil.addEventListener('mousedown', event => {
-        if (event.target === veil) close(null);
-      });
-
+      veil.addEventListener('mousedown', event => { if (event.target === veil) close(null); });
       validate();
-      requestAnimationFrame(() => {
-        input.focus();
-        if (editing) input.select();
-      });
+      requestAnimationFrame(() => { input.focus(); if (editing) input.select(); });
     });
   }
 
-  async function createLocalFolder() {
-    const name = await localFolderNameDialog();
+  async function createLocalFolder(parentFolder = null) {
+    const name = await localFolderNameDialog({ parentFolder });
     if (!name) return;
     try {
-      renderLocalFolders(await rpc('localFolders.add', { name }));
-      status(t('localFolder.created', { name }), 'success');
+      const folders = await rpc('localFolders.add', { name, parentId: parentFolder?.id ?? null });
+      if (parentFolder) localFolderCollapsedIds.delete(Number(parentFolder.id));
+      renderLocalFolders(folders);
+      status(parentFolder ? t('localFolder.createdSubfolder', { name, parent: parentFolder.name }) : t('localFolder.created', { name }), 'success');
     } catch (error) {
       status(`${t('error')} : ${error.message}`, 'error');
     }
@@ -1632,15 +2002,9 @@ const App = (() => {
     const name = await localFolderNameDialog({ folder });
     if (!name || name === normalizeLocalFolderName(folder?.name)) return;
     try {
-      const folders = await rpc('localFolders.update', {
-        id: folder.id,
-        name,
-        color: folder.color,
-      });
+      const folders = await rpc('localFolders.update', { id: folder.id, name, color: folder.color });
       renderLocalFolders(folders);
-      if (view.type === 'localFolder' && String(view.localFolderId) === String(folder.id)) {
-        document.getElementById('list-title').textContent = name;
-      }
+      if (view.type === 'localFolder' && String(view.localFolderId) === String(folder.id)) document.getElementById('list-title').textContent = localFolderPath(folder.id) || name;
       status(t('localFolder.renamed', { name }), 'success');
     } catch (error) {
       status(`${t('error')} : ${error.message}`, 'error');
@@ -1648,6 +2012,10 @@ const App = (() => {
   }
 
   async function deleteLocalFolder(folder) {
+    if (Number(folder.child_count || 0) > 0) {
+      status(t('localFolder.deleteHasChildren'), 'info');
+      return;
+    }
     const accepted = await confirmAction({
       title: t('localFolder.deleteTitle'),
       message: t('localFolder.deleteConfirm', { name: folder.name }),
@@ -1657,11 +2025,9 @@ const App = (() => {
       note: t('localFolder.deleteNote'),
     });
     if (!accepted) return;
-
     try {
       const result = await rpc('localFolders.remove', { id: folder.id });
-      const deletedSelected = view.type === 'localFolder'
-        && String(view.localFolderId) === String(folder.id);
+      const deletedSelected = view.type === 'localFolder' && String(view.localFolderId) === String(folder.id);
       if (deletedSelected) {
         view = { type: 'unified' };
         document.getElementById('list-title').textContent = t('unified.inbox');
@@ -1669,8 +2035,10 @@ const App = (() => {
         document.querySelector('[data-view="unified"]')?.classList.add('active');
         clearReader();
       }
+      localFolderCollapsedIds.delete(Number(folder.id));
       renderLocalFolders(result.folders || []);
       status(t('localFolder.deleted', { name: folder.name }), 'success');
+      listViewCache.clear();
       await refresh();
     } catch (error) {
       status(`${t('error')} : ${error.message}`, 'error');
@@ -1838,6 +2206,17 @@ const App = (() => {
   let sidebarCountsBusy = false;
   let sidebarCountsAgain = false;
 
+  // LibraMail 0.4.4 — navigation locale préchargée.
+  //
+  // Un clic de navigation pure ne doit pas déclencher toute la mécanique
+  // des compteurs de la sidebar. Les dossiers voisins sont aussi préchargés
+  // en arrière-plan pour que le clic suivant bénéficie déjà du cache.
+  const LOCAL_FOLDER_CACHE_FRESH_MS = 3500;
+  const LOCAL_FOLDER_PREFETCH_TTL_MS = 15000;
+  const localFolderPrefetchInFlight = new Map();
+  let localFolderRevalidateTimer = null;
+  let localFolderPrefetchTimer = null;
+
   function listViewCacheKey(params = null, conversationMode = null) {
     const effectiveParams = params || listParams();
     const effectiveConversationMode = conversationMode === null
@@ -1848,6 +2227,148 @@ const App = (() => {
       params: effectiveParams,
     });
   }
+  function localFolderCacheAge(snapshot) {
+    return Math.max(0, Date.now() - Number(snapshot?.cachedAt || 0));
+  }
+
+  function localFolderViewParams(folderId) {
+    if (view.type !== 'localFolder') return null;
+    const params = { ...listParams() };
+    params.localFolderId = folderId;
+    return params;
+  }
+
+  function localFolderPrefetchCandidates(folderId) {
+    const id = Number(folderId);
+    if (!Number.isInteger(id) || id <= 0) return [];
+
+    const all = flattenLocalFolderTree({ respectCollapsed: false });
+    const currentIndex = all.findIndex(item => Number(item.folder.id) === id);
+    if (currentIndex < 0) return [];
+
+    const currentFolder = all[currentIndex].folder;
+    const ids = [];
+    const push = value => {
+      const candidate = Number(value);
+      if (!Number.isInteger(candidate) || candidate <= 0 || candidate === id) return;
+      if (!ids.includes(candidate)) ids.push(candidate);
+    };
+
+    push(currentFolder.parent_id);
+    push(all[currentIndex - 1]?.folder?.id);
+    push(all[currentIndex + 1]?.folder?.id);
+
+    for (const item of all) {
+      if (Number(item.folder.parent_id) === id) push(item.folder.id);
+      if (ids.length >= 5) break;
+    }
+    return ids.slice(0, 5);
+  }
+
+  function invalidateLocalFolderCachedViews(folderIds = []) {
+    const wanted = new Set(
+      (Array.isArray(folderIds) ? folderIds : [folderIds])
+        .map(Number)
+        .filter(id => Number.isInteger(id) && id > 0)
+    );
+    if (!wanted.size) return;
+
+    for (const key of [...listViewCache.keys()]) {
+      try {
+        const parsed = JSON.parse(key);
+        const id = Number(parsed?.params?.localFolderId);
+        if (wanted.has(id)) listViewCache.delete(key);
+      } catch {}
+    }
+  }
+
+  async function prefetchLocalFolderView(folderId) {
+    if (view.type !== 'localFolder') return;
+    const params = localFolderViewParams(folderId);
+    if (!params) return;
+
+    const conversationMode = config.conversationView !== false;
+    const method = conversationMode ? 'conversations.list' : 'messages.list';
+    const cacheKey = listViewCacheKey(params, conversationMode);
+    const cached = listViewCache.get(cacheKey);
+
+    if (cached && localFolderCacheAge(cached) < LOCAL_FOLDER_PREFETCH_TTL_MS) return;
+    if (localFolderPrefetchInFlight.has(cacheKey)) return;
+
+    const task = rpc(method, params)
+      .then(result => {
+        result.rows = decorateRows(result.rows);
+        listViewCache.set(cacheKey, {
+          rows: result.rows,
+          counts: result.counts || {},
+          cachedAt: Date.now(),
+        });
+      })
+      .catch(() => {})
+      .finally(() => {
+        localFolderPrefetchInFlight.delete(cacheKey);
+      });
+
+    localFolderPrefetchInFlight.set(cacheKey, task);
+    await task;
+  }
+
+  function scheduleLocalFolderPrefetch(folderId, delay = 500) {
+    if (localFolderPrefetchTimer) clearTimeout(localFolderPrefetchTimer);
+    localFolderPrefetchTimer = setTimeout(() => {
+      localFolderPrefetchTimer = null;
+      if (view.type !== 'localFolder'
+          || String(view.localFolderId) !== String(folderId)) return;
+
+      for (const candidateId of localFolderPrefetchCandidates(folderId)) {
+        prefetchLocalFolderView(candidateId).catch(() => {});
+      }
+    }, Math.max(0, Number(delay) || 0));
+  }
+
+  function scheduleLocalFolderRevalidate(options, delay = 420) {
+    if (localFolderRevalidateTimer) clearTimeout(localFolderRevalidateTimer);
+    localFolderRevalidateTimer = setTimeout(async () => {
+      localFolderRevalidateTimer = null;
+
+      const {
+        token,
+        method,
+        params,
+        cacheKey,
+        conversationMode,
+        folderId,
+      } = options;
+
+      if (token !== listRefreshToken
+          || view.type !== 'localFolder'
+          || String(view.localFolderId) !== String(folderId)) return;
+
+      try {
+        const result = await rpc(method, params);
+        result.rows = decorateRows(result.rows);
+        const snapshot = {
+          rows: result.rows,
+          counts: result.counts || {},
+          cachedAt: Date.now(),
+        };
+        listViewCache.set(cacheKey, snapshot);
+
+        if (token !== listRefreshToken
+            || view.type !== 'localFolder'
+            || String(view.localFolderId) !== String(folderId)) return;
+
+        renderListResult(snapshot, {
+          preserveListState: true,
+          conversationMode,
+        });
+      } catch (error) {
+        console.warn('[LibraMail] Révalidation dossier local :', error);
+      }
+    }, Math.max(0, Number(delay) || 0));
+  }
+
+
 
   function listSubtitle(counts = {}, conversationMode = config.conversationView !== false) {
     return conversationMode
@@ -1918,6 +2439,7 @@ const App = (() => {
   async function refresh({
     preserveListState = false,
     preferCache = true,
+    localFolderNavigation = false,
   } = {}) {
     if (!preserveListState) closeQuickLabelMenu();
     if (!list || !ws || ws.readyState !== WebSocket.OPEN) return;
@@ -1928,9 +2450,27 @@ const App = (() => {
     const cacheKey = listViewCacheKey(params, conversationMode);
     const token = ++listRefreshToken;
     const cached = preferCache ? listViewCache.get(cacheKey) : null;
+    const currentLocalFolderId = view.type === 'localFolder'
+      ? view.localFolderId
+      : null;
 
     if (cached) {
       renderListResult(cached, { preserveListState, conversationMode });
+
+      if (localFolderNavigation
+          && currentLocalFolderId !== null
+          && localFolderCacheAge(cached) < LOCAL_FOLDER_CACHE_FRESH_MS) {
+        scheduleLocalFolderRevalidate({
+          token,
+          method,
+          params,
+          cacheKey,
+          conversationMode,
+          folderId: currentLocalFolderId,
+        });
+        scheduleLocalFolderPrefetch(currentLocalFolderId);
+        return;
+      }
     } else {
       list.setData([], mailListOptions(false));
       document.getElementById('list-sub').textContent = t('list.loading');
@@ -1948,15 +2488,25 @@ const App = (() => {
 
       if (token !== listRefreshToken) return;
 
-      renderListResult(snapshot, { preserveListState: true, conversationMode });
-      scheduleSidebarCountsRefresh();
+      renderListResult(snapshot, {
+        preserveListState: true,
+        conversationMode,
+      });
+
+      if (!localFolderNavigation) scheduleSidebarCountsRefresh();
+
+      if (localFolderNavigation && currentLocalFolderId !== null) {
+        scheduleLocalFolderPrefetch(currentLocalFolderId);
+      }
     } catch (error) {
       if (token === listRefreshToken && !cached) {
-        document.getElementById('list-sub').textContent = `${t('error')} : ${error.message}`;
+        document.getElementById('list-sub').textContent =
+          `${t('error')} : ${error.message}`;
       }
       throw error;
     }
   }
+
 
   function setCount(id, number) {
     const element = document.getElementById(id);
@@ -6692,8 +7242,8 @@ const App = (() => {
     const previous = String(select.value || '');
     const options = [
       `<option value="">${esc(t('emlImport.localFolderNone'))}</option>`,
-      ...currentLocalFolders.map(folder =>
-        `<option value="${esc(folder.id)}">${esc(folder.name)}</option>`
+      ...flattenLocalFolderTree({ respectCollapsed: false }).map(({ folder, path }) =>
+        `<option value="${esc(folder.id)}">${esc(path)}</option>`
       ),
     ];
 
@@ -6705,6 +7255,7 @@ const App = (() => {
     }
     select.disabled = backupBusy;
   }
+
 
   function populateEmlImportAccounts() {
     const select = document.getElementById('eml-import-account');

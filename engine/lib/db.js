@@ -37,6 +37,125 @@ function ensureColumn(table, name, sqlType) {
   }
 }
 
+// LibraMail 0.4.4 — noms de dossiers uniques par parent.
+//
+// Le premier schéma des dossiers locaux imposait UNIQUE(name), donc un nom
+// ne pouvait apparaître qu'une seule fois dans toute l'arborescence.
+// Désormais l'unicité porte sur (parent_id, name), avec parent_id NULL
+// normalisé à 0 pour les dossiers racine.
+function migrateLocalFolderNameScope() {
+  const table = db.prepare(`
+    SELECT sql
+      FROM sqlite_master
+     WHERE type='table' AND name='local_folders'
+  `).get();
+
+  if (!table?.sql) return;
+
+  const createIndexes = () => {
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_local_folders_parent
+        ON local_folders(parent_id, name COLLATE NOCASE);
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_local_folders_parent_name
+        ON local_folders(COALESCE(parent_id, 0), name COLLATE NOCASE);
+
+      CREATE INDEX IF NOT EXISTS idx_message_local_folder_folder
+        ON message_local_folder(folder_id, message_id);
+    `);
+  };
+
+  const hasGlobalUnique =
+    /name\s+TEXT\s+NOT\s+NULL\s+COLLATE\s+NOCASE\s+UNIQUE/i
+      .test(String(table.sql));
+
+  if (!hasGlobalUnique) {
+    createIndexes();
+    return;
+  }
+
+  const beforeFolders = Number(
+    db.prepare('SELECT COUNT(*) AS n FROM local_folders').get()?.n
+  ) || 0;
+  const beforeAssignments = Number(
+    db.prepare('SELECT COUNT(*) AS n FROM message_local_folder').get()?.n
+  ) || 0;
+
+  const foreignKeysEnabled =
+    Number(db.pragma('foreign_keys', { simple: true })) === 1;
+
+  if (foreignKeysEnabled) db.pragma('foreign_keys = OFF');
+
+  try {
+    db.transaction(() => {
+      db.exec(`
+        DROP TABLE IF EXISTS message_local_folder_v044_scope;
+        DROP TABLE IF EXISTS local_folders_v044_scope;
+
+        CREATE TABLE local_folders_v044_scope (
+          id INTEGER PRIMARY KEY,
+          name TEXT NOT NULL COLLATE NOCASE,
+          color TEXT NOT NULL DEFAULT '#4f8bd6',
+          parent_id INTEGER REFERENCES local_folders_v044_scope(id) ON DELETE RESTRICT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        INSERT INTO local_folders_v044_scope
+          (id, name, color, parent_id, created_at, updated_at)
+        SELECT id, name, color, parent_id, created_at, updated_at
+          FROM local_folders;
+
+        CREATE TABLE message_local_folder_v044_scope (
+          message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+          folder_id INTEGER NOT NULL REFERENCES local_folders_v044_scope(id) ON DELETE CASCADE,
+          assigned_at INTEGER NOT NULL
+        );
+
+        INSERT INTO message_local_folder_v044_scope
+          (message_id, folder_id, assigned_at)
+        SELECT message_id, folder_id, assigned_at
+          FROM message_local_folder;
+
+        DROP TABLE message_local_folder;
+        DROP TABLE local_folders;
+
+        ALTER TABLE local_folders_v044_scope
+          RENAME TO local_folders;
+
+        ALTER TABLE message_local_folder_v044_scope
+          RENAME TO message_local_folder;
+      `);
+    })();
+
+    createIndexes();
+
+    const afterFolders = Number(
+      db.prepare('SELECT COUNT(*) AS n FROM local_folders').get()?.n
+    ) || 0;
+    const afterAssignments = Number(
+      db.prepare('SELECT COUNT(*) AS n FROM message_local_folder').get()?.n
+    ) || 0;
+
+    if (afterFolders !== beforeFolders || afterAssignments !== beforeAssignments) {
+      throw new Error(
+        `Migration dossiers locaux incomplète : `
+        + `${afterFolders}/${beforeFolders} dossiers, `
+        + `${afterAssignments}/${beforeAssignments} affectations`
+      );
+    }
+  } finally {
+    if (foreignKeysEnabled) db.pragma('foreign_keys = ON');
+  }
+
+  const fkErrors = db.pragma('foreign_key_check');
+  if (fkErrors.length) {
+    throw new Error(
+      `Migration dossiers locaux : ${fkErrors.length} erreur(s) de clé étrangère`
+    );
+  }
+}
+
 function migrateMessageData() {
   ensureColumn('messages', 'thread_key', "TEXT DEFAULT ''");
   ensureColumn('messages', 'in_reply_to', 'TEXT');
@@ -237,8 +356,9 @@ function init(dataDir) {
 
   CREATE TABLE IF NOT EXISTS local_folders (
     id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    name TEXT NOT NULL COLLATE NOCASE,
     color TEXT NOT NULL DEFAULT '#4f8bd6',
+    parent_id INTEGER REFERENCES local_folders(id) ON DELETE RESTRICT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );
@@ -418,6 +538,18 @@ function init(dataDir) {
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_calendar_events_import_key ON calendar_events(import_key)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_calendar_events_subscription ON calendar_events(subscription_id, start_at)');
 
+  // LibraMail 0.4.4 — hiérarchie des dossiers locaux.
+  ensureColumn(
+    'local_folders',
+    'parent_id',
+    'INTEGER REFERENCES local_folders(id) ON DELETE RESTRICT'
+  );
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_local_folders_parent
+      ON local_folders(parent_id, name COLLATE NOCASE);
+  `);
+
+  migrateLocalFolderNameScope();
   migrateMessageData();
   migrateEmlPaths(dataDir);
 
@@ -1251,50 +1383,169 @@ function normalizeLocalFolderInput(name, color) {
   return { name: cleanName, color: cleanColor };
 }
 
+function normalizeLocalFolderParent(parentId, currentId = null) {
+  if (parentId === null || parentId === undefined || parentId === '') return null;
+
+  const normalized = Number(parentId);
+  if (!Number.isInteger(normalized) || normalized <= 0) {
+    throw new Error('Dossier local parent invalide');
+  }
+
+  const parent = db.prepare('SELECT id, parent_id FROM local_folders WHERE id=?').get(normalized);
+  if (!parent) throw new Error('Dossier local parent introuvable');
+
+  const current = Number(currentId);
+  if (Number.isInteger(current) && current > 0) {
+    if (normalized === current) {
+      throw new Error('Un dossier local ne peut pas être son propre parent');
+    }
+
+    const seen = new Set();
+    let cursor = parent;
+    const selectParent = db.prepare('SELECT id, parent_id FROM local_folders WHERE id=?');
+
+    while (cursor) {
+      if (Number(cursor.id) === current) {
+        throw new Error('Impossible de déplacer un dossier dans l’un de ses sous-dossiers');
+      }
+      if (seen.has(Number(cursor.id))) {
+        throw new Error('Arborescence de dossiers locaux invalide');
+      }
+      seen.add(Number(cursor.id));
+      const nextId = Number(cursor.parent_id);
+      cursor = Number.isInteger(nextId) && nextId > 0 ? selectParent.get(nextId) : null;
+    }
+  }
+
+  return normalized;
+}
+
+// LibraMail 0.4.4 — compteurs hiérarchiques stabilisés.
+//
+// Les compteurs affichés sur un parent représentent toute sa branche.
+// Les compteurs directs restent exposés séparément afin de ne pas perdre
+// l'information sur le contenu réellement rangé dans ce dossier.
 function listLocalFolders() {
-  return db.prepare(`
-    SELECT lf.id, lf.name, lf.color, lf.created_at, lf.updated_at,
+  const folders = db.prepare(`
+    SELECT lf.id, lf.name, lf.color, lf.parent_id, lf.created_at, lf.updated_at,
+           (SELECT COUNT(*)
+              FROM local_folders child
+             WHERE child.parent_id=lf.id) AS child_count,
            COALESCE(SUM(CASE
              WHEN m.id IS NOT NULL
               AND m.folder_role IN ('inbox','sent','other')
-              AND m.is_spam=0 THEN 1 ELSE 0 END), 0) AS message_count,
+              AND m.is_spam=0 THEN 1 ELSE 0 END), 0) AS direct_message_count,
            COALESCE(SUM(CASE
              WHEN m.id IS NOT NULL
               AND m.folder_role IN ('inbox','sent','other')
               AND m.is_spam=0
-              AND m.seen=0 THEN 1 ELSE 0 END), 0) AS unread_count
+              AND m.seen=0 THEN 1 ELSE 0 END), 0) AS direct_unread_count
       FROM local_folders lf
       LEFT JOIN message_local_folder mlf ON mlf.folder_id=lf.id
       LEFT JOIN messages m ON m.id=mlf.message_id
-     GROUP BY lf.id, lf.name, lf.color, lf.created_at, lf.updated_at
-     ORDER BY lf.name COLLATE NOCASE, lf.id
+     GROUP BY lf.id, lf.name, lf.color, lf.parent_id, lf.created_at, lf.updated_at
+     ORDER BY CASE WHEN lf.parent_id IS NULL THEN 0 ELSE 1 END,
+              lf.parent_id,
+              lf.name COLLATE NOCASE,
+              lf.id
   `).all();
+
+  const byId = new Map(folders.map(folder => [Number(folder.id), folder]));
+  const children = new Map();
+
+  for (const folder of folders) {
+    const parentId = Number(folder.parent_id);
+    if (!Number.isInteger(parentId) || parentId <= 0 || !byId.has(parentId)) continue;
+    if (!children.has(parentId)) children.set(parentId, []);
+    children.get(parentId).push(Number(folder.id));
+  }
+
+  const totals = new Map();
+
+  const aggregate = (folderId, visiting = new Set()) => {
+    if (totals.has(folderId)) return totals.get(folderId);
+
+    const folder = byId.get(folderId);
+    if (!folder) return { messages: 0, unread: 0 };
+
+    // La création/déplacement interdit déjà les cycles. Cette garde évite
+    // toutefois qu'une ancienne base incohérente puisse bloquer l'interface.
+    if (visiting.has(folderId)) {
+      return {
+        messages: Number(folder.direct_message_count) || 0,
+        unread: Number(folder.direct_unread_count) || 0,
+      };
+    }
+
+    const nextVisiting = new Set(visiting);
+    nextVisiting.add(folderId);
+
+    let messages = Number(folder.direct_message_count) || 0;
+    let unread = Number(folder.direct_unread_count) || 0;
+
+    for (const childId of children.get(folderId) || []) {
+      const childTotal = aggregate(childId, nextVisiting);
+      messages += Number(childTotal.messages) || 0;
+      unread += Number(childTotal.unread) || 0;
+    }
+
+    const total = { messages, unread };
+    totals.set(folderId, total);
+    return total;
+  };
+
+  return folders.map(folder => {
+    const total = aggregate(Number(folder.id));
+    return {
+      ...folder,
+      message_count: total.messages,
+      unread_count: total.unread,
+    };
+  });
 }
 
-function addLocalFolder(name, color = '') {
+function addLocalFolder(name, color = '', parentId = null) {
   const clean = normalizeLocalFolderInput(name, color);
+  const normalizedParentId = normalizeLocalFolderParent(parentId);
   const now = Date.now();
   return db.prepare(`
-    INSERT INTO local_folders(name,color,created_at,updated_at)
-    VALUES(?,?,?,?)
-  `).run(clean.name, clean.color, now, now);
+    INSERT INTO local_folders(name,color,parent_id,created_at,updated_at)
+    VALUES(?,?,?,?,?)
+  `).run(clean.name, clean.color, normalizedParentId, now, now);
 }
 
-function updateLocalFolder(id, name, color = '') {
+function updateLocalFolder(id, name, color = '', parentId = undefined) {
   const folderId = Number(id);
   if (!Number.isInteger(folderId) || folderId <= 0) throw new Error('Dossier local invalide');
   const existing = db.prepare('SELECT * FROM local_folders WHERE id=?').get(folderId);
   if (!existing) throw new Error('Dossier local introuvable');
+
   const clean = normalizeLocalFolderInput(name, color || existing.color);
+  const normalizedParentId = parentId === undefined
+    ? (Number(existing.parent_id) > 0 ? Number(existing.parent_id) : null)
+    : normalizeLocalFolderParent(parentId, folderId);
+
   db.prepare(`
-    UPDATE local_folders SET name=?, color=?, updated_at=? WHERE id=?
-  `).run(clean.name, clean.color, Date.now(), folderId);
+    UPDATE local_folders
+       SET name=?, color=?, parent_id=?, updated_at=?
+     WHERE id=?
+  `).run(clean.name, clean.color, normalizedParentId, Date.now(), folderId);
+
   return db.prepare('SELECT * FROM local_folders WHERE id=?').get(folderId);
 }
 
 function removeLocalFolder(id) {
   const folderId = Number(id);
   if (!Number.isInteger(folderId) || folderId <= 0) throw new Error('Dossier local invalide');
+
+  const children = db.prepare(
+    'SELECT COUNT(*) AS n FROM local_folders WHERE parent_id=?'
+  ).get(folderId)?.n || 0;
+
+  if (Number(children) > 0) {
+    throw new Error('Ce dossier contient des sous-dossiers. Supprimez-les d’abord.');
+  }
+
   return db.prepare('DELETE FROM local_folders WHERE id=?').run(folderId).changes > 0;
 }
 
@@ -1302,7 +1553,7 @@ function getMessageLocalFolder(messageId) {
   const id = Number(messageId);
   if (!Number.isInteger(id) || id <= 0) return null;
   return db.prepare(`
-    SELECT lf.id, lf.name, lf.color, mlf.assigned_at
+    SELECT lf.id, lf.name, lf.color, lf.parent_id, mlf.assigned_at
       FROM message_local_folder mlf
       JOIN local_folders lf ON lf.id=mlf.folder_id
      WHERE mlf.message_id=?
