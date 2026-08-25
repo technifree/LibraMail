@@ -1,3 +1,35 @@
+# LibraMail 0.4.5 - 2026-08-25
+
+LibraMail 0.4.5 est une version corrective centrée sur Windows et les échanges de messages au format EML.
+
+## Démarrage Windows
+
+- Le délai d’attente du moteur embarqué passe de 12 à 30 secondes.
+- Une dernière vérification WebSocket est effectuée avant de déclarer un échec de démarrage.
+- En cas d’échec réel, LibraMail tente désormais d’arrêter proprement le processus `node.exe` qu’il a lancé.
+- Le journal `data/engine-startup.log` est rendu plus exploitable sous Windows.
+
+## Import EML
+
+- Ajout d’un diagnostic détaillé par étape lors d’un échec d’import : validation, lecture, détection de doublon, parsing, snippet, base de données, stockage, indexation ou classement.
+- Création de `data/eml-import.log` après chaque import afin de faciliter les retours de test et le diagnostic sous Windows.
+- Affichage de la première erreur directement dans l’interface.
+- Rafraîchissement immédiat des compteurs de dossiers locaux après import.
+- Invalidation renforcée du cache et des préchargements afin d’éviter l’affichage d’un ancien état après import.
+
+## Export EML
+
+- Ajout d’une action « Exporter .eml » dans le lecteur de message.
+- Le message est exporté depuis son MIME brut stocké par LibraMail, sans reconstruction par le parseur.
+- Les en-têtes, le `Message-ID`, les parties texte/HTML et les pièces jointes sont donc conservés tels qu’ils sont enregistrés.
+- Le nom de fichier proposé est basé sur l’objet du message et nettoyé pour rester compatible avec Windows, Linux et macOS.
+- L’extension `.eml` est ajoutée automatiquement si nécessaire.
+
+## Tests
+
+- Ajout de tests dédiés au démarrage Windows, au diagnostic EML, au rafraîchissement post-import et à l’export EML.
+- Les tests existants de dossiers locaux, sauvegarde/restauration, import EML, IMAP IDLE, calendrier et interface restent validés.
+
 # LibraMail 0.4.4 - 2026-08-23
 
 LibraMail 0.4.4 étend l'organisation locale des messages, améliore la gestion des pièces jointes et renforce la robustesse des relèves IMAP.

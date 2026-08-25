@@ -1,73 +1,53 @@
-# LibraMail 0.4.4
+# LibraMail 0.4.5
 
 ## Français
 
-LibraMail 0.4.4 apporte une organisation locale plus complète des messages, une meilleure gestion des pièces jointes et une relève IMAP plus robuste.
+LibraMail 0.4.5 est une version corrective centrée sur la robustesse sous Windows et les échanges de messages au format EML.
 
-### Dossiers locaux
+### Démarrage Windows
 
-Les dossiers locaux sont indépendants des comptes IMAP : un message peut être classé localement sans être déplacé sur le serveur.
+- Le délai d’attente du moteur embarqué passe de 12 à 30 secondes.
+- Une dernière vérification est effectuée avant de considérer le démarrage comme échoué.
+- Si le moteur ne répond réellement pas, LibraMail tente maintenant d’arrêter proprement le `node.exe` lancé afin d’éviter qu’un processus reste en arrière-plan.
+- Le journal `data/engine-startup.log` est plus exploitable sous Windows.
 
-- Dossiers et sous-dossiers de profondeur libre.
-- Compteurs récursifs sur toute la branche.
-- Classement des messages par glisser-déposer.
-- Déplacement des dossiers eux-mêmes par glisser-déposer.
-- Retour d'un dossier à la racine.
-- Protection contre les cycles et les doublons entre dossiers frères.
-- Même nom autorisé dans des branches différentes.
-- Navigation accélérée grâce au cache et au préchargement des dossiers voisins.
-- Sauvegarde/restauration de la hiérarchie et des affectations.
+### Import EML
 
-L'import EML peut désormais classer directement les nouveaux messages dans un dossier local. Les doublons détectés ne sont pas reclassés automatiquement.
+- Les erreurs d’import sont maintenant détaillées par étape.
+- Un rapport `data/eml-import.log` est généré après chaque import.
+- La première erreur est affichée directement dans l’interface.
+- Les compteurs et les vues de dossiers locaux sont rafraîchis immédiatement après import.
+- Les caches de navigation sont invalidés de façon plus stricte pour éviter l’affichage d’informations périmées.
 
-### Pièces jointes et interface
+### Export EML
 
-- Ouverture directe des pièces jointes avec l'application associée du système.
-- Action « Enregistrer sous » toujours disponible.
-- Blocage de l'ouverture directe pour les extensions potentiellement dangereuses.
-- Indicateur de pièce jointe toujours visible au survol de la liste.
-- Affichage de l'année pour les anciens messages.
-- Volet Planning rendu réellement responsive sur les fenêtres étroites.
+Une nouvelle action **Exporter .eml** est disponible dans le lecteur de message.
 
-### Relève IMAP
-
-La synchronisation IMAP bénéficie maintenant de limites de temps par phase, d'une interruption contrôlée des connexions bloquées et d'une reconnexion automatique.
-
-Les connexions IMAP IDLE persistantes récupèrent également proprement après des erreurs réseau telles que `ETIMEDOUT` ou `ECONNRESET`, sans remonter en erreur non interceptée.
+L’export utilise directement le MIME brut conservé par LibraMail : le message n’est pas reconstruit. Les en-têtes, le `Message-ID`, le contenu texte/HTML et les pièces jointes sont ainsi préservés.
 
 ---
 
 ## English
 
-LibraMail 0.4.4 adds more complete local message organization, improved attachment handling, and more robust IMAP synchronization.
+LibraMail 0.4.5 is a corrective release focused on Windows robustness and EML message exchange.
 
-### Local folders
+### Windows startup
 
-Local folders are independent from IMAP accounts: messages can be filed locally without moving them on the server.
+- The bundled engine startup timeout is increased from 12 to 30 seconds.
+- A final probe is performed before startup is considered failed.
+- On a real startup failure, LibraMail now attempts to stop the `node.exe` process it launched so that no orphaned engine remains in the background.
+- `data/engine-startup.log` is easier to use for Windows diagnostics.
 
-- Unlimited nested local folders.
-- Recursive counters across the whole branch.
-- Drag-and-drop message filing.
-- Drag-and-drop folder moves.
-- Move folders back to root.
-- Cycle prevention and sibling duplicate protection.
-- Identical folder names allowed in different branches.
-- Faster navigation using cache and nearby-folder prefetching.
-- Backup and restore of the hierarchy and message assignments.
+### EML import
 
-EML import can now file newly imported messages directly into a local folder. Detected duplicates are not automatically reclassified.
+- Import failures now include detailed processing-stage information.
+- A `data/eml-import.log` report is generated after each import.
+- The first import error is displayed directly in the interface.
+- Local-folder counters and views are refreshed immediately after import.
+- Navigation caches are invalidated more strictly to avoid stale views.
 
-### Attachments and interface
+### EML export
 
-- Open attachments directly with the operating system's associated application.
-- “Save As” remains available.
-- Direct opening is blocked for potentially dangerous extensions.
-- Attachment indicator remains visible when hovering message rows.
-- Older message dates now include the year.
-- The Planning side pane is now properly responsive on narrow windows.
+A new **Export .eml** action is available in the message reader.
 
-### IMAP synchronization
-
-IMAP synchronization now includes per-phase time limits, controlled interruption of stalled connections, and automatic reconnection.
-
-Persistent IMAP IDLE connections also recover cleanly from network errors such as `ETIMEDOUT` or `ECONNRESET` without surfacing as uncaught errors.
+Export uses the raw MIME message stored by LibraMail without rebuilding it. Headers, `Message-ID`, text/HTML parts, and attachments are therefore preserved.
