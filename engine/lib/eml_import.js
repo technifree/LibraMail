@@ -101,13 +101,26 @@ function safeDate(parsed, stats) {
   return mtime > 0 ? mtime : Date.now();
 }
 
+// LibraMail 0.4.5 — diagnostic EML par étape
+function annotateImportError(error, stage) {
+  const value = error instanceof Error ? error : new Error(String(error || 'Erreur inconnue'));
+  if (!value.emlStage) value.emlStage = String(stage || 'unknown');
+  return value;
+}
+function withImportStageSync(stage, action) {
+  try { return action(); } catch (error) { throw annotateImportError(error, stage); }
+}
+async function withImportStage(stage, action) {
+  try { return await action(); } catch (error) { throw annotateImportError(error, stage); }
+}
+
 async function importOne(account, filePath, mode, localFolderId = null) {
   const resolved = path.resolve(String(filePath || ''));
   if (path.extname(resolved).toLowerCase() !== '.eml') {
     throw new Error('Extension de fichier invalide (attendu : .eml)');
   }
 
-  const stats = fs.statSync(resolved);
+  const stats = withImportStageSync('validation', () => fs.statSync(resolved));
   if (!stats.isFile()) throw new Error('Le chemin sélectionné n’est pas un fichier');
   if (stats.size <= 0) throw new Error('Le fichier EML est vide');
   if (stats.size > MAX_FILE_BYTES) {
@@ -118,23 +131,24 @@ async function importOne(account, filePath, mode, localFolderId = null) {
     throw new Error(mailStore.status().error || 'Stockage chiffré indisponible');
   }
 
-  const raw = fs.readFileSync(resolved);
+  const raw = withImportStageSync('read', () => fs.readFileSync(resolved));
   const sha256 = crypto.createHash('sha256').update(raw).digest('hex');
 
   // Le SHA est vérifié avant le parsing pour rendre un second import du même
   // fichier presque gratuit, même si le message ne possède pas de Message-ID.
-  const shaDuplicate = findDuplicate(account.id, '', sha256);
+  const shaDuplicate = withImportStageSync('duplicate-check', () => findDuplicate(account.id, '', sha256));
   if (shaDuplicate) return { duplicate: true, reason: shaDuplicate.reason };
 
-  const parsed = await simpleParser(raw, { skipImageLinks: true });
+  const parsed = await withImportStage('parse', () => simpleParser(raw, { skipImageLinks: true }));
   const role = detectRole(parsed, account, mode);
   const folder = role === 'sent' ? LOCAL_SENT : LOCAL_INBOX;
   const messageId = parsed.messageId || null;
 
-  const duplicate = findDuplicate(account.id, messageId, sha256);
+  const duplicate = withImportStageSync('duplicate-check', () => findDuplicate(account.id, messageId, sha256));
   if (duplicate) return { duplicate: true, reason: duplicate.reason };
 
   const text = String(parsed.text || '').replace(/\s+/g, ' ').trim();
+  const protectedSnippet = withImportStageSync('snippet', () => mailStore.protectSnippet(account.id, text.slice(0, 160)));
   const fromItem = parsed.from?.value?.[0] || {};
   const uid = db.nextLocalUid(account.id, folder);
   const row = {
@@ -148,7 +162,7 @@ async function importOne(account, filePath, mode, localFolderId = null) {
     from_addr: fromItem.address || '',
     to_addr: addressList(parsed.to),
     date: safeDate(parsed, stats),
-    snippet: mailStore.protectSnippet(account.id, text.slice(0, 160)),
+    snippet: protectedSnippet,
     seen: 1,
     flagged: 0,
     answered: 0,
@@ -169,18 +183,18 @@ async function importOne(account, filePath, mode, localFolderId = null) {
   let id = null;
   let descriptor = null;
   try {
-    ({ id } = db.upsertMessage(row));
-    descriptor = mailStore.storeMessage({ ...row, id }, raw);
-    db.setMessageStorage(id, descriptor);
-    db.indexBody(id, row, '', {
+    ({ id } = withImportStageSync('database', () => db.upsertMessage(row)));
+    descriptor = withImportStageSync('storage', () => mailStore.storeMessage({ ...row, id }, raw));
+    withImportStageSync('database', () => db.setMessageStorage(id, descriptor));
+    withImportStageSync('index', () => db.indexBody(id, row, '', {
       secureTokens: mailStore.searchTokens(text),
-    });
+    }));
 
     // LibraMail 0.4.4 — import EML vers dossier local.
     // L'association n'est faite que pour un message réellement importé.
     // Un doublon existant n'est donc jamais reclassé silencieusement.
     if (localFolderId != null) {
-      db.setMessageLocalFolder(id, localFolderId);
+      withImportStageSync('filing', () => db.setMessageLocalFolder(id, localFolderId));
     }
 
     return { imported: true, id, role, folder, localFolderId };
@@ -239,9 +253,11 @@ async function importFiles({ account, paths = [], mode = 'auto', localFolderId =
       else if (result.imported) imported++;
     } catch (error) {
       failed++;
+      console.warn(`[LibraMail][EML] ${path.basename(file)} · ${String(error?.emlStage || 'validation')} · ${String(error?.message || error)}`);
       if (errors.length < 20) {
         errors.push({
           name: path.basename(file),
+          stage: String(error?.emlStage || 'validation'),
           error: String(error?.message || error),
         });
       }

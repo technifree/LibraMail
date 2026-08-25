@@ -256,6 +256,7 @@ const App = (() => {
     }
   }
 
+// LibraMail 0.4.5 — démarrage Windows robuste
   async function ensureBundledWindowsEngine() {
     if (!usesBundledWindowsEngine()) return;
     startupMessage('Initialisation du moteur…');
@@ -290,26 +291,51 @@ const App = (() => {
     bundledEngineProcess = await Neutralino.os.spawnProcess(command, { cwd: appDir });
     bundledEngineOwned = true;
 
-    const deadline = Date.now() + 12000;
+    const startupStartedAt = Date.now();
+    const deadline = startupStartedAt + 30000;
     while (Date.now() < deadline) {
-      if (await probeEngine(220)) return;
+      if (await probeEngine(300)) {
+        await writeEngineStartupLog(`PRÊT : moteur joignable après ${Date.now() - startupStartedAt} ms.`);
+        return;
+      }
       if (!bundledEngineProcess) break;
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 120));
+    }
+
+    // Dernière vérification plus longue : évite un faux échec si Node ouvre
+    // son WebSocket exactement à la limite du délai.
+    if (await probeEngine(1200)) {
+      await writeEngineStartupLog(`PRÊT tardif : moteur joignable après ${Date.now() - startupStartedAt} ms.`);
+      return;
     }
 
     const detail = bundledEngineLastError ? `\n\n${bundledEngineLastError}` : '';
-    await writeEngineStartupLog(`ÉCHEC : Le moteur n’a pas répondu dans le délai imparti.${bundledEngineLastError ? ` ${bundledEngineLastError}` : ''}`);
-    throw new Error(`Le moteur LibraMail n’a pas pu démarrer.${detail}\n\nConsultez data\\engine-startup.log.`);
+    await writeEngineStartupLog(
+      `ÉCHEC : le moteur n’a pas répondu après ${Date.now() - startupStartedAt} ms. Arrêt du processus lancé.`
+      + `${bundledEngineLastError ? ` ${bundledEngineLastError}` : ''}`
+    );
+    const stopped = await stopBundledWindowsEngine({ reason: 'startup-timeout' });
+    if (!stopped) {
+      await writeEngineStartupLog('ATTENTION : le processus moteur n’a pas confirmé son arrêt ; une nouvelle tentative sera faite à la fermeture de LibraMail.');
+    }
+    throw new Error(`Le moteur LibraMail n’a pas pu démarrer dans le délai imparti.${detail}\n\nConsultez data\\engine-startup.log.`);
   }
 
-  async function stopBundledWindowsEngine() {
-    if (!usesBundledWindowsEngine() || !bundledEngineOwned || !bundledEngineProcess?.id) return;
+  async function stopBundledWindowsEngine({ reason = '' } = {}) {
+    if (!usesBundledWindowsEngine() || !bundledEngineOwned || !bundledEngineProcess?.id) return true;
     const processId = bundledEngineProcess.id;
+    const previousOwned = bundledEngineOwned;
     bundledEngineOwned = false;
     try {
       await Neutralino.os.updateSpawnedProcess(processId, 'exit');
-    } catch {}
-    bundledEngineProcess = null;
+      bundledEngineProcess = null;
+      if (reason) await writeEngineStartupLog(`ARRÊT : moteur ${processId} (${reason}).`);
+      return true;
+    } catch (error) {
+      bundledEngineOwned = previousOwned;
+      await writeEngineStartupLog(`ARRÊT IMPOSSIBLE : moteur ${processId}${reason ? ` (${reason})` : ''} · ${error?.message || error}`);
+      return false;
+    }
   }
 
   // ---------- RPC ----------
@@ -2216,6 +2242,7 @@ const App = (() => {
   const localFolderPrefetchInFlight = new Map();
   let localFolderRevalidateTimer = null;
   let localFolderPrefetchTimer = null;
+  let listViewCacheEpoch = 0; // LibraMail 0.4.5 — invalidation forte du cache après mutation
 
   function listViewCacheKey(params = null, conversationMode = null) {
     const effectiveParams = params || listParams();
@@ -2282,6 +2309,20 @@ const App = (() => {
     }
   }
 
+  function invalidateListViewCacheAfterMutation() {
+    listViewCacheEpoch += 1;
+    listViewCache.clear();
+    if (localFolderRevalidateTimer) {
+      clearTimeout(localFolderRevalidateTimer);
+      localFolderRevalidateTimer = null;
+    }
+    if (localFolderPrefetchTimer) {
+      clearTimeout(localFolderPrefetchTimer);
+      localFolderPrefetchTimer = null;
+    }
+    localFolderPrefetchInFlight.clear();
+  }
+
   async function prefetchLocalFolderView(folderId) {
     if (view.type !== 'localFolder') return;
     const params = localFolderViewParams(folderId);
@@ -2295,8 +2336,10 @@ const App = (() => {
     if (cached && localFolderCacheAge(cached) < LOCAL_FOLDER_PREFETCH_TTL_MS) return;
     if (localFolderPrefetchInFlight.has(cacheKey)) return;
 
+    const cacheEpoch = listViewCacheEpoch;
     const task = rpc(method, params)
       .then(result => {
+        if (cacheEpoch !== listViewCacheEpoch) return;
         result.rows = decorateRows(result.rows);
         listViewCache.set(cacheKey, {
           rows: result.rows,
@@ -2328,6 +2371,7 @@ const App = (() => {
 
   function scheduleLocalFolderRevalidate(options, delay = 420) {
     if (localFolderRevalidateTimer) clearTimeout(localFolderRevalidateTimer);
+    const cacheEpoch = listViewCacheEpoch;
     localFolderRevalidateTimer = setTimeout(async () => {
       localFolderRevalidateTimer = null;
 
@@ -2346,6 +2390,7 @@ const App = (() => {
 
       try {
         const result = await rpc(method, params);
+        if (cacheEpoch !== listViewCacheEpoch) return;
         result.rows = decorateRows(result.rows);
         const snapshot = {
           rows: result.rows,
@@ -7482,22 +7527,33 @@ const App = (() => {
         failed: Number(result.failed) || 0,
       });
       const state = Number(result.failed) > 0 ? 'info' : 'success';
+      const firstError = Array.isArray(result?.errors) ? result.errors[0] : null;
+      const firstErrorText = firstError
+        ? t('emlImport.firstError', {
+            name: firstError.name || '?',
+            stage: firstError.stage || 'unknown',
+            error: firstError.error || t('error'),
+          })
+        : '';
+      const logText = result?.logFile ? t('emlImport.errorLog', { path: result.logFile }) : '';
+      const progressDetail = [message, firstErrorText, logText].filter(Boolean).join('\\n');
       setBackupProgress({
         label: t('emlImport.complete'),
         percent: 100,
-        detail: message,
+        detail: progressDetail,
         state: Number(result.failed) > 0 ? 'error' : 'success',
       });
       setBackupOperationStatus(message, state);
-      status(message, state);
+      status(Number(result.failed) > 0 && logText ? `${message} ${logText}` : message, state);
 
       if (Array.isArray(result?.folders)) {
         renderLocalFolders(result.folders);
       }
 
-      listViewCache.clear();
+      invalidateListViewCacheAfterMutation();
       await refresh({ preserveListState: true, preferCache: false });
-      scheduleSidebarCountsRefresh(0);
+      // x mails + y nouveaux mails doivent produire immédiatement x+y.
+      await refreshSidebarCounts();
     } catch (error) {
       console.error('[LibraMail] Import EML :', error);
       setBackupProgress({

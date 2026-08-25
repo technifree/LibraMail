@@ -37,7 +37,7 @@ const RESTORE_STATE_FILE = path.join(ROOT, '.libramail-restore-state.json');
 const RETENTION_CHECK_MS = 6 * 60 * 60 * 1000;
 const OUTBOX_CHECK_MS = 30 * 1000;
 const CALENDAR_SUBSCRIPTION_CHECK_MS = 60 * 1000;
-const RUNTIME_DATA_FILES = new Set(['engine.log', 'engine.stdout.log', 'engine.stderr.log', 'engine-startup.log']);
+const RUNTIME_DATA_FILES = new Set(['engine.log', 'engine.stdout.log', 'engine.stderr.log', 'engine-startup.log', 'eml-import.log']);
 
 function isRuntimeDataFile(name) {
   return RUNTIME_DATA_FILES.has(String(name || '').replace(/\\/g, '/'));
@@ -90,6 +90,39 @@ function loadJson(file, fallback) {
 }
 const saveJson = (file, object) => fs.writeFileSync(file, JSON.stringify(object, null, 2));
 const saveAccounts = () => saveJson(ACCOUNTS_FILE, accounts.map(credentialStore.serialize));
+
+function writeEmlImportLog({ account, result, localFolderId = null, selectedCount = 0 } = {}) {
+  const relativePath = 'data/eml-import.log';
+  const target = path.join(DATA, 'eml-import.log');
+  const errors = Array.isArray(result?.errors) ? result.errors : [];
+  const lines = [
+    `LibraMail ${APP_VERSION} — rapport import EML`,
+    `Date: ${new Date().toISOString()}`,
+    `Plateforme: ${process.platform} ${process.arch}`,
+    `Compte: ${account?.displayName || account?.email || account?.id || '(inconnu)'}`,
+    `Sélectionnés: ${Number(selectedCount) || Number(result?.total) || 0}`,
+    `Importés: ${Number(result?.imported) || 0}`,
+    `Doublons: ${Number(result?.duplicates) || 0}`,
+    `Erreurs: ${Number(result?.failed) || 0}`,
+    `Dossier local: ${localFolderId == null ? '(aucun)' : localFolderId}`,
+    '',
+  ];
+  if (errors.length) {
+    lines.push('Premières erreurs :');
+    for (const item of errors) {
+      lines.push(`- ${item?.name || '(fichier)'} [${item?.stage || 'unknown'}] : ${item?.error || 'Erreur inconnue'}`);
+    }
+  } else {
+    lines.push('Aucune erreur détaillée.');
+  }
+  try {
+    fs.writeFileSync(target, `\uFEFF${lines.join('\n')}\n`, 'utf8');
+    return relativePath;
+  } catch (error) {
+    console.warn(`[LibraMail][EML] Impossible d’écrire ${relativePath} : ${error.message}`);
+    return '';
+  }
+}
 
 function serializeAddressList(addressObject) {
   return (addressObject?.value || [])
@@ -1936,9 +1969,17 @@ const methods = {
       }),
     }));
 
+    const folders = db.listLocalFolders();
+    const logFile = writeEmlImportLog({
+      account,
+      result,
+      localFolderId,
+      selectedCount: Array.isArray(paths) ? paths.length : 0,
+    });
     return {
       ...result,
-      folders: db.listLocalFolders(),
+      folders,
+      logFile,
     };
   },
 

@@ -139,6 +139,8 @@
   "emlImport.complete": "Import EML terminé",
   "emlImport.description": "Ajoute un ou plusieurs messages .eml au stockage local de LibraMail sans modifier le serveur de messagerie.",
   "emlImport.done": "Import terminé : {imported} message(s) importé(s) · {duplicates} doublon(s) ignoré(s) · {failed} erreur(s).",
+  "emlImport.firstError": "Première erreur : {name} [{stage}] — {error}",
+  "emlImport.errorLog": "Détails : {path}",
   "emlImport.failed": "Échec de l’import EML",
   "emlImport.importing": "Import de {count} message(s) EML…",
   "emlImport.localHint": "Les messages sont stockés localement et chiffrés. Aucun message n’est envoyé vers le serveur IMAP ou POP3.",

@@ -1,0 +1,12 @@
+'use strict';
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const app = fs.readFileSync(path.join(__dirname, '..', 'resources', 'js', 'app.js'), 'utf8');
+assert(app.includes('// LibraMail 0.4.5 — démarrage Windows robuste'));
+assert(app.includes('startupStartedAt + 30000'));
+assert(app.includes('if (await probeEngine(1200))'));
+assert(app.includes("stopBundledWindowsEngine({ reason: 'startup-timeout' })"));
+assert(app.includes("async function stopBundledWindowsEngine({ reason = '' } = {})"));
+assert(!app.includes('const deadline = Date.now() + 12000;'));
+console.log('[LibraMail] Tests démarrage Windows 0.4.5 : OK');
