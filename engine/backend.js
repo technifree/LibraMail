@@ -2276,6 +2276,32 @@ const methods = {
   'messages.remote.allow': ({ id, urls }) => ({
     urls: db.allowMessageRemoteResources(id, urls),
   }),
+  // LibraMail 0.4.5 — export EML sans reconstruction du message.
+  'messages.exportEml': async ({ id, targetPath }) => {
+    const message = db.getMessage(id);
+    if (!message) throw new Error('Message introuvable');
+
+    const requested = String(targetPath || '').trim();
+    if (!requested) throw new Error('Chemin d’export EML invalide');
+
+    const resolvedTarget = path.resolve(
+      /\.eml$/i.test(requested) ? requested : `${requested}.eml`
+    );
+
+    const raw = readLocalMessage(message);
+    fs.writeFileSync(resolvedTarget, raw);
+
+    const size = Buffer.isBuffer(raw)
+      ? raw.length
+      : Buffer.byteLength(String(raw));
+
+    return {
+      saved: resolvedTarget,
+      filename: path.basename(resolvedTarget),
+      size,
+    };
+  },
+
   'messages.read': async ({ id }) => {
     const message = db.getMessage(id);
     if (!message) throw new Error('Message introuvable');

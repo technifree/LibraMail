@@ -3184,6 +3184,50 @@ const App = (() => {
     }
   }
 
+  // LibraMail 0.4.5 — export du message brut au format EML.
+  function defaultEmlExportFilename(message) {
+    let base = String(message?.meta?.subject || 'message')
+      .replace(/[\u0000-\u001f<>:"/\\|?*]/g, '_')
+      .replace(/[. ]+$/g, '')
+      .trim();
+
+    if (!base) base = 'message';
+    if (base.length > 140) base = base.slice(0, 140).replace(/[. ]+$/g, '').trim();
+
+    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(base)) {
+      base = `_${base}`;
+    }
+
+    return /\.eml$/i.test(base) ? base : `${base}.eml`;
+  }
+
+  async function exportCurrentMessageEml() {
+    const current = Viewer.current;
+    const messageId = Number(current?.meta?.id);
+    if (!Number.isFinite(messageId) || messageId <= 0) return;
+
+    try {
+      const defaultPath = defaultEmlExportFilename(current);
+      const target = await Neutralino.os.showSaveDialog(t('emlExport.title'), {
+        defaultPath,
+      });
+      if (!target) return;
+
+      const result = await rpc('messages.exportEml', {
+        id: messageId,
+        targetPath: target,
+      });
+
+      status(t('emlExport.done', {
+        filename: result?.filename || defaultPath,
+      }), 'success');
+    } catch (error) {
+      status(t('emlExport.failed', {
+        error: error?.message || String(error),
+      }), 'error');
+    }
+  }
+
   async function saveAttachment(messageId, attachment) {
     const target = await Neutralino.os.showSaveDialog(t('compose.attach'), {
       defaultPath: attachment.filename,
@@ -8433,6 +8477,7 @@ const App = (() => {
       Viewer.current && openCompose(Viewer.current, 'reply-all');
     document.getElementById('btn-forward').onclick = () =>
       Viewer.current && openCompose(Viewer.current, 'forward');
+    document.getElementById('btn-export-eml').onclick = exportCurrentMessageEml;
     document.getElementById('btn-r-contact').onclick = openCurrentCorrespondentContact;
     document.getElementById('btn-r-label').onclick = toggleLabelMenu;
 
