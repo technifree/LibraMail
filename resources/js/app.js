@@ -190,17 +190,40 @@ const App = (() => {
     return window.NL_OS === 'Windows';
   }
 
+  // LibraMail 0.4.6 — journal Windows persistant et arrêt de secours ciblé.
   async function writeEngineStartupLog(message, { reset = false } = {}) {
     if (window.NL_OS !== 'Windows') return;
     try {
       const appDir = String(window.NL_PATH || '').replace(/[\\/]+$/, '');
       if (!appDir) return;
-      await Neutralino.filesystem.createDirectory(`${appDir}\\data`).catch(() => {});
-      if (reset) bundledEngineStartupLog = [];
+
+      const dataDir = `${appDir}\\data`;
+      const logPath = `${dataDir}\\engine-startup.log`;
+      await Neutralino.filesystem.createDirectory(dataDir).catch(() => {});
       const stamp = new Date().toISOString();
+
+      if (reset) {
+        let previousLines = [];
+        try {
+          const previous = await Neutralino.filesystem.readFile(logPath);
+          previousLines = String(previous || '')
+            .replace(/^\uFEFF/, '')
+            .split(/\r?\n/)
+            .filter(Boolean);
+        } catch {}
+        bundledEngineStartupLog = previousLines.slice(-180);
+        bundledEngineStartupLog.push(`[${stamp}] ===== Nouvelle session LibraMail =====`);
+      }
+
       bundledEngineStartupLog.push(`[${stamp}] ${String(message || '')}`);
-      if (bundledEngineStartupLog.length > 80) bundledEngineStartupLog = bundledEngineStartupLog.slice(-80);
-      await Neutralino.filesystem.writeFile(`${appDir}\\data\\engine-startup.log`, `${bundledEngineStartupLog.join('\n')}\n`);
+      if (bundledEngineStartupLog.length > 240) {
+        bundledEngineStartupLog = bundledEngineStartupLog.slice(-240);
+      }
+
+      await Neutralino.filesystem.writeFile(
+        logPath,
+        `\uFEFF${bundledEngineStartupLog.join('\n')}\n`
+      );
     } catch {}
   }
 
@@ -321,21 +344,75 @@ const App = (() => {
     throw new Error(`Le moteur LibraMail n’a pas pu démarrer dans le délai imparti.${detail}\n\nConsultez data\\engine-startup.log.`);
   }
 
+  async function forceKillBundledWindowsEngine(processInfo, reason = '') {
+    const osPid = Number(processInfo?.pid || 0);
+    if (!Number.isInteger(osPid) || osPid <= 0) {
+      await writeEngineStartupLog(
+        `ARRÊT DE SECOURS IMPOSSIBLE : PID Windows indisponible`
+        + `${reason ? ` (${reason})` : ''}.`
+      );
+      return false;
+    }
+
+    try {
+      const result = await Neutralino.os.execCommand(
+        `taskkill.exe /PID ${osPid} /T /F`
+      );
+      const success = Number(result?.exitCode) === 0;
+      await writeEngineStartupLog(
+        `${success ? 'ARRÊT DE SECOURS' : 'ÉCHEC ARRÊT DE SECOURS'}`
+        + ` : PID Windows ${osPid}`
+        + `${reason ? ` (${reason})` : ''}`
+      );
+      return success;
+    } catch (error) {
+      await writeEngineStartupLog(
+        `ÉCHEC ARRÊT DE SECOURS : PID Windows ${osPid}`
+        + `${reason ? ` (${reason})` : ''}`
+        + ` · ${error?.message || error}`
+      );
+      return false;
+    }
+  }
+
   async function stopBundledWindowsEngine({ reason = '' } = {}) {
     if (!usesBundledWindowsEngine() || !bundledEngineOwned || !bundledEngineProcess?.id) return true;
-    const processId = bundledEngineProcess.id;
+
+    const processInfo = bundledEngineProcess;
+    const processId = processInfo.id;
     const previousOwned = bundledEngineOwned;
     bundledEngineOwned = false;
+
+    let neutralinoSucceeded = false;
     try {
       await Neutralino.os.updateSpawnedProcess(processId, 'exit');
+      neutralinoSucceeded = true;
+    } catch (error) {
+      await writeEngineStartupLog(
+        `ARRÊT NEUTRALINO IMPOSSIBLE : moteur ${processId}`
+        + `${reason ? ` (${reason})` : ''}`
+        + ` · ${error?.message || error}`
+      );
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 450));
+    const engineStillResponds = await probeEngine(250);
+
+    if (neutralinoSucceeded && !engineStillResponds) {
       bundledEngineProcess = null;
       if (reason) await writeEngineStartupLog(`ARRÊT : moteur ${processId} (${reason}).`);
       return true;
-    } catch (error) {
-      bundledEngineOwned = previousOwned;
-      await writeEngineStartupLog(`ARRÊT IMPOSSIBLE : moteur ${processId}${reason ? ` (${reason})` : ''} · ${error?.message || error}`);
-      return false;
     }
+
+    const forced = await forceKillBundledWindowsEngine(processInfo, reason);
+    if (forced) {
+      bundledEngineProcess = null;
+      return true;
+    }
+
+    bundledEngineOwned = previousOwned;
+    bundledEngineProcess = processInfo;
+    return false;
   }
 
   // ---------- RPC ----------
@@ -2064,8 +2141,11 @@ const App = (() => {
       localFolderCollapsedIds.delete(Number(folder.id));
       renderLocalFolders(result.folders || []);
       status(t('localFolder.deleted', { name: folder.name }), 'success');
-      listViewCache.clear();
+      invalidateListViewCacheAfterMutation();
+      list?.clearSelection();
+      updateBulkSelection([], { total: 0, allSelected: false });
       await refresh();
+      await refreshSidebarCounts();
     } catch (error) {
       status(`${t('error')} : ${error.message}`, 'error');
     }
@@ -2321,6 +2401,17 @@ const App = (() => {
       localFolderPrefetchTimer = null;
     }
     localFolderPrefetchInFlight.clear();
+  }
+
+  // LibraMail 0.4.6 — réconciliation forte après suppression.
+  async function reconcileAfterMessageDeletion(items = []) {
+    const normalizedItems = Array.isArray(items) ? items : [];
+    removeLocalFolderItemsFromVisibleList(normalizedItems);
+    list?.clearSelection();
+    updateBulkSelection([], { total: 0, allSelected: false });
+    invalidateListViewCacheAfterMutation();
+    await refreshVisibleList({ preserveListState: true });
+    await refreshSidebarCounts();
   }
 
   async function prefetchLocalFolderView(folderId) {
@@ -4108,10 +4199,15 @@ const App = (() => {
       });
       if (!accepted) return;
       const deletedItems = [selectionItemFromRow(row)];
-      await rpc('messages.batchDelete', { items: deletedItems });
+      const result = await rpc('messages.batchDelete', { items: deletedItems });
+      const errorCount = Array.isArray(result?.errors) ? result.errors.length : 0;
+      if (!Number(result?.processed) && errorCount) {
+        status(`${t('error')} : ${result.errors[0].error}`, 'error');
+        return;
+      }
       closeReaderTabsForItems(deletedItems);
       clearReader();
-      await refreshVisibleList({ preserveListState: true });
+      await reconcileAfterMessageDeletion(deletedItems);
     } else if (action === 'label') {
       await toggleQuickLabelMenu(row, sourceElement);
     } else if (action === 'local-folder') {
@@ -4411,7 +4507,7 @@ const App = (() => {
         : t('selection.processed', { count: result.processed || 0 }),
       errorCount ? 'error' : 'success');
       clearReader();
-      await refreshVisibleList({ preserveListState: true });
+      await reconcileAfterMessageDeletion(deletedItems);
     } catch (error) {
       status(`${t('error')} : ${error.message}`, 'error');
     }
