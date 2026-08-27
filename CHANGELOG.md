@@ -1,3 +1,54 @@
+# LibraMail 0.4.6 - 2026-08-27
+
+LibraMail 0.4.6 est une version corrective centrée sur la cohérence des vues, la sélection multiple, l’export EML et la réactivité de l’interface.
+
+## Suppression et cohérence des vues
+
+- Correction du rafraîchissement après suppression simple ou multiple de messages.
+- Invalidation renforcée des caches afin d’éviter qu’un message supprimé ou déplacé vers la corbeille réapparaisse temporairement.
+- Réinitialisation de la sélection multiple après suppression.
+- Rafraîchissement immédiat des compteurs après les opérations de suppression.
+- Meilleure cohérence des vues après suppression d’un dossier local, sans modifier le principe existant : supprimer un dossier local ne supprime pas les messages qu’il classe.
+
+## Démarrage et arrêt sous Windows
+
+- Conservation de l’historique des sessions dans `data/engine-startup.log` au lieu d’écraser le journal à chaque démarrage.
+- Journal borné afin d’éviter une croissance illimitée.
+- Amélioration de l’arrêt du moteur embarqué sous Windows.
+- En cas d’échec de l’arrêt normal, utilisation d’un arrêt de secours ciblé exclusivement sur le PID du moteur lancé par LibraMail.
+- Aucun arrêt global de processus `node.exe` n’est utilisé.
+
+## Sélection multiple
+
+- `Ctrl+A` sélectionne désormais tous les messages de la vue courante.
+- Le raccourci conserve son comportement natif dans les champs de saisie, la recherche, les zones éditables et les fenêtres modales.
+- Le bouton « Tout sélectionner » est repositionné au-dessus de la liste des messages pour être plus visible.
+
+## Export EML multiple
+
+- Ajout d’une action permettant d’exporter plusieurs messages sélectionnés au format `.eml`.
+- Le dossier de destination est choisi une seule fois pour toute la sélection.
+- Les conversations sélectionnées sont développées afin d’exporter les messages qu’elles contiennent.
+- Les exports utilisent toujours le MIME brut stocké par LibraMail, sans reconstruction du message.
+- Les fichiers existants ne sont jamais écrasés : un suffixe numérique est ajouté automatiquement en cas de doublon de nom.
+- Ajout d’un sélecteur de dossier compatible Linux, Windows et macOS.
+
+## Réactivité de l’interface
+
+- Réduction des rafraîchissements complets lors de l’ajout ou du retrait d’étiquettes.
+- Mise à jour ciblée des vues d’étiquette lorsque leur contenu change réellement.
+- Mise à jour locale des actions multiples « lu/non lu » et « favori » sans reconstruction complète de la liste.
+- Regroupement et différé de certains rafraîchissements de compteurs.
+- Conservation du mécanisme optimiste existant pour le classement dans les dossiers locaux.
+
+## Tests
+
+- Ajout de tests dédiés au rafraîchissement après suppression.
+- Ajout de tests du cycle de vie du moteur Windows.
+- Ajout de tests pour `Ctrl+A` et l’export EML multiple.
+- Ajout de tests de non-régression sur les optimisations des mutations courantes.
+- Les tests existants d’import/export EML, dossiers locaux, IMAP IDLE, calendrier, interface et sécurité restent applicables.
+
 # LibraMail 0.4.5 - 2026-08-25
 
 LibraMail 0.4.5 est une version corrective centrée sur Windows et les échanges de messages au format EML.

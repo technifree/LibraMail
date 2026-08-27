@@ -1,53 +1,81 @@
-# LibraMail 0.4.5
+# LibraMail 0.4.6
 
 ## Français
 
-LibraMail 0.4.5 est une version corrective centrée sur la robustesse sous Windows et les échanges de messages au format EML.
+LibraMail 0.4.6 est une version corrective consacrée à la cohérence des vues, à la sélection multiple, à l’export EML et à la réactivité de l’interface.
 
-### Démarrage Windows
+### Suppression et compteurs
 
-- Le délai d’attente du moteur embarqué passe de 12 à 30 secondes.
-- Une dernière vérification est effectuée avant de considérer le démarrage comme échoué.
-- Si le moteur ne répond réellement pas, LibraMail tente maintenant d’arrêter proprement le `node.exe` lancé afin d’éviter qu’un processus reste en arrière-plan.
-- Le journal `data/engine-startup.log` est plus exploitable sous Windows.
+- Les suppressions simples et multiples réconcilient maintenant immédiatement la liste affichée et les compteurs.
+- Les caches sont invalidés afin d’éviter le retour temporaire d’un ancien état après suppression.
+- La sélection multiple est remise à zéro après l’opération.
+- La suppression d’un dossier local conserve les messages : seul le classement local est supprimé.
 
-### Import EML
+### Windows
 
-- Les erreurs d’import sont maintenant détaillées par étape.
-- Un rapport `data/eml-import.log` est généré après chaque import.
-- La première erreur est affichée directement dans l’interface.
-- Les compteurs et les vues de dossiers locaux sont rafraîchis immédiatement après import.
-- Les caches de navigation sont invalidés de façon plus stricte pour éviter l’affichage d’informations périmées.
+- `data/engine-startup.log` conserve désormais l’historique des sessions au lieu d’être réinitialisé à chaque lancement.
+- Le journal reste borné pour éviter une croissance indéfinie.
+- L’arrêt du moteur embarqué est renforcé.
+- Un arrêt de secours peut être utilisé uniquement sur le PID du moteur `node.exe` lancé par LibraMail ; aucun arrêt global de processus Node n’est effectué.
 
-### Export EML
+### Sélection multiple
 
-Une nouvelle action **Exporter .eml** est disponible dans le lecteur de message.
+- `Ctrl+A` sélectionne tous les messages de la vue courante.
+- Le raccourci garde son comportement normal dans les champs de saisie, la recherche, les zones éditables et les fenêtres modales.
+- Le bouton « Tout sélectionner » est placé plus visiblement au-dessus de la liste.
 
-L’export utilise directement le MIME brut conservé par LibraMail : le message n’est pas reconstruit. Les en-têtes, le `Message-ID`, le contenu texte/HTML et les pièces jointes sont ainsi préservés.
+### Export EML multiple
+
+- Les messages sélectionnés peuvent être exportés en une seule opération.
+- Le dossier de destination est choisi une seule fois.
+- Les conversations sélectionnées exportent les messages qu’elles contiennent.
+- Le MIME brut est conservé sans reconstruction.
+- Les fichiers existants ne sont jamais écrasés : LibraMail génère automatiquement un nom disponible.
+
+### Réactivité
+
+- Réduction des rafraîchissements complets lors des modifications d’étiquettes.
+- Mise à jour ciblée des vues réellement concernées.
+- Les actions multiples « lu/non lu » et « favori » sont appliquées directement dans la liste.
+- Certains rafraîchissements de compteurs sont regroupés afin de limiter les opérations inutiles.
 
 ---
 
 ## English
 
-LibraMail 0.4.5 is a corrective release focused on Windows robustness and EML message exchange.
+LibraMail 0.4.6 is a corrective release focused on view consistency, multiple selection, EML export, and interface responsiveness.
 
-### Windows startup
+### Deletion and counters
 
-- The bundled engine startup timeout is increased from 12 to 30 seconds.
-- A final probe is performed before startup is considered failed.
-- On a real startup failure, LibraMail now attempts to stop the `node.exe` process it launched so that no orphaned engine remains in the background.
-- `data/engine-startup.log` is easier to use for Windows diagnostics.
+- Single and multiple message deletions now immediately reconcile the visible list and counters.
+- Caches are invalidated to prevent stale states from briefly reappearing after deletion.
+- Multiple selection is cleared after the operation.
+- Deleting a local folder keeps the messages: only the local filing assignment is removed.
 
-### EML import
+### Windows
 
-- Import failures now include detailed processing-stage information.
-- A `data/eml-import.log` report is generated after each import.
-- The first import error is displayed directly in the interface.
-- Local-folder counters and views are refreshed immediately after import.
-- Navigation caches are invalidated more strictly to avoid stale views.
+- `data/engine-startup.log` now keeps previous session history instead of being reset on every launch.
+- The log remains size-bounded.
+- Bundled engine shutdown is more robust.
+- A fallback shutdown may target only the PID of the `node.exe` engine started by LibraMail; no global Node process termination is used.
 
-### EML export
+### Multiple selection
 
-A new **Export .eml** action is available in the message reader.
+- `Ctrl+A` now selects all messages in the current view.
+- Native select-all behavior is preserved in input fields, search, editable areas, and modal dialogs.
+- The Select all control is positioned more visibly above the message list.
 
-Export uses the raw MIME message stored by LibraMail without rebuilding it. Headers, `Message-ID`, text/HTML parts, and attachments are therefore preserved.
+### Multiple EML export
+
+- Selected messages can be exported in a single operation.
+- The destination folder is selected once for the whole batch.
+- Selected conversations export the messages they contain.
+- Raw MIME is preserved without rebuilding messages.
+- Existing files are never overwritten: LibraMail automatically generates an available filename.
+
+### Responsiveness
+
+- Full list refreshes are reduced when labels are added or removed.
+- Only views whose contents actually change are reconciled.
+- Bulk read/unread and favorite actions are patched directly into the visible list.
+- Some counter refreshes are grouped to avoid unnecessary work.
