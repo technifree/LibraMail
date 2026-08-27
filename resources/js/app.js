@@ -2389,6 +2389,103 @@ const App = (() => {
     }
   }
 
+  // LibraMail 0.4.6 — mutations légères sans rafraîchissement complet.
+  let labelSidebarRefreshTimer = null;
+
+  function invalidateLabelCachedViews(labelIds = []) {
+    const wanted = new Set(
+      (Array.isArray(labelIds) ? labelIds : [labelIds])
+        .map(Number)
+        .filter(id => Number.isInteger(id) && id > 0)
+    );
+    if (!wanted.size) return;
+
+    for (const key of [...listViewCache.keys()]) {
+      try {
+        const parsed = JSON.parse(key);
+        const id = Number(parsed?.params?.labelId);
+        if (wanted.has(id)) listViewCache.delete(key);
+      } catch {}
+    }
+  }
+
+  function scheduleLabelSidebarRefresh(delay = 70) {
+    if (labelSidebarRefreshTimer) clearTimeout(labelSidebarRefreshTimer);
+    labelSidebarRefreshTimer = setTimeout(() => {
+      labelSidebarRefreshTimer = null;
+      rpc('labels.list').then(renderLabels).catch(error => {
+        console.warn('[LibraMail] Actualisation des étiquettes :', error);
+      });
+    }, Math.max(0, Number(delay) || 0));
+  }
+
+  function reconcileLabelMutation(labelId, {
+    removedFromCurrentLabelView = false,
+    affectedItems = [],
+  } = {}) {
+    invalidateLabelCachedViews([labelId]);
+    scheduleLabelSidebarRefresh();
+
+    if (!removedFromCurrentLabelView) return;
+
+    if (affectedItems.length) removeLocalFolderItemsFromVisibleList(affectedItems);
+    refreshVisibleList({ preserveListState: true }).catch(error => {
+      console.warn('[LibraMail] Réconciliation après étiquette :', error);
+    });
+  }
+
+  function selectionContainsViewer(items = []) {
+    const current = Viewer.current?.meta;
+    if (!current) return false;
+    const currentId = Number(current.id);
+    const threadKey = String(current.thread_key || '');
+    return (items || []).some(item =>
+      (item?.type === 'thread' && threadKey && String(item.threadKey || '') === threadKey)
+      || (item?.type !== 'thread' && Number(item?.id) === currentId)
+    );
+  }
+
+  function patchSelectionFlagInPlace(items, flag, value) {
+    const normalizedValue = value ? 1 : 0;
+    const source = Array.isArray(items) ? items : [];
+
+    for (const item of source) {
+      if (item?.type === 'thread' && item.threadKey) {
+        if (flag === 'seen') {
+          list.patchThread(item.threadKey, {
+            seen: normalizedValue,
+            thread_unread: normalizedValue ? 0 : Math.max(1, Number(item.count) || 1),
+          });
+        } else {
+          list.patchThread(item.threadKey, { flagged: normalizedValue });
+        }
+      } else if (Number.isInteger(Number(item?.id))) {
+        list.patchRow(Number(item.id), { [flag]: normalizedValue });
+      }
+    }
+
+    updateCurrentListCacheRows(list.rows);
+
+    const nextSelection = bulkSelection.map(item => ({
+      ...item,
+      ...(flag === 'seen' ? { seen: Boolean(value) } : {}),
+      ...(flag === 'flagged' ? { flagged: Boolean(value) } : {}),
+    }));
+    updateBulkSelection(nextSelection, bulkSelectionMeta);
+
+    if (selectionContainsViewer(source)) {
+      if (flag === 'seen') {
+        Viewer.current.meta.seen = normalizedValue;
+        setReaderSeenButton(Boolean(value));
+      } else if (flag === 'flagged') {
+        Viewer.current.meta.flagged = normalizedValue;
+        const icon = document.getElementById('btn-r-flag')?.querySelector('i');
+        if (icon) icon.className = normalizedValue ? 'fa-solid fa-star' : 'fa-regular fa-star';
+      }
+      updateReaderTabsFlag(Viewer.current.meta, { [flag]: normalizedValue });
+    }
+  }
+
   function invalidateListViewCacheAfterMutation() {
     listViewCacheEpoch += 1;
     listViewCache.clear();
@@ -3252,7 +3349,7 @@ const App = (() => {
       setReaderSeenButton(seen);
     }
     if (!automatic) clearReadTimer();
-    refreshSidebarCounts().catch(() => {});
+    scheduleSidebarCountsRefresh(220);
   }
 
   function clearReader() {
@@ -4235,6 +4332,7 @@ const App = (() => {
         await rpc('messages.setFlag', { id: row.id, flag: 'flagged', value: Boolean(value) });
         list.patchRow(row.id, { flagged: value });
       }
+      updateCurrentListCacheRows(list.rows);
       updateReaderTabsFlag(row, { flagged: value });
       if (Viewer.current?.meta?.id === row.id) {
         Viewer.current.meta.flagged = value;
@@ -4345,8 +4443,14 @@ const App = (() => {
           });
           closeQuickLabelMenu();
           status(t('selection.labelProcessed', { count: result.processed || 0 }), 'success');
-          renderLabels(await rpc('labels.list'));
-          await refreshVisibleList({ preserveListState: true });
+          const removedFromCurrentLabelView =
+            applied
+            && view.type === 'label'
+            && String(view.labelId) === String(label.id);
+          reconcileLabelMutation(label.id, {
+            removedFromCurrentLabelView,
+            affectedItems: removedFromCurrentLabelView ? [context.item] : [],
+          });
         } catch (error) {
           status(`${t('error')} : ${error.message}`, 'error');
           button.disabled = false;
@@ -4506,8 +4610,9 @@ const App = (() => {
         ? t('contacts.spamSkippedTrusted', { processed: result.processed || 0, skipped: errorCount })
         : t('selection.processed', { count: result.processed || 0 }),
       errorCount ? 'error' : 'success');
-      clearReader();
-      await refresh();
+
+      patchSelectionFlagInPlace(bulkSelection, flag, Boolean(value));
+      if (flag === 'seen') scheduleSidebarCountsRefresh(220);
     } catch (error) {
       status(`${t('error')} : ${error.message}`, 'error');
     }
@@ -4622,16 +4727,29 @@ const App = (() => {
       button.title = t(all ? 'selection.removeLabel' : 'selection.addLabel', { label: label.name });
       button.onclick = async event => {
         event.stopPropagation();
+        const affectedItems = [...bulkSelection];
         try {
           const result = await rpc('labels.batchSet', {
-            items: selectionPayload(),
+            items: selectionPayload(affectedItems),
             labelId: label.id,
             applied: !all,
           });
           closeBulkLabelMenu();
           status(t('selection.labelProcessed', { count: result.processed || 0 }), 'success');
-          renderLabels(await rpc('labels.list'));
-          await refreshVisibleList({ preserveListState: true });
+          const removedFromCurrentLabelView =
+            all
+            && view.type === 'label'
+            && String(view.labelId) === String(label.id);
+
+          reconcileLabelMutation(label.id, {
+            removedFromCurrentLabelView,
+            affectedItems: removedFromCurrentLabelView ? affectedItems : [],
+          });
+
+          if (removedFromCurrentLabelView) {
+            list?.clearSelection();
+            updateBulkSelection([], { total: 0, allSelected: false });
+          }
         } catch (error) {
           status(`${t('error')} : ${error.message}`, 'error');
         }
@@ -4902,9 +5020,14 @@ const App = (() => {
             labelId: label.id,
           });
           // Une sélection d'étiquette est une action ponctuelle : le menu se
-          // referme et la liste conserve le message actif ainsi que sa position.
+          // referme immédiatement. Seule la vue de cette même étiquette doit
+          // être réconciliée si son contenu change.
           menu.classList.add('hidden');
-          await refreshVisibleList({ preserveListState: true });
+          const removedFromCurrentLabelView =
+            Boolean(label.applied)
+            && view.type === 'label'
+            && String(view.labelId) === String(label.id);
+          reconcileLabelMutation(label.id, { removedFromCurrentLabelView });
         } catch (error) {
           status(`${t('error')} : ${error.message}`, 'error');
           button.disabled = false;
