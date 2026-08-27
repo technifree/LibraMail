@@ -4384,6 +4384,60 @@ const App = (() => {
     }
   }
 
+  // LibraMail 0.4.6 — Ctrl+A contextuel et export EML multiple.
+  function preserveNativeSelectAllShortcut(target) {
+    if (!target) return false;
+    if (document.querySelector('.modal-veil.open')) return true;
+    if (target.closest?.('input, textarea, select, [contenteditable="true"], [contenteditable="plaintext-only"]')) return true;
+    return false;
+  }
+
+  function handleGlobalSelectAllShortcut(event) {
+    if (event.defaultPrevented) return;
+    if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+    if (String(event.key || '').toLowerCase() !== 'a') return;
+    if (preserveNativeSelectAllShortcut(event.target)) return;
+    if (!list) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    list.selectAll();
+  }
+
+  async function runBulkExportEml() {
+    if (!bulkSelection.length) return;
+
+    const items = selectionPayload();
+    try {
+      status(t('emlExport.selectingDirectory'), 'busy');
+      const selected = await rpc('eml.selectExportDirectory');
+      const targetDirectory = String(selected?.path || '').trim();
+      if (!targetDirectory) {
+        status(t('emlExport.selectionCancelled'), 'info');
+        return;
+      }
+
+      status(t('emlExport.selectionExporting', { count: bulkSelection.length }), 'busy');
+      const result = await rpc('messages.exportSelectionEml', {
+        items,
+        targetDirectory,
+      });
+
+      const exported = Number(result?.exported) || 0;
+      const failed = Array.isArray(result?.errors) ? result.errors.length : 0;
+      status(
+        failed
+          ? t('emlExport.selectionPartial', { exported, failed, directory: result?.directory || targetDirectory })
+          : t('emlExport.selectionDone', { exported, directory: result?.directory || targetDirectory }),
+        failed ? 'error' : 'success'
+      );
+    } catch (error) {
+      status(t('emlExport.selectionFailed', {
+        error: error?.message || String(error),
+      }), 'error');
+    }
+  }
+
   function updateBulkSelection(items, meta = {}) {
     bulkSelection = Array.isArray(items) ? items : [];
     bulkSelectionMeta = {
@@ -8363,6 +8417,7 @@ const App = (() => {
       if (!event.target.closest('#sync-split')) closeSyncMenu();
     });
     document.getElementById('btn-select-all').onclick = () => list.selectAll();
+    document.addEventListener('keydown', handleGlobalSelectAllShortcut);
     document.getElementById('btn-clear-selection').onclick = () => list.clearSelection();
     document.getElementById('btn-bulk-read').onclick = () => runBulkFlag('seen', true);
     document.getElementById('btn-bulk-unread').onclick = () => runBulkFlag('seen', false);
@@ -8374,6 +8429,7 @@ const App = (() => {
       if (!bulkSelection.length) return;
       openLocalFolderMenu(event.currentTarget, bulkSelection);
     };
+    document.getElementById('btn-bulk-export-eml').onclick = runBulkExportEml;
     document.getElementById('btn-bulk-spam').onclick = runBulkSpam;
     document.getElementById('btn-bulk-restore').onclick = runBulkRestore;
     document.getElementById('btn-bulk-delete').onclick = runBulkDelete;

@@ -244,4 +244,63 @@ async function showEmlDialog({ title = 'Importer des messages EML' } = {}) {
   );
 }
 
-module.exports = { showBackupDialog, showEmlDialog };
+
+function linuxDirectoryCandidates({ title }) {
+  const directory = defaultDirectory();
+  return [
+    {
+      command: 'zenity',
+      args: ['--file-selection', '--directory', `--title=${title}`, `--filename=${directory}${path.sep}`],
+    },
+    {
+      command: 'yad',
+      args: ['--file-selection', '--directory', `--title=${title}`, `--filename=${directory}${path.sep}`],
+    },
+    {
+      command: 'kdialog',
+      args: ['--title', title, '--getexistingdirectory', directory],
+    },
+  ];
+}
+
+function macDirectoryCandidates({ title }) {
+  const escapedTitle = String(title).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return [{
+    command: 'osascript',
+    args: ['-e', `POSIX path of (choose folder with prompt "${escapedTitle}")`],
+  }];
+}
+
+function windowsDirectoryCandidates({ title }) {
+  const script = [
+    'Add-Type -AssemblyName System.Windows.Forms',
+    '$dialog = New-Object System.Windows.Forms.FolderBrowserDialog',
+    `$dialog.Description = ${JSON.stringify(String(title))}`,
+    `$dialog.SelectedPath = ${JSON.stringify(defaultDirectory())}`,
+    '$dialog.ShowNewFolderButton = $true',
+    'if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.SelectedPath }',
+  ].join('; ');
+  return [
+    { command: 'powershell.exe', args: ['-NoProfile', '-STA', '-Command', script] },
+    { command: 'pwsh', args: ['-NoProfile', '-STA', '-Command', script] },
+  ];
+}
+
+async function showDirectoryDialog({ title = 'Choisir un dossier' } = {}) {
+  let candidates;
+  if (process.platform === 'linux') {
+    candidates = linuxDirectoryCandidates({ title });
+  } else if (process.platform === 'darwin') {
+    candidates = macDirectoryCandidates({ title });
+  } else if (process.platform === 'win32') {
+    candidates = windowsDirectoryCandidates({ title });
+  } else {
+    throw new Error(`Sélecteur de dossier non pris en charge sur ${process.platform}`);
+  }
+
+  const selected = await tryCandidates(candidates);
+  if (!selected) return null;
+  return path.resolve(selected);
+}
+
+module.exports = { showBackupDialog, showEmlDialog, showDirectoryDialog };

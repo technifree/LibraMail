@@ -215,14 +215,14 @@
   <section id="list-pane">
     <div id="list-header">
       <div class="list-heading">
-        <span id="list-title" data-i18n="unified.inbox"></span>
-        <span class="sub" id="list-sub"></span>
-      </div>
-      <div class="list-controls">
         <button class="iconbtn list-select-all" id="btn-select-all" type="button"
                 data-i18n-title="selection.selectAll" aria-pressed="false">
           <i class="fa-regular fa-square"></i>
         </button>
+        <span id="list-title" data-i18n="unified.inbox"></span>
+        <span class="sub" id="list-sub"></span>
+      </div>
+      <div class="list-controls">
         <button class="btn compact danger-soft hidden" id="btn-empty-folder" type="button">
           <i class="fa-solid fa-broom"></i><span></span>
         </button>
@@ -257,6 +257,10 @@
       <button class="iconbtn" id="btn-bulk-local-folder" type="button"
               data-i18n-title="localFolder.classifySelection">
         <i class="fa-solid fa-folder-open"></i>
+      </button>
+      <button class="iconbtn" id="btn-bulk-export-eml" type="button"
+              data-i18n-title="emlExport.selectionAction">
+        <i class="fa-solid fa-file-export"></i>
       </button>
       <button class="iconbtn" id="btn-bulk-spam" type="button" data-i18n-title="action.spam">
         <i class="fa-solid fa-ban"></i>

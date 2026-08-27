@@ -1954,6 +1954,13 @@ const methods = {
     }),
   }),
 
+  'eml.selectExportDirectory': async () => ({
+    path: await nativeDialog.showDirectoryDialog({
+      title: 'Choisir le dossier de destination des messages EML',
+    }),
+  }),
+
+
   'eml.import': async ({ accountId, paths = [], mode = 'auto', localFolderId = null } = {}) => {
     const account = getAccount(String(accountId || ''));
     if (!account) throw new Error('Compte de destination introuvable');
@@ -2299,6 +2306,86 @@ const methods = {
       saved: resolvedTarget,
       filename: path.basename(resolvedTarget),
       size,
+    };
+  },
+
+  // LibraMail 0.4.6 — export EML multiple sans reconstruction.
+  'messages.exportSelectionEml': async ({ items = [], targetDirectory } = {}) => {
+    const requestedDirectory = String(targetDirectory || '').trim();
+    if (!requestedDirectory) throw new Error('Dossier d’export EML invalide');
+
+    const directory = path.resolve(requestedDirectory);
+    let stats;
+    try {
+      stats = fs.statSync(directory);
+    } catch {
+      throw new Error('Dossier d’export EML introuvable');
+    }
+    if (!stats.isDirectory()) throw new Error('La destination EML n’est pas un dossier');
+
+    const messages = resolveSelection(items);
+    if (!messages.length) return { exported: 0, requested: 0, directory, errors: [] };
+
+    const usedPaths = new Set();
+    const errors = [];
+    let exported = 0;
+
+    const safeFilename = message => {
+      let base = String(message?.subject || 'message')
+        .replace(/[\u0000-\u001f<>:"/\\|?*]/g, '_')
+        .replace(/[. ]+$/g, '')
+        .trim();
+
+      if (!base) base = 'message';
+      base = base.replace(/\.eml$/i, '').replace(/[. ]+$/g, '').trim() || 'message';
+      if (base.length > 140) base = base.slice(0, 140).replace(/[. ]+$/g, '').trim() || 'message';
+      if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(base)) base = `_${base}`;
+      return base;
+    };
+
+    const uniqueTarget = message => {
+      const base = safeFilename(message);
+      for (let suffix = 1; suffix <= 9999; suffix += 1) {
+        const filename = suffix === 1 ? `${base}.eml` : `${base} (${suffix}).eml`;
+        const target = path.join(directory, filename);
+        const key = process.platform === 'win32' ? target.toLowerCase() : target;
+        if (usedPaths.has(key) || fs.existsSync(target)) continue;
+        usedPaths.add(key);
+        return target;
+      }
+      throw new Error(`Impossible de générer un nom de fichier unique pour « ${base} »`);
+    };
+
+    for (const message of messages) {
+      try {
+        const raw = readLocalMessage(message);
+        let target = uniqueTarget(message);
+
+        for (;;) {
+          try {
+            fs.writeFileSync(target, raw, { flag: 'wx' });
+            break;
+          } catch (error) {
+            if (error?.code !== 'EEXIST') throw error;
+            target = uniqueTarget(message);
+          }
+        }
+
+        exported += 1;
+      } catch (error) {
+        errors.push({
+          id: Number(message?.id) || 0,
+          subject: String(message?.subject || ''),
+          error: error?.message || String(error),
+        });
+      }
+    }
+
+    return {
+      exported,
+      requested: messages.length,
+      directory,
+      errors,
     };
   },
 
