@@ -1,81 +1,55 @@
-# LibraMail 0.4.6
+# LibraMail 0.4.7
 
 ## Français
 
-LibraMail 0.4.6 est une version corrective consacrée à la cohérence des vues, à la sélection multiple, à l’export EML et à la réactivité de l’interface.
+LibraMail 0.4.7 améliore la réactivité de l’interface et rétablit un lecteur de messages en fenêtre dédiée avec gestion des onglets.
 
-### Suppression et compteurs
+### Étiquettes
 
-- Les suppressions simples et multiples réconcilient maintenant immédiatement la liste affichée et les compteurs.
-- Les caches sont invalidés afin d’éviter le retour temporaire d’un ancien état après suppression.
-- La sélection multiple est remise à zéro après l’opération.
-- La suppression d’un dossier local conserve les messages : seul le classement local est supprimé.
+- Les étiquettes ajoutées ou retirées d’un message apparaissent immédiatement dans la liste.
+- Lorsqu’une étiquette est appliquée à une discussion, les messages déjà dépliés sont mis à jour immédiatement.
+- La ligne de discussion, les messages enfants et l’état courant de la conversation restent synchronisés.
+- Un message individuel peut toujours être étiqueté sans modifier toute sa discussion.
 
-### Windows
+### Suppression
 
-- `data/engine-startup.log` conserve désormais l’historique des sessions au lieu d’être réinitialisé à chaque lancement.
-- Le journal reste borné pour éviter une croissance indéfinie.
-- L’arrêt du moteur embarqué est renforcé.
-- Un arrêt de secours peut être utilisé uniquement sur le PID du moteur `node.exe` lancé par LibraMail ; aucun arrêt global de processus Node n’est effectué.
+- Les messages supprimés disparaissent immédiatement de la liste.
+- La liste complète n’est plus reconstruite après chaque suppression.
+- Les compteurs sont actualisés en arrière-plan.
 
-### Sélection multiple
+### Lecteur modal
 
-- `Ctrl+A` sélectionne tous les messages de la vue courante.
-- Le raccourci garde son comportement normal dans les champs de saisie, la recherche, les zones éditables et les fenêtres modales.
-- Le bouton « Tout sélectionner » est placé plus visiblement au-dessus de la liste.
-
-### Export EML multiple
-
-- Les messages sélectionnés peuvent être exportés en une seule opération.
-- Le dossier de destination est choisi une seule fois.
-- Les conversations sélectionnées exportent les messages qu’elles contiennent.
-- Le MIME brut est conservé sans reconstruction.
-- Les fichiers existants ne sont jamais écrasés : LibraMail génère automatiquement un nom disponible.
-
-### Réactivité
-
-- Réduction des rafraîchissements complets lors des modifications d’étiquettes.
-- Mise à jour ciblée des vues réellement concernées.
-- Les actions multiples « lu/non lu » et « favori » sont appliquées directement dans la liste.
-- Certains rafraîchissements de compteurs sont regroupés afin de limiter les opérations inutiles.
+- Un simple clic conserve l’aperçu dans le volet principal.
+- Un double-clic sur la ligne d’un message ouvre une fenêtre de lecture dédiée.
+- Le double-clic fonctionne sur toute la zone non interactive de la ligne.
+- Plusieurs messages peuvent être ouverts dans des onglets au sein de cette fenêtre.
+- L’onglet « Aperçu » n’est pas affiché dans la modale afin d’éviter les doublons.
+- Fermer le dernier onglet ferme la fenêtre de lecture et revient à l’aperçu principal.
 
 ---
 
 ## English
 
-LibraMail 0.4.6 is a corrective release focused on view consistency, multiple selection, EML export, and interface responsiveness.
+LibraMail 0.4.7 improves interface responsiveness and restores a dedicated modal message reader with tab support.
 
-### Deletion and counters
+### Labels
 
-- Single and multiple message deletions now immediately reconcile the visible list and counters.
-- Caches are invalidated to prevent stale states from briefly reappearing after deletion.
-- Multiple selection is cleared after the operation.
-- Deleting a local folder keeps the messages: only the local filing assignment is removed.
+- Labels added to or removed from a message are reflected immediately in the message list.
+- When a label is applied to a conversation, already expanded messages are updated immediately.
+- The conversation row, visible child messages, and current conversation state remain synchronized.
+- Individual messages can still be labeled without affecting the whole conversation.
 
-### Windows
+### Deletion
 
-- `data/engine-startup.log` now keeps previous session history instead of being reset on every launch.
-- The log remains size-bounded.
-- Bundled engine shutdown is more robust.
-- A fallback shutdown may target only the PID of the `node.exe` engine started by LibraMail; no global Node process termination is used.
+- Deleted messages disappear from the list immediately.
+- The entire message list is no longer rebuilt after each deletion.
+- Counters are refreshed in the background.
 
-### Multiple selection
+### Modal reader
 
-- `Ctrl+A` now selects all messages in the current view.
-- Native select-all behavior is preserved in input fields, search, editable areas, and modal dialogs.
-- The Select all control is positioned more visibly above the message list.
-
-### Multiple EML export
-
-- Selected messages can be exported in a single operation.
-- The destination folder is selected once for the whole batch.
-- Selected conversations export the messages they contain.
-- Raw MIME is preserved without rebuilding messages.
-- Existing files are never overwritten: LibraMail automatically generates an available filename.
-
-### Responsiveness
-
-- Full list refreshes are reduced when labels are added or removed.
-- Only views whose contents actually change are reconciled.
-- Bulk read/unread and favorite actions are patched directly into the visible list.
-- Some counter refreshes are grouped to avoid unnecessary work.
+- A single click keeps the normal preview behavior.
+- Double-clicking a message row opens a dedicated modal reader.
+- Double-click works across the non-interactive area of the entire row.
+- Multiple messages can be opened in tabs inside the modal reader.
+- The Preview tab is hidden in the modal to avoid displaying the same message twice.
+- Closing the last tab closes the reader window and returns to the main preview.

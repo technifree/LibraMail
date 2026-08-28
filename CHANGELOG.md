@@ -1,3 +1,34 @@
+# LibraMail 0.4.7 - 2026-08-28
+
+LibraMail 0.4.7 améliore la réactivité de l’interface et rétablit un lecteur de messages en fenêtre dédiée avec gestion des onglets.
+
+## Étiquettes
+
+- L’ajout ou le retrait d’une étiquette sur un message est visible immédiatement dans la liste.
+- L’ajout ou le retrait d’une étiquette sur une discussion est propagé immédiatement aux messages déjà dépliés.
+- La ligne racine de la discussion, les messages enfants affichés et l’état courant de la conversation restent synchronisés.
+- L’étiquetage d’un message individuel reste indépendant de celui de l’ensemble de la discussion.
+
+## Suppression de messages
+
+- Un message supprimé disparaît immédiatement de la liste.
+- Suppression du rafraîchissement complet et bloquant de toute la liste après chaque suppression.
+- Les compteurs sont réconciliés en arrière-plan afin de limiter les opérations coûteuses.
+
+## Lecteur modal et onglets
+
+- Un simple clic conserve l’aperçu dans le volet de lecture.
+- Un double-clic sur la ligne d’un message ouvre le lecteur dans une fenêtre modale dédiée.
+- Le double-clic fonctionne sur toute la zone non interactive de la ligne, même lorsque la preview provoque un rerender.
+- Le système d’onglets de lecture est réutilisé dans la fenêtre modale afin d’ouvrir plusieurs messages.
+- L’onglet « Aperçu » est masqué dans la modale pour éviter d’afficher deux fois le même message.
+- Fermer le dernier onglet de la modale ferme également la fenêtre et revient proprement à l’aperçu principal.
+
+## Tests
+
+- Ajout de tests dédiés au lecteur modal, au double-clic, aux étiquettes de discussions et à la suppression légère.
+- Les tests de non-régression 0.4.6 restent applicables.
+
 # LibraMail 0.4.6 - 2026-08-27
 
 LibraMail 0.4.6 est une version corrective centrée sur la cohérence des vues, la sélection multiple, l’export EML et la réactivité de l’interface.
