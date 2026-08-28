@@ -24,6 +24,7 @@ const calendarImport = require('./lib/calendar_import');
 const calendarSubscriptions = require('./lib/calendar_subscriptions');
 const credentialStore = require('./lib/credential_store');
 const mailStore = require('./lib/mail_store');
+const masterPassword = require('./lib/master_password');
 const emlImport = require('./lib/eml_import');
 
 const PORT = 47800;
@@ -44,6 +45,11 @@ function isRuntimeDataFile(name) {
 }
 
 fs.mkdirSync(DATA, { recursive: true });
+
+// LibraMail 0.4.8 — démarrage verrouillable par mot de passe principal.
+// masterPassword.init() ne lit aucun secret du trousseau système. Il inspecte
+// uniquement data/security.json pour savoir si le moteur doit rester verrouillé.
+masterPassword.init(DATA);
 
 function recoverInterruptedRestore() {
   if (!fs.existsSync(RESTORE_STATE_FILE)) return;
@@ -79,11 +85,6 @@ function recoverInterruptedRestore() {
   if (safeStaging) fs.rmSync(stagingRoot, { recursive: true, force: true });
   fs.rmSync(RESTORE_STATE_FILE, { force: true });
 }
-
-recoverInterruptedRestore();
-db.init(DATA);
-mailStore.init(DATA);
-outbox.init(db.db, DATA);
 
 function loadJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
@@ -316,7 +317,32 @@ function loadRuntimeState() {
   migrateTrustedSenders();
 }
 
-loadRuntimeState();
+let runtimeInitialized = false;
+
+function initializeRuntimeState() {
+  if (runtimeInitialized) return true;
+  if (masterPassword.isLocked()) throw new Error('LibraMail est verrouillé');
+
+  recoverInterruptedRestore();
+  db.init(DATA);
+  mailStore.init(DATA);
+  outbox.init(db.db, DATA);
+  loadRuntimeState();
+  runtimeInitialized = true;
+  return true;
+}
+
+function closeRuntimeStateForLock() {
+  stopAccountRuntime();
+  try { mailStore.close(); } catch {}
+  try { db.close(); } catch {}
+  accounts = [];
+  config = { ...defaultConfig };
+  runtimeInitialized = false;
+  startupSyncTriggered = false;
+}
+
+if (!masterPassword.isLocked()) initializeRuntimeState();
 
 const wss = new WebSocketServer({ host: '127.0.0.1', port: PORT });
 const sockets = new Set();
@@ -341,6 +367,8 @@ let startupSyncTriggered = false;
 let serverReady = false;
 let resolveStartupMigration;
 const startupMigrationPromise = new Promise(resolve => { resolveStartupMigration = resolve; });
+let startupMigrationStarted = false;
+let startupMigrationCompleted = false;
 
 async function migrateLocalStorage({ notify = false } = {}) {
   const mailMigration = await mailStore.migrateLegacyMessages(db.db, {
@@ -363,19 +391,43 @@ async function runStartupStorageMigration() {
   return migrateLocalStorage({ notify: true });
 }
 
+async function ensureStartupStorageMigration() {
+  if (startupMigrationCompleted) return startupMigrationPromise;
+  if (startupMigrationStarted) return startupMigrationPromise;
+  if (masterPassword.isLocked()) return false;
+
+  startupMigrationStarted = true;
+  let result;
+  try {
+    result = await runStartupStorageMigration();
+  } catch (error) {
+    console.error('[LibraMail] Migration du stockage 0.4.0 impossible :', error);
+    result = { migrated: false, error: error.message };
+  }
+  startupMigrationCompleted = true;
+  resolveStartupMigration(result);
+  return result;
+}
+
 wss.on('listening', () => {
   serverReady = true;
-  console.log(`[LibraMail ${APP_VERSION}] Moteur prêt sur ws://127.0.0.1:${PORT} — ${accounts.length} compte(s)`);
+  const locked = masterPassword.isLocked();
+  console.log(
+    `[LibraMail ${APP_VERSION}] Moteur prêt sur ws://127.0.0.1:${PORT}`
+    + (locked ? ' — verrouillé' : ` — ${accounts.length} compte(s)`)
+  );
+
+  if (locked) {
+    console.log('[LibraMail] Mot de passe principal requis avant chargement des données.');
+    return;
+  }
+
   // Le port est ouvert avant de migrer les milliers d'anciens .eml : les
   // lanceurs Linux/Windows ne prennent donc pas une migration légitime pour un
   // échec de démarrage. La migration cède régulièrement la main à l'interface.
   new Promise(resolve => setImmediate(resolve))
-    .then(runStartupStorageMigration)
-    .catch(error => {
-      console.error('[LibraMail] Migration du stockage 0.4.0 impossible :', error);
-      return { migrated: false, error: error.message };
-    })
-    .then(resolveStartupMigration);
+    .then(ensureStartupStorageMigration)
+    .catch(error => console.error('[LibraMail] Initialisation du stockage impossible :', error));
 });
 
 wss.on('error', error => {
@@ -1907,6 +1959,53 @@ async function processScheduledMessages() {
 }
 
 const methods = {
+  // ---------- Sécurité 0.4.8 ----------
+  'security.status': async () => ({
+    ...masterPassword.status(),
+    runtimeReady: runtimeInitialized,
+  }),
+
+  'security.unlock': async ({ password = '' } = {}) => {
+    const before = masterPassword.status();
+    if (!before.enabled) {
+      if (!runtimeInitialized) initializeRuntimeState();
+      return { ...masterPassword.status(), runtimeReady: runtimeInitialized };
+    }
+    if (!before.locked) {
+      return { ...before, runtimeReady: runtimeInitialized };
+    }
+
+    masterPassword.unlock(password);
+    const migrationWasAlreadyComplete = startupMigrationCompleted;
+    try {
+      initializeRuntimeState();
+      if (!migrationWasAlreadyComplete) {
+        await ensureStartupStorageMigration();
+      } else if (!shuttingDown) {
+        startAccountRuntime({ resolveFolders: true });
+      }
+    } catch (error) {
+      closeRuntimeStateForLock();
+      masterPassword.lock();
+      throw error;
+    }
+
+    const state = { ...masterPassword.status(), runtimeReady: runtimeInitialized };
+    broadcast('security.unlocked', state);
+    return state;
+  },
+
+  'security.lock': async () => {
+    if (!masterPassword.isEnabled()) {
+      return { ...masterPassword.status(), runtimeReady: runtimeInitialized };
+    }
+    closeRuntimeStateForLock();
+    masterPassword.lock();
+    const state = { ...masterPassword.status(), runtimeReady: false };
+    broadcast('security.locked', state);
+    return state;
+  },
+
   // ---------- Configuration / comptes ----------
   'config.get': async () => ({ config, accounts: accounts.map(publicAccount) }),
   'config.set': async patch => {
@@ -2883,6 +2982,14 @@ wss.on('connection', socket => {
     try { request = JSON.parse(buffer.toString()); } catch { return; }
     const { id, method, params } = request;
     try {
+      const allowedWhileLocked = new Set([
+        'security.status',
+        'security.unlock',
+        'app.shutdown',
+      ]);
+      if (masterPassword.isLocked() && !allowedWhileLocked.has(String(method || ''))) {
+        throw new Error('LibraMail est verrouillé');
+      }
       if (maintenanceOperation) {
         throw new Error(maintenanceOperation === 'import'
           ? 'Une restauration des données est en cours'

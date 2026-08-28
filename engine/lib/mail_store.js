@@ -524,12 +524,26 @@ function init(baseDataDir) {
   return status();
 }
 
+function clearMasterKeys() {
+  if (Buffer.isBuffer(masterKey)) {
+    try { masterKey.fill(0); } catch {}
+  }
+  if (Buffer.isBuffer(masterSearchKey)) {
+    try { masterSearchKey.fill(0); } catch {}
+  }
+  masterKey = null;
+  masterSearchKey = null;
+  secureAvailable = false;
+  secureError = '';
+}
+
 function close() {
   for (const database of stores.values()) {
     try { database.pragma('wal_checkpoint(TRUNCATE)'); } catch {}
     try { database.close(); } catch {}
   }
   stores.clear();
+  clearMasterKeys();
 }
 
 module.exports = {

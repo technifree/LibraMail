@@ -1041,6 +1041,12 @@ const App = (() => {
 
   // ---------- Démarrage ----------
   async function boot() {
+    const security = await rpc('security.status');
+    if (security?.locked) {
+      startupMessage('LibraMail est verrouillé — mot de passe principal requis.');
+      return;
+    }
+
     startupMessage('Chargement de la configuration…');
     const state = await rpc('config.get');
     config = state.config;
