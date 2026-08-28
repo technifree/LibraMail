@@ -205,6 +205,35 @@ class VirtualMailList {
     div.addEventListener('pointerdown', event => {
       if (event.button !== 0) return;
       if (event.target.closest?.('button, input, select, textarea, a')) return;
+
+      // LibraMail 0.4.7 — double-clic sur toute la ligne, détecté dès pointerdown.
+      //
+      // Le premier clic peut re-rendre la ligne pour la preview. On mémorise
+      // donc le clic sur l'instance VirtualMailList, pas sur le noeud DOM.
+      // Le second pointerdown sur la même ligne ouvre le lecteur modal avant
+      // qu'un nouveau rerender ne puisse casser le double-clic.
+      const openPointerNow = Date.now();
+      const previousOpenPointerKey = String(this._lastOpenPointerKey || '');
+      const previousOpenPointerAt = Number(this._lastOpenPointerAt || 0);
+      const openAsDoubleClick = previousOpenPointerKey === key
+        && previousOpenPointerAt > 0
+        && openPointerNow - previousOpenPointerAt <= 450;
+
+      if (openAsDoubleClick) {
+        this._lastOpenPointerKey = '';
+        this._lastOpenPointerAt = 0;
+        this._suppressNextOpenClickKey = key;
+        this._suppressNextOpenClickUntil = openPointerNow + 900;
+        pointerDrag = null;
+        event.preventDefault();
+        event.stopPropagation();
+        this.callbacks.onOpenTab?.(row);
+        return;
+      }
+
+      this._lastOpenPointerKey = key;
+      this._lastOpenPointerAt = openPointerNow;
+
       const items = localFolderDragPayload();
       if (!items.length) return;
       pointerDrag = {
@@ -262,20 +291,27 @@ class VirtualMailList {
     div.addEventListener('pointerup', event => finishPointerDrag(event, false));
     div.addEventListener('pointercancel', event => finishPointerDrag(event, true));
     div.addEventListener('click', event => {
-      if (suppressOpenAfterPointerDrag) {
-        suppressOpenAfterPointerDrag = false;
+      const suppressModalFollowup = String(this._suppressNextOpenClickKey || '') === key
+        && Date.now() <= Number(this._suppressNextOpenClickUntil || 0);
+
+      if (suppressModalFollowup) {
+        this._suppressNextOpenClickKey = '';
+        this._suppressNextOpenClickUntil = 0;
         event.preventDefault();
         event.stopPropagation();
         return;
       }
-      this.callbacks.onOpen?.(row);
-    });
 
-    div.addEventListener('dblclick', event => {
-      if (event.target.closest?.('button, input, select, textarea, a')) return;
-      event.preventDefault();
-      event.stopPropagation();
-      this.callbacks.onOpenTab?.(row);
+      if (suppressOpenAfterPointerDrag) {
+        suppressOpenAfterPointerDrag = false;
+        this._lastOpenPointerKey = '';
+        this._lastOpenPointerAt = 0;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
+      this.callbacks.onOpen?.(row);
     });
     div.addEventListener('dblclick', event => {
       event.preventDefault();
@@ -388,6 +424,24 @@ class VirtualMailList {
     return { id: 'older', label: window.t?.('group.older') || 'Plus ancien' };
   }
 
+
+  // LibraMail 0.4.7 — mise à jour locale des messages d'une discussion dépliée.
+  patchExpandedThreadMessages(threadKey, updater) {
+    const key = String(threadKey || '');
+    if (!key || typeof updater !== 'function') return false;
+
+    const state = this.expandedThreads.get(key);
+    if (!state || !Array.isArray(state.messages)) return false;
+
+    const messages = state.messages.map(message => {
+      const candidate = updater({ ...message });
+      return candidate && typeof candidate === 'object' ? candidate : message;
+    });
+
+    this.expandedThreads.set(key, { ...state, messages });
+    this.render(true);
+    return true;
+  }
 
   labelsHtml(row) {
     const allLabels = this.labelList(row);

@@ -2454,6 +2454,7 @@ const App = (() => {
     return labels;
   }
 
+  // LibraMail 0.4.7 — propagation immédiate des étiquettes dans les discussions.
   function patchVisibleLabelSelection(items, label, applied) {
     if (!list || !Array.isArray(list.rows) || !label) return;
 
@@ -2470,6 +2471,12 @@ const App = (() => {
         .map(item => String(item?.threadKey || ''))
         .filter(Boolean)
     );
+
+    // Seules les discussions explicitement sélectionnées doivent propager
+    // l'étiquette à tous leurs messages. Le thread ajouté plus bas depuis le
+    // Viewer sert uniquement à maintenir le badge de la ligne racine lorsqu'un
+    // message individuel est étiqueté.
+    const selectedThreadKeys = new Set(threadKeys);
 
     // Depuis le lecteur, l'élément ciblé est un message. Si celui-ci appartient
     // à une conversation affichée sous forme de ligne racine, cette ligne doit
@@ -2492,6 +2499,29 @@ const App = (() => {
         list.patchThread(rowThread, patch);
       } else {
         list.patchRow(Number(row.id), patch);
+      }
+    }
+
+    // Les lignes enfants d'une discussion dépliée ne vivent pas dans
+    // list.rows : elles sont conservées dans VirtualMailList.expandedThreads.
+    // C'est la raison pour laquelle elles restaient visuellement inchangées
+    // jusqu'au prochain refresh complet.
+    for (const threadKey of selectedThreadKeys) {
+      const activeId = Number(Viewer.current?.meta?.id) || null;
+
+      if (currentConversation?.threadKey === threadKey
+          && Array.isArray(currentConversation.messages)) {
+        currentConversation.messages = currentConversation.messages.map(message => ({
+          ...message,
+          labels: nextVisibleLabels(message, label, Boolean(applied)),
+        }));
+        list.expandThread(threadKey, currentConversation.messages, activeId);
+        renderConversationPanel(currentConversation.messages, activeId);
+      } else {
+        list.patchExpandedThreadMessages?.(threadKey, message => ({
+          ...message,
+          labels: nextVisibleLabels(message, label, Boolean(applied)),
+        }));
       }
     }
 
@@ -3089,6 +3119,14 @@ const App = (() => {
       return;
     }
     const next = readerTabs[Math.min(index, readerTabs.length - 1)] || readerTabs[index - 1] || null;
+
+    // Dans le lecteur modal, l'onglet Aperçu n'existe pas : si le dernier
+    // message est fermé, on ferme aussi la fenêtre et on revient à la preview.
+    if (!next && readerModalOpen) {
+      await closeReaderModal();
+      return;
+    }
+
     activeReaderTabKey = next?.key || 'preview';
     renderReaderTabs();
     if (next) {
@@ -3102,6 +3140,12 @@ const App = (() => {
 
   async function closeAllReaderTabs() {
     readerTabs = [];
+
+    if (readerModalOpen) {
+      await closeReaderModal();
+      return;
+    }
+
     activeReaderTabKey = 'preview';
     renderReaderTabs();
     if (previewReaderRow) await openListItem(previewReaderRow, { fromTab: true });

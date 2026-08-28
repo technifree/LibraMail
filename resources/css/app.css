@@ -4506,3 +4506,8 @@ body.reader-modal-active { overflow: hidden; }
     border-radius: 9px;
   }
 }
+
+/* LibraMail 0.4.7 — masquer l'onglet Aperçu dans le lecteur modal */
+#reader.reader-modal-open #reader-tab-preview {
+  display: none;
+}
