@@ -4466,3 +4466,43 @@ body.local-folder-tree-dragging * {
   border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
   color: var(--fg-faint);
 }
+
+/* LibraMail 0.4.7 — lecteur modal au double-clic */
+.reader-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 11990;
+  background: rgba(0, 0, 0, .48);
+  backdrop-filter: blur(2px);
+}
+.reader-modal-backdrop.hidden { display: none; }
+
+body.reader-modal-active { overflow: hidden; }
+
+#reader.reader-modal-open {
+  position: fixed;
+  inset: clamp(16px, 4vh, 44px) clamp(18px, 4vw, 72px);
+  z-index: 12000;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .48);
+}
+
+#reader.reader-modal-open .reader-tabs {
+  padding-right: 8px;
+}
+
+.reader-modal-close {
+  flex: none;
+  margin-left: 2px;
+}
+
+@media (max-width: 760px), (max-height: 620px) {
+  #reader.reader-modal-open {
+    inset: 8px;
+    border-radius: 9px;
+  }
+}

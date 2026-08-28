@@ -283,6 +283,8 @@
   <div id="resize-list" class="pane-resizer pane-resizer-list" role="separator" tabindex="0"
        aria-orientation="vertical" data-i18n-title="layout.resizeList"></div>
 
+  <div id="reader-modal-backdrop" class="reader-modal-backdrop hidden" aria-hidden="true"></div>
+
   <section id="reader">
     <div id="reader-tabs" class="reader-tabs" role="tablist" aria-label="Onglets de lecture">
       <button class="reader-tab reader-tab-preview active" id="reader-tab-preview" type="button" role="tab" aria-selected="true">
@@ -293,6 +295,9 @@
       <span class="reader-tabs-spacer"></span>
       <button class="iconbtn reader-tabs-close-all hidden" id="btn-close-reader-tabs" type="button" data-i18n-title="tabs.closeAll">
         <i class="fa-solid fa-window-restore"></i>
+      </button>
+      <button class="iconbtn reader-modal-close hidden" id="btn-reader-modal-close" type="button" data-i18n-title="tabs.closeWindow">
+        <i class="fa-solid fa-xmark"></i>
       </button>
     </div>
     <div class="empty reader-empty-brand" id="reader-empty">

@@ -270,6 +270,13 @@ class VirtualMailList {
       }
       this.callbacks.onOpen?.(row);
     });
+
+    div.addEventListener('dblclick', event => {
+      if (event.target.closest?.('button, input, select, textarea, a')) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.callbacks.onOpenTab?.(row);
+    });
     div.addEventListener('dblclick', event => {
       event.preventDefault();
       this.callbacks.onOpenTab?.(row);

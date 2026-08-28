@@ -2419,10 +2419,95 @@ const App = (() => {
     }, Math.max(0, Number(delay) || 0));
   }
 
+  // LibraMail 0.4.7 — étiquettes immédiates, suppression légère et lecteur modal.
+  function normalizedVisibleLabels(row) {
+    const raw = row?.labels;
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw.filter(item => item && (item.name || item.label));
+    if (typeof raw !== 'string') return [];
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) return parsed.filter(item => item && (item.name || item.label));
+    } catch {}
+    return trimmed
+      .split(',')
+      .map(name => ({ name: name.trim(), color: '#8b7dd8' }))
+      .filter(item => item.name);
+  }
+
+  function nextVisibleLabels(row, label, applied) {
+    const labelId = Number(label?.id);
+    const labelName = String(label?.name || label?.label || '').trim();
+    const labels = normalizedVisibleLabels(row).filter(item => {
+      if (Number.isInteger(labelId) && labelId > 0 && Number(item?.id) === labelId) return false;
+      return !labelName || String(item?.name || item?.label || '').trim() !== labelName;
+    });
+    if (applied && labelName) {
+      labels.push({
+        id: Number.isInteger(labelId) && labelId > 0 ? labelId : undefined,
+        name: labelName,
+        color: label?.color || '#8b7dd8',
+      });
+    }
+    return labels;
+  }
+
+  function patchVisibleLabelSelection(items, label, applied) {
+    if (!list || !Array.isArray(list.rows) || !label) return;
+
+    const source = Array.isArray(items) ? items : [];
+    const messageIds = new Set(
+      source
+        .filter(item => item?.type !== 'thread')
+        .map(item => Number(item?.id))
+        .filter(id => Number.isInteger(id) && id > 0)
+    );
+    const threadKeys = new Set(
+      source
+        .filter(item => item?.type === 'thread')
+        .map(item => String(item?.threadKey || ''))
+        .filter(Boolean)
+    );
+
+    // Depuis le lecteur, l'élément ciblé est un message. Si celui-ci appartient
+    // à une conversation affichée sous forme de ligne racine, cette ligne doit
+    // elle aussi refléter immédiatement l'étiquette.
+    const viewerMeta = Viewer.current?.meta;
+    if (viewerMeta && messageIds.has(Number(viewerMeta.id))) {
+      const viewerThread = String(viewerMeta.thread_key || '');
+      if (viewerThread) threadKeys.add(viewerThread);
+    }
+
+    const rows = [...list.rows];
+    for (const row of rows) {
+      const rowThread = String(row?.thread_key || row?.parent_thread_key || '');
+      const messageMatch = messageIds.has(Number(row?.id));
+      const threadMatch = rowThread && threadKeys.has(rowThread);
+      if (!messageMatch && !threadMatch) continue;
+
+      const patch = { labels: nextVisibleLabels(row, label, Boolean(applied)) };
+      if (row?.is_thread && !row?.is_thread_child && rowThread) {
+        list.patchThread(rowThread, patch);
+      } else {
+        list.patchRow(Number(row.id), patch);
+      }
+    }
+
+    updateCurrentListCacheRows(list.rows);
+  }
+
   function reconcileLabelMutation(labelId, {
     removedFromCurrentLabelView = false,
     affectedItems = [],
+    label = null,
+    applied = null,
   } = {}) {
+    if (label && applied !== null) {
+      patchVisibleLabelSelection(affectedItems, label, Boolean(applied));
+    }
+
     invalidateLabelCachedViews([labelId]);
     scheduleLabelSidebarRefresh();
 
@@ -2500,15 +2585,16 @@ const App = (() => {
     localFolderPrefetchInFlight.clear();
   }
 
-  // LibraMail 0.4.6 — réconciliation forte après suppression.
+  // LibraMail 0.4.7 — suppression légère : la ligne est déjà retirée localement.
+  // Le serveur/SQLite restent la source de vérité, mais on ne reconstruit plus
+  // toute la liste après chaque suppression réussie.
   async function reconcileAfterMessageDeletion(items = []) {
     const normalizedItems = Array.isArray(items) ? items : [];
     removeLocalFolderItemsFromVisibleList(normalizedItems);
     list?.clearSelection();
     updateBulkSelection([], { total: 0, allSelected: false });
     invalidateListViewCacheAfterMutation();
-    await refreshVisibleList({ preserveListState: true });
-    await refreshSidebarCounts();
+    scheduleSidebarCountsRefresh(160);
   }
 
   async function prefetchLocalFolderView(folderId) {
@@ -2905,6 +2991,36 @@ const App = (() => {
     closeAll.onclick = closeAllReaderTabs;
     const activeElement = tabList.querySelector('.reader-tab.active');
     activeElement?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+
+  let readerModalOpen = false;
+
+  function setReaderModalOpen(open) {
+    readerModalOpen = Boolean(open);
+    document.getElementById('reader')?.classList.toggle('reader-modal-open', readerModalOpen);
+    document.getElementById('reader-modal-backdrop')?.classList.toggle('hidden', !readerModalOpen);
+    document.getElementById('btn-reader-modal-close')?.classList.toggle('hidden', !readerModalOpen);
+    document.body.classList.toggle('reader-modal-active', readerModalOpen);
+  }
+
+  async function closeReaderModal() {
+    if (!readerModalOpen) return;
+    setReaderModalOpen(false);
+
+    // Fermer la fenêtre ne détruit pas les onglets. Le panneau principal
+    // retrouve simplement l'aperçu sélectionné avant le double-clic.
+    activeReaderTabKey = 'preview';
+    renderReaderTabs();
+    if (previewReaderRow) {
+      await openListItem(previewReaderRow, { fromTab: true });
+    } else {
+      clearReader();
+    }
+  }
+
+  async function openItemInModal(row) {
+    setReaderModalOpen(true);
+    await openItemInTab(row);
   }
 
   async function openItemInTab(row) {
@@ -4449,7 +4565,9 @@ const App = (() => {
             && String(view.labelId) === String(label.id);
           reconcileLabelMutation(label.id, {
             removedFromCurrentLabelView,
-            affectedItems: removedFromCurrentLabelView ? [context.item] : [],
+            affectedItems: [context.item],
+            label,
+            applied: !applied,
           });
         } catch (error) {
           status(`${t('error')} : ${error.message}`, 'error');
@@ -4743,7 +4861,9 @@ const App = (() => {
 
           reconcileLabelMutation(label.id, {
             removedFromCurrentLabelView,
-            affectedItems: removedFromCurrentLabelView ? affectedItems : [],
+            affectedItems,
+            label,
+            applied: !all,
           });
 
           if (removedFromCurrentLabelView) {
@@ -5027,7 +5147,16 @@ const App = (() => {
             Boolean(label.applied)
             && view.type === 'label'
             && String(view.labelId) === String(label.id);
-          reconcileLabelMutation(label.id, { removedFromCurrentLabelView });
+          reconcileLabelMutation(label.id, {
+            removedFromCurrentLabelView,
+            affectedItems: [{
+              type: 'message',
+              id: Number(message.meta?.id),
+              threadKey: message.meta?.thread_key || undefined,
+            }],
+            label,
+            applied: !Boolean(label.applied),
+          });
         } catch (error) {
           status(`${t('error')} : ${error.message}`, 'error');
           button.disabled = false;
@@ -8486,13 +8615,28 @@ const App = (() => {
         console.error('[LibraMail] Lecture du message :', error);
         status(`${t('error')} : ${error.message}`, 'error');
       }),
-      onOpenTab: row => openItemInTab(row).catch(error => {
-        console.error('[LibraMail] Ouverture de l’onglet :', error);
+      onOpenTab: row => openItemInModal(row).catch(error => {
+        console.error('[LibraMail] Ouverture du lecteur modal :', error);
         status(`${t('error')} : ${error.message}`, 'error');
       }),
       onQuickAction: quickAction,
       onSelectionChange: updateBulkSelection,
     });
+
+    document.getElementById('btn-reader-modal-close')?.addEventListener('click', () => {
+      closeReaderModal().catch(error => status(`${t('error')} : ${error.message}`, 'error'));
+    });
+    document.getElementById('reader-modal-backdrop')?.addEventListener('click', () => {
+      closeReaderModal().catch(error => status(`${t('error')} : ${error.message}`, 'error'));
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key !== 'Escape' || !readerModalOpen) return;
+      if (document.querySelector('.modal-veil.open')) return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeReaderModal().catch(error => status(`${t('error')} : ${error.message}`, 'error'));
+    });
+
 
     document.addEventListener('libramail:local-folder-drag-start', event => {
       updateLocalFolderPointerDragUi(event.detail || {});
