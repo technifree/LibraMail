@@ -239,6 +239,33 @@ function changePassword(currentPassword, newPassword) {
   return status();
 }
 
+function verify(password) {
+  if (!isEnabled()) throw new Error('Le mot de passe principal n’est pas activé');
+  const key = unwrapVaultKey(metadata, password);
+  try {
+    return key.length === 32;
+  } finally {
+    try { key.fill(0); } catch {}
+  }
+}
+
+function disable(password) {
+  if (!isEnabled()) return status();
+  verify(password);
+  if (!securityFile) throw new Error('Stockage du mot de passe principal non initialisé');
+
+  try {
+    fs.unlinkSync(securityFile);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+    throw new Error('Configuration du mot de passe principal introuvable');
+  }
+
+  clearVaultKey();
+  metadata = null;
+  return status();
+}
+
 function requireUnlockedKey() {
   if (!isEnabled()) throw new Error('Le mot de passe principal n’est pas activé');
   if (!vaultKey) throw new Error('LibraMail est verrouillé');
@@ -305,6 +332,8 @@ module.exports = {
   unlock,
   lock,
   changePassword,
+  verify,
+  disable,
   protectSecret,
   unprotectSecret,
 };

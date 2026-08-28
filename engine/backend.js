@@ -342,6 +342,34 @@ function closeRuntimeStateForLock() {
   startupSyncTriggered = false;
 }
 
+const SECURITY_SERVICE_SECRETS = [mailStore.MASTER_SECRET];
+
+function securityAccountIds({ fromDisk = false } = {}) {
+  const source = fromDisk
+    ? loadJson(ACCOUNTS_FILE, [])
+    : accounts;
+  return [...new Set((Array.isArray(source) ? source : [])
+    .map(account => String(account?.id || '').trim())
+    .filter(Boolean))];
+}
+
+function assertSecurityMigrationReady() {
+  if (!runtimeInitialized) throw new Error('Données LibraMail non initialisées');
+  if (activeSyncs.size || activeCleanups.size || folderMaintenanceOperation
+      || scheduledSendBusy || calendarSubscriptionSyncBusy) {
+    throw new Error('Une opération est en cours. Réessayez dans quelques instants.');
+  }
+  const legacy = accounts.filter(account => account?.id && account.credentials?.store !== 'system');
+  if (legacy.length) {
+    throw new Error('Tous les mots de passe de comptes doivent être migrés vers le coffre-fort système avant d’activer le mot de passe principal.');
+  }
+}
+
+function restartRuntimeAfterSecurityChange() {
+  if (!runtimeInitialized || shuttingDown || masterPassword.isLocked()) return;
+  startAccountRuntime({ resolveFolders: false });
+}
+
 if (!masterPassword.isLocked()) initializeRuntimeState();
 
 const wss = new WebSocketServer({ host: '127.0.0.1', port: PORT });
@@ -1978,6 +2006,14 @@ const methods = {
     masterPassword.unlock(password);
     const migrationWasAlreadyComplete = startupMigrationCompleted;
     try {
+      // Une coupure brutale pendant l'activation peut laisser un mélange de
+      // secrets anciens et protégés. Après authentification, on termine
+      // silencieusement cette migration avant de charger le moindre compte.
+      credentialStore.ensureProtectedSecrets(
+        securityAccountIds({ fromDisk: true }),
+        SECURITY_SERVICE_SECRETS,
+      );
+
       initializeRuntimeState();
       if (!migrationWasAlreadyComplete) {
         await ensureStartupStorageMigration();
@@ -2004,6 +2040,101 @@ const methods = {
     const state = { ...masterPassword.status(), runtimeReady: false };
     broadcast('security.locked', state);
     return state;
+  },
+
+  'security.enable': async ({ password = '' } = {}) => {
+    if (masterPassword.isEnabled()) throw new Error('Le mot de passe principal est déjà activé');
+    assertSecurityMigrationReady();
+
+    const accountIds = securityAccountIds();
+    const snapshot = credentialStore.snapshotSecrets(accountIds, SECURITY_SERVICE_SECRETS);
+    stopAccountRuntime();
+
+    let enabled = false;
+    try {
+      masterPassword.enable(password);
+      enabled = true;
+
+      credentialStore.ensureProtectedSecrets(accountIds, SECURITY_SERVICE_SECRETS);
+      const summary = credentialStore.protectionSummary(accountIds, SECURITY_SERVICE_SECRETS);
+      if (summary.plain > 0) {
+        throw new Error(`${summary.plain} secret(s) restent non protégés`);
+      }
+
+      // accounts.json ne doit jamais conserver les mots de passe hydratés.
+      saveAccounts();
+      const state = {
+        ...masterPassword.status(),
+        runtimeReady: runtimeInitialized,
+        protectedSecrets: summary.protected,
+      };
+      broadcast('security.enabled', state);
+      return state;
+    } catch (error) {
+      const rollbackErrors = [];
+      try { credentialStore.restoreSnapshot(snapshot); } catch (rollbackError) {
+        rollbackErrors.push(`secrets : ${rollbackError.message}`);
+      }
+      if (enabled && masterPassword.isEnabled()) {
+        try { masterPassword.disable(password); } catch (rollbackError) {
+          rollbackErrors.push(`configuration : ${rollbackError.message}`);
+        }
+      }
+      if (rollbackErrors.length) {
+        throw new Error(`${error.message} ; retour arrière incomplet (${rollbackErrors.join(' ; ')})`);
+      }
+      throw error;
+    } finally {
+      restartRuntimeAfterSecurityChange();
+    }
+  },
+
+  'security.changePassword': async ({ currentPassword = '', newPassword = '' } = {}) => {
+    if (!masterPassword.isEnabled()) throw new Error('Le mot de passe principal n’est pas activé');
+    if (masterPassword.isLocked()) throw new Error('LibraMail est verrouillé');
+    masterPassword.changePassword(currentPassword, newPassword);
+    const state = { ...masterPassword.status(), runtimeReady: runtimeInitialized };
+    broadcast('security.passwordChanged', state);
+    return state;
+  },
+
+  'security.disable': async ({ password = '' } = {}) => {
+    if (!masterPassword.isEnabled()) {
+      return { ...masterPassword.status(), runtimeReady: runtimeInitialized };
+    }
+    if (masterPassword.isLocked()) throw new Error('LibraMail est verrouillé');
+    assertSecurityMigrationReady();
+    masterPassword.verify(password);
+
+    const accountIds = securityAccountIds();
+    const snapshot = credentialStore.snapshotSecrets(accountIds, SECURITY_SERVICE_SECRETS);
+    stopAccountRuntime();
+
+    let disabled = false;
+    try {
+      credentialStore.transformSnapshot(snapshot, { protect: false });
+      const summary = credentialStore.protectionSummary(accountIds, SECURITY_SERVICE_SECRETS);
+      if (summary.protected > 0) {
+        throw new Error(`${summary.protected} secret(s) restent protégés`);
+      }
+
+      masterPassword.disable(password);
+      disabled = true;
+      const state = { ...masterPassword.status(), runtimeReady: runtimeInitialized };
+      broadcast('security.disabled', state);
+      return state;
+    } catch (error) {
+      if (!disabled && masterPassword.isEnabled()) {
+        try {
+          credentialStore.restoreSnapshot(snapshot);
+        } catch (rollbackError) {
+          throw new Error(`${error.message} ; retour arrière des secrets impossible : ${rollbackError.message}`);
+        }
+      }
+      throw error;
+    } finally {
+      restartRuntimeAfterSecurityChange();
+    }
   },
 
   // ---------- Configuration / comptes ----------

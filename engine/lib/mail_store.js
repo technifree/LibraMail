@@ -547,6 +547,7 @@ function close() {
 }
 
 module.exports = {
+  MASTER_SECRET,
   init, close, status, storeMessage, readMessage, removeMessage, removeAccount,
   migrateLegacyMessages, expectedEmlPath, storeFileForAccount, verifyIndexCoverage,
   exportKeyEnvelope, importKeyEnvelope, unwrapKeyEnvelope, checkpointAll,
