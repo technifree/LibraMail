@@ -29,7 +29,7 @@ const emlImport = require('./lib/eml_import');
 const appPaths = require('./lib/app_paths');
 
 const PORT = 47800;
-const APP_VERSION = '0.4.7';
+const APP_VERSION = '0.4.8';
 const ROOT = path.resolve(__dirname, '..');
 
 // LibraMail 0.4.8 — séparation programme / données utilisateur.

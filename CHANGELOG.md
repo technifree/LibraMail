@@ -1,3 +1,46 @@
+# LibraMail 0.4.8 - 2026-08-29
+
+LibraMail 0.4.8 renforce la sécurité locale, ajoute une action globale de lecture et introduit un paquet Debian natif en complément des archives portables.
+
+## Mot de passe principal et verrouillage
+
+- Ajout d’un mot de passe principal facultatif, désactivé par défaut.
+- Possibilité de verrouiller manuellement LibraMail et de demander le mot de passe au démarrage.
+- Lorsque l’application est verrouillée, le runtime métier n’est pas initialisé et les opérations sur les comptes et messages restent indisponibles.
+- Les secrets de comptes et la clé maître du magasin local sont protégés par le coffre cryptographique du mot de passe principal.
+- Le mot de passe principal peut être modifié ou désactivé depuis les paramètres.
+- Le verrouillage ferme les accès à la base et au magasin local avant de revenir à l’écran de déverrouillage.
+
+## Tout marquer comme lu
+
+- Ajout d’une action « Tout marquer comme lu » pour la vue courante.
+- L’opération traite tous les messages non lus correspondant à la vue, et pas seulement les lignes actuellement chargées.
+- Prise en charge de la boîte unifiée, des comptes/dossiers, des dossiers locaux et des étiquettes.
+- L’action est masquée pendant une recherche afin d’éviter de modifier involontairement toute la vue structurelle.
+- Les lignes visibles et les compteurs sont mis à jour immédiatement sans reconstruction complète de la liste.
+- Les erreurs IMAP partielles conservent les messages concernés en non-lu et provoquent une réconciliation ciblée.
+
+## Paquet Debian
+
+- Ajout de la génération d’un paquet `.deb` amd64 en plus des archives Linux portables.
+- Installation du programme sous `/opt/libramail` avec lanceur `/usr/bin/libramail`.
+- Ajout d’une entrée de menu et de l’icône système.
+- Le runtime Node.js reste embarqué : aucune installation de Node.js système n’est nécessaire.
+- Les données utilisateur d’une installation Debian sont stockées sous `$XDG_DATA_HOME/libramail` ou `~/.local/share/libramail`.
+- Le mode portable conserve ses chemins historiques et reste compatible avec les installations existantes.
+- Les données d’une version portable ne sont pas migrées automatiquement ; la sauvegarde/restauration complète reste la méthode recommandée.
+
+## Construction et publication
+
+- GitHub Actions construit désormais le portable Linux et le paquet Debian dans la même chaîne.
+- Les fichiers `.deb` et leurs sommes SHA-256 sont ajoutés aux artefacts Linux et aux releases.
+- Les permissions du paquet Debian sont normalisées et les fichiers de développement `.old`, `.bak` et `.orig` sont exclus.
+
+## Tests
+
+- Ajout de tests dédiés au mot de passe principal, au runtime verrouillé, à la protection des secrets, à l’interface de sécurité, à l’action globale « lu », aux chemins de données et au packaging Debian.
+- Le paquet Debian a été installé et lancé avec un profil XDG isolé afin de vérifier qu’aucune donnée utilisateur n’est écrite sous `/opt/libramail`.
+
 # LibraMail 0.4.7 - 2026-08-28
 
 LibraMail 0.4.7 améliore la réactivité de l’interface et rétablit un lecteur de messages en fenêtre dédiée avec gestion des onglets.
