@@ -19,23 +19,25 @@ jobs:
       - name: Install packaging tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y zip xz-utils build-essential python3
+          sudo apt-get install -y zip xz-utils build-essential python3 dpkg-dev
 
       - name: Verify sources
         run: |
-          chmod +x security_check.sh build_linux.sh
+          chmod +x security_check.sh build_linux.sh build_deb.sh
           ./security_check.sh
           python3 tools/check_version.py
 
-      - name: Build portable Linux package
-        run: ./build_linux.sh --fresh-npm
+      - name: Build Linux portable and Debian packages
+        run: ./build_deb.sh --fresh-npm
 
       - name: Collect Linux files
         run: |
           mkdir -p release-linux
           cp build/linux/*.zip release-linux/ 2>/dev/null || true
           cp build/linux/*.tar.gz release-linux/ 2>/dev/null || true
+          cp build/linux/*.deb release-linux/ 2>/dev/null || true
           cp build/linux/*.sha256 release-linux/ 2>/dev/null || true
+          test -n "$(find release-linux -maxdepth 1 -type f -name '*.deb' -print -quit)"
           test -n "$(find release-linux -maxdepth 1 -type f -print -quit)"
 
       - name: Upload Linux artifact
