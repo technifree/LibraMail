@@ -805,6 +805,39 @@ function countMessages(filters = {}) {
     WHERE ${filter.where}`).get(filter.params);
 }
 
+// LibraMail 0.4.8 — opération globale de lecture.
+// Contrairement à listMessages(), cette requête n'a volontairement aucun
+// LIMIT : l'action porte sur toute la vue, y compris au-delà des 500 lignes UI.
+function listUnreadMessages(filters = {}) {
+  const filter = buildFilter(filters);
+  return db.prepare(`
+    SELECT m.id, m.account_id, m.folder, m.folder_role, m.uid,
+           m.thread_key, m.storage_kind, m.storage_ref
+      FROM messages m ${filter.join}
+     WHERE ${filter.where} AND m.seen=0
+     ORDER BY m.account_id, m.folder, m.uid, m.id
+  `).all(filter.params);
+}
+
+function setMessagesSeen(ids, value = true) {
+  const uniqueIds = [...new Set((ids || []).map(Number)
+    .filter(id => Number.isInteger(id) && id > 0))];
+  if (!uniqueIds.length) return 0;
+
+  const wanted = value ? 1 : 0;
+  const update = db.prepare(
+    'UPDATE messages SET seen=? WHERE id=? AND seen<>?'
+  );
+
+  return db.transaction(messageIds => {
+    let changed = 0;
+    for (const id of messageIds) {
+      changed += update.run(wanted, id, wanted).changes;
+    }
+    return changed;
+  })(uniqueIds);
+}
+
 function listConversations({ limit = 200, offset = 0, sortBy = 'date', sortDirection = 'desc', ...filters } = {}) {
   const filter = buildFilter(filters);
   const order = conversationOrder(sortBy, sortDirection);
@@ -2567,6 +2600,8 @@ module.exports = {
   vacuum,
   listMessages,
   countMessages,
+  listUnreadMessages,
+  setMessagesSeen,
   listConversations,
   countConversations,
   getConversation,

@@ -38,6 +38,7 @@ const App = (() => {
   let securityState = { enabled: false, locked: false, runtimeReady: true };
   let securityPasswordMode = 'enable';
   let securityOperationBusy = false;
+  let markViewReadBusy = false;
   let bulkSelection = [];
   let bulkSelectionMeta = { total: 0, allSelected: false };
   let quickLabelContext = null;
@@ -1941,7 +1942,7 @@ const App = (() => {
       button.innerHTML = `
         <i class="fa-solid fa-folder local-folder-icon" style="color:${safeColor(folder.color || '#4f8bd6')}"></i>
         <span class="local-folder-sidebar-name">${esc(folder.name)}</span>
-        ${messageCount ? `<span class="count${unreadCount ? ' has-unread' : ''}" title="${esc(t('localFolder.messageCount', { count: messageCount, unread: unreadCount }))}">${messageCount}</span>` : ''}`;
+        ${messageCount ? `<span class="count local-folder-mail-count${unreadCount ? ' has-unread' : ''}" title="${esc(t('localFolder.messageCount', { count: messageCount, unread: unreadCount }))}">${unreadCount}/${messageCount}</span>` : ''}`;
       button.onclick = () => {
         closeQuickLabelMenu();
         closeLocalFolderMenu();
@@ -2271,7 +2272,92 @@ const App = (() => {
     if (changed && list) list.render(true);
   }
 
+  function currentMarkReadTarget() {
+    if (String(document.getElementById('search-input')?.value || '').trim()) return null;
+
+    if (view.type === 'unified') return { type: 'unified' };
+    if (view.type === 'account') return { type: 'account', accountId: view.accountId };
+    if (view.type === 'spam') return { type: 'spam' };
+    if (view.type === 'sent') return { type: 'sent' };
+    if (view.type === 'trash') return { type: 'trash' };
+    if (view.type === 'localFolder') {
+      return { type: 'localFolder', localFolderId: view.localFolderId };
+    }
+    if (view.type === 'label') return { type: 'label', labelId: view.labelId };
+    return null;
+  }
+
+  function updateMarkViewReadButton() {
+    const button = document.getElementById('btn-mark-view-read');
+    if (!button) return;
+    const supported = Boolean(currentMarkReadTarget());
+    button.classList.toggle('hidden', !supported);
+    button.disabled = markViewReadBusy;
+    button.title = t('action.markViewRead');
+  }
+
+  function patchVisibleRowsRead() {
+    if (!list || !Array.isArray(list.rows)) return;
+    let changed = false;
+    const rows = list.rows.map(row => {
+      if (Number(row?.seen) === 1 && Number(row?.thread_unread || 0) === 0) return row;
+      changed = true;
+      return { ...row, seen: 1, thread_unread: 0 };
+    });
+    if (!changed) return;
+
+    list.setData(rows, mailListOptions(true));
+    updateCurrentListCacheRows(rows);
+
+    if (Viewer.current?.meta) Viewer.current.meta.seen = 1;
+  }
+
+  async function markCurrentViewRead() {
+    if (markViewReadBusy) return;
+    const target = currentMarkReadTarget();
+    if (!target) return;
+
+    markViewReadBusy = true;
+    updateMarkViewReadButton();
+    status(t('status.markViewReadBusy'), 'busy');
+
+    try {
+      const result = await rpc('messages.markViewRead', { view: target });
+      const processed = Number(result?.processed) || 0;
+      const errors = Array.isArray(result?.errors) ? result.errors : [];
+
+      if (processed > 0 && errors.length === 0) patchVisibleRowsRead();
+
+      invalidateListViewCacheAfterMutation();
+
+      // Cas normal : ne surtout pas reconstruire la liste. Les lignes visibles
+      // ont déjà été basculées en lu localement ; seuls les compteurs doivent
+      // être recalculés. Cela évite le clignotement/rechargement de la liste.
+      await refreshSidebarCounts();
+
+      // En cas d'erreur IMAP partielle seulement, on réconcilie la liste avec
+      // SQLite afin de refléter exactement les groupes réellement confirmés.
+      if (errors.length) {
+        await refreshVisibleList({ preserveListState: true });
+        status(t('status.markViewReadPartial', {
+          count: processed,
+          errors: errors.length,
+        }), 'error');
+      } else if (processed > 0) {
+        status(t('status.markViewReadDone', { count: processed }), 'success');
+      } else {
+        status(t('status.markViewReadNone'), 'info');
+      }
+    } catch (error) {
+      status(`${t('error')} : ${error.message}`, 'error');
+    } finally {
+      markViewReadBusy = false;
+      updateMarkViewReadButton();
+    }
+  }
+
   function updateFolderActionButton() {
+    updateMarkViewReadButton();
     const button = document.getElementById('btn-empty-folder');
     if (!button) return;
     const supported = view.type === 'spam' || view.type === 'trash';
@@ -9211,6 +9297,7 @@ const App = (() => {
     const clearSearchButton = document.getElementById('btn-clear-search');
     searchInput.addEventListener('input', event => {
       updateSearchClearButton();
+      updateMarkViewReadButton();
       clearTimeout(searchTimer);
       searchTimer = setTimeout(() => searchFor(event.target.value), 280);
     });
@@ -9321,6 +9408,7 @@ const App = (() => {
       });
     });
 
+    document.getElementById('btn-mark-view-read')?.addEventListener('click', markCurrentViewRead);
     document.getElementById('list-sort').onchange = event =>
       applyListPreference('sortBy', event.target.value);
     document.getElementById('list-sort-direction').onclick = () =>

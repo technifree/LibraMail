@@ -863,6 +863,36 @@ async function serverAction(account, folder, uid, action) {
   }
 }
 
+// LibraMail 0.4.8 — mise à jour groupée du drapeau \Seen.
+// On conserve une seule connexion et un seul verrou de boîte par dossier.
+// Les UID sont découpés pour éviter une commande IMAP démesurée.
+async function setSeenUids(account, folder, uids, value = true) {
+  const unique = [...new Set((uids || []).map(Number)
+    .filter(uid => Number.isInteger(uid) && uid > 0))];
+  if (!account || !folder || !unique.length) return 0;
+
+  const client = makeClient(account);
+  await client.connect();
+  try {
+    const lock = await client.getMailboxLock(folder);
+    try {
+      for (let index = 0; index < unique.length; index += 1000) {
+        const sequence = unique.slice(index, index + 1000).join(',');
+        if (value) {
+          await client.messageFlagsAdd(sequence, ['\\Seen'], { uid: true });
+        } else {
+          await client.messageFlagsRemove(sequence, ['\\Seen'], { uid: true });
+        }
+      }
+    } finally {
+      lock.release();
+    }
+  } finally {
+    await closeClientGracefully(client);
+  }
+
+  return unique.length;
+}
 async function moveUids(account, sourceFolder, uids, targetFolder) {
   const unique = [...new Set((uids || []).map(Number).filter(Number.isInteger))];
   if (!account || !sourceFolder || !targetFolder || !unique.length) return 0;
@@ -1080,6 +1110,7 @@ module.exports = {
   listFolders,
   resolveFolderMap,
   serverAction,
+  setSeenUids,
   moveUids,
   deleteUids,
   emptyFolder,

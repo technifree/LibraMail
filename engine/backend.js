@@ -958,6 +958,142 @@ function resolveSelection(items) {
   return db.getMessagesByIds([...messageIds]);
 }
 
+// LibraMail 0.4.8 — marquer toute la vue comme lue.
+// Le frontend n'envoie jamais de clause SQL ni une sélection de 500 lignes :
+// il transmet seulement le type de vue, puis le backend reconstruit une liste
+// blanche de filtres identique à listParams().
+function markReadFiltersForView(target = {}) {
+  const type = String(target?.type || '');
+  const filters = {
+    folderRole: 'inbox',
+    spam: 0,
+    excludeLocalFolders: true,
+  };
+
+  if (type === 'unified') return filters;
+
+  if (type === 'account') {
+    const accountId = String(target.accountId || '').trim();
+    if (!accountId || !getAccount(accountId)) throw new Error('Compte invalide');
+    filters.accountId = accountId;
+    return filters;
+  }
+
+  if (type === 'spam') {
+    delete filters.folderRole;
+    filters.folderRoles = ['inbox', 'junk'];
+    filters.spam = 1;
+    return filters;
+  }
+
+  if (type === 'sent') {
+    filters.folderRole = 'sent';
+    filters.spam = null;
+    return filters;
+  }
+
+  if (type === 'trash') {
+    filters.excludeLocalFolders = false;
+    filters.folderRole = 'trash';
+    filters.spam = null;
+    return filters;
+  }
+
+  if (type === 'localFolder') {
+    const localFolderId = Number(target.localFolderId);
+    if (!Number.isInteger(localFolderId) || localFolderId <= 0) {
+      throw new Error('Dossier local invalide');
+    }
+    filters.excludeLocalFolders = false;
+    delete filters.folderRole;
+    filters.folderRoles = ['inbox', 'sent', 'other'];
+    filters.spam = 0;
+    filters.localFolderId = localFolderId;
+    return filters;
+  }
+
+  if (type === 'label') {
+    const labelId = Number(target.labelId);
+    if (!Number.isInteger(labelId) || labelId <= 0) throw new Error('Étiquette invalide');
+    filters.excludeLocalFolders = false;
+    delete filters.folderRole;
+    filters.spam = null;
+    filters.labelId = labelId;
+    return filters;
+  }
+
+  throw new Error('Vue non prise en charge');
+}
+
+async function markViewRead(target = {}) {
+  const filters = markReadFiltersForView(target);
+  const unread = db.listUnreadMessages(filters);
+  if (!unread.length) {
+    return { requested: 0, processed: 0, remoteGroups: 0, errors: [] };
+  }
+
+  const localIds = [];
+  const remoteMessages = [];
+  const errors = [];
+
+  for (const message of unread) {
+    const account = getAccount(message.account_id);
+
+    if (isLocalImportedMessage(message) || account?.receiveProtocol === 'pop3') {
+      localIds.push(message.id);
+      continue;
+    }
+
+    if (!account) {
+      errors.push({
+        accountId: message.account_id,
+        folder: message.folder,
+        error: 'Compte introuvable',
+      });
+      continue;
+    }
+
+    remoteMessages.push(message);
+  }
+
+  const succeededRemoteIds = [];
+  let remoteGroups = 0;
+
+  for (const group of groupMessages(remoteMessages)) {
+    const first = group[0];
+    const account = getAccount(first.account_id);
+    try {
+      const uids = group.map(message => Number(message.uid))
+        .filter(uid => Number.isInteger(uid) && uid > 0);
+      if (uids.length !== group.length) {
+        throw new Error('UID IMAP invalide dans la sélection');
+      }
+      await imap.setSeenUids(account, first.folder, uids, true);
+      succeededRemoteIds.push(...group.map(message => message.id));
+      remoteGroups++;
+    } catch (error) {
+      errors.push({
+        accountId: first.account_id,
+        folder: first.folder,
+        count: group.length,
+        error: error.message,
+      });
+    }
+  }
+
+  const changed = db.setMessagesSeen(
+    [...localIds, ...succeededRemoteIds],
+    true
+  );
+
+  return {
+    requested: unread.length,
+    processed: changed,
+    remoteGroups,
+    errors,
+  };
+}
+
 async function setMessageSpamState(message, isSpam, { persistSenderRule = false } = {}) {
   if (!message) return false;
   const decision = db.spamRuleDecision(message.from_addr);
@@ -2710,6 +2846,7 @@ const methods = {
     await setMessageSpamState(message, Boolean(isSpam), { persistSenderRule: Boolean(isSpam) });
     return spam.stats();
   },
+  'messages.markViewRead': async ({ view: target } = {}) => markViewRead(target),
   'messages.batchSetFlag': async ({ items, flag, value }) => {
     if (!['seen', 'flagged'].includes(flag)) throw new Error('Drapeau invalide');
     const messages = resolveSelection(items);

@@ -941,5 +941,10 @@
   "security.disable.title": "Désactiver le mot de passe principal",
   "security.disable.description": "La protection par mot de passe principal sera supprimée. Les secrets resteront stockés dans le coffre-fort du système.",
   "security.disable.action": "Désactiver",
-  "security.disable.success": "Le mot de passe principal est désactivé."
+  "security.disable.success": "Le mot de passe principal est désactivé.",
+  "action.markViewRead": "Tout marquer comme lu",
+  "status.markViewReadBusy": "Marquage de tous les messages de cette vue comme lus…",
+  "status.markViewReadDone": "{count} message(s) marqué(s) comme lu(s).",
+  "status.markViewReadNone": "Aucun message non lu dans cette vue.",
+  "status.markViewReadPartial": "{count} message(s) marqué(s) comme lu(s), {errors} erreur(s) de synchronisation."
 }

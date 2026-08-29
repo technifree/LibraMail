@@ -941,5 +941,10 @@
   "security.disable.title": "Disable master password",
   "security.disable.description": "Master-password protection will be removed. Secrets will remain stored in the system keyring.",
   "security.disable.action": "Disable",
-  "security.disable.success": "The master password is disabled."
+  "security.disable.success": "The master password is disabled.",
+  "action.markViewRead": "Mark all as read",
+  "status.markViewReadBusy": "Marking all messages in this view as read…",
+  "status.markViewReadDone": "{count} message(s) marked as read.",
+  "status.markViewReadNone": "No unread messages in this view.",
+  "status.markViewReadPartial": "{count} message(s) marked as read, {errors} synchronization error(s)."
 }
