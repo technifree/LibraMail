@@ -160,7 +160,9 @@ NODE_BIN="$APP_DIR/runtime/node/bin/node"
 ENGINE_FILE="$APP_DIR/engine/backend.js"
 APP_BIN="$APP_DIR/libramail-app"
 
-if [[ -n "${XDG_DATA_HOME:-}" ]]; then
+if [[ -n "${LIBRAMAIL_STATE_ROOT:-}" ]]; then
+  STATE_ROOT="${LIBRAMAIL_STATE_ROOT%/}"
+elif [[ -n "${XDG_DATA_HOME:-}" ]]; then
   STATE_ROOT="${XDG_DATA_HOME%/}/libramail"
 else
   STATE_ROOT="${HOME:?HOME non défini}/.local/share/libramail"

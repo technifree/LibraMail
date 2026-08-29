@@ -21,6 +21,7 @@ assert(build.includes('PORTABLE_DIR="$PROJECT_DIR/build/linux/$PORTABLE_NAME"'))
 assert(build.includes('SKIP_PORTABLE_BUILD=0'));
 assert(build.includes('"$PROJECT_DIR/build_linux.sh"'));
 assert(build.includes('APP_DIR="/opt/libramail"'));
+assert(build.includes('STATE_ROOT="${LIBRAMAIL_STATE_ROOT%/}"'));
 assert(build.includes('STATE_ROOT="${XDG_DATA_HOME%/}/libramail"'));
 assert(build.includes('${HOME:?HOME non défini}/.local/share/libramail'));
 assert(build.includes('export LIBRAMAIL_STATE_ROOT="$STATE_ROOT"'));
