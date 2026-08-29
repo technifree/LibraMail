@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=LibraMail
+Comment=Client de messagerie et planning local
+Exec=libramail
+TryExec=/usr/bin/libramail
+Icon=libramail
+Terminal=false
+Categories=Network;Email;Office;
+StartupNotify=true

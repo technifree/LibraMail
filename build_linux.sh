@@ -363,6 +363,9 @@ if command -v rsync >/dev/null 2>&1; then
   rsync -a \
     --exclude node_modules \
     --exclude '*.log' \
+    --exclude '*.old' \
+    --exclude '*.bak' \
+    --exclude '*.orig' \
     --exclude '.npm' \
     --exclude '.cache' \
     "$PROJECT_DIR/engine/" "$PACKAGE_DIR/engine/"
@@ -372,6 +375,8 @@ else
          "$PACKAGE_DIR/engine/.npm" \
          "$PACKAGE_DIR/engine/.cache"
   find "$PACKAGE_DIR/engine" -type f -name '*.log' -delete
+  find "$PACKAGE_DIR/engine" -type f \
+    \( -name '*.old' -o -name '*.bak' -o -name '*.orig' \) -delete
 fi
 
 install_engine_dependencies() {
@@ -648,6 +653,11 @@ PACKAGE_NODE="$PACKAGE_DIR/runtime/node/bin/node"
 [[ -x "$PACKAGE_DIR/libramail-app" ]] || die "Binaire Neutralino absent."
 [[ -x "$PACKAGE_NODE" ]] || die "Runtime Node.js absent."
 [[ -f "$PACKAGE_DIR/engine/backend.js" ]] || die "Moteur absent."
+
+if find "$PACKAGE_DIR/engine" -type f \
+    \( -name '*.old' -o -name '*.bak' -o -name '*.orig' \) -print -quit | grep -q .; then
+  die "Le paquet portable contient encore un fichier .old/.bak/.orig."
+fi
 
 bash -n "$PACKAGE_DIR/libramail"
 bash -n "$PACKAGE_DIR/check_portable.sh"
