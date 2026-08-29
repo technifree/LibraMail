@@ -1988,10 +1988,22 @@ async function processScheduledMessages() {
 
 const methods = {
   // ---------- Sécurité 0.4.8 ----------
-  'security.status': async () => ({
-    ...masterPassword.status(),
-    runtimeReady: runtimeInitialized,
-  }),
+  'security.status': async () => {
+    // Le thème et la langue ne sont pas des secrets. Les lire directement dans
+    // config.json permet d'afficher l'écran de déverrouillage sans ouvrir la DB,
+    // sans hydrater les comptes et sans charger la clé du mailstore.
+    const publicConfig = loadJson(CONFIG_FILE, {});
+    return {
+      ...masterPassword.status(),
+      runtimeReady: runtimeInitialized,
+      locale: ['fr', 'en'].includes(String(publicConfig.locale || ''))
+        ? String(publicConfig.locale)
+        : defaultConfig.locale,
+      theme: ['dark', 'light'].includes(String(publicConfig.theme || ''))
+        ? String(publicConfig.theme)
+        : defaultConfig.theme,
+    };
+  },
 
   'security.unlock': async ({ password = '' } = {}) => {
     const before = masterPassword.status();

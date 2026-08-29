@@ -4511,3 +4511,38 @@ body.reader-modal-active { overflow: hidden; }
 #reader.reader-modal-open #reader-tab-preview {
   display: none;
 }
+
+
+/* LibraMail 0.4.8 — interface du mot de passe principal. */
+.security-lock-screen { position:fixed; inset:0; z-index:30000; display:flex; align-items:center; justify-content:center; padding:24px; background:var(--bg,#101217); }
+.security-lock-screen.hidden { display:none; }
+.security-lock-card { width:min(390px,94vw); display:flex; flex-direction:column; gap:14px; padding:28px; border:1px solid var(--border); border-radius:14px; background:var(--bg-panel); box-shadow:0 22px 70px rgba(0,0,0,.32); }
+.security-lock-logo { width:76px; height:76px; object-fit:contain; align-self:center; }
+.security-lock-title { align-self:center; color:var(--fg-strong); font-size:22px; font-weight:700; }
+.security-lock-heading { display:flex; align-items:center; justify-content:center; gap:8px; color:var(--fg-strong); font-size:16px; font-weight:700; }
+.security-lock-heading i { color:var(--accent); }
+.security-lock-copy { margin:-3px 0 2px; color:var(--fg-muted); font-size:12px; line-height:1.5; text-align:center; }
+.security-unlock-form { display:grid; gap:10px; }
+.security-unlock-form .field { margin:0; }
+.security-unlock-form input { width:100%; }
+.security-unlock-button,.security-unlock-quit { width:100%; justify-content:center; }
+.security-unlock-error,.security-password-status,.security-settings-status { min-height:18px; color:var(--fg-faint); font-size:11.5px; line-height:1.45; }
+.security-unlock-error.error,.security-password-status.error,.security-settings-status.error { color:var(--danger,#d66f4f); }
+.security-password-status.success,.security-settings-status.success { color:var(--success,#49a86b); }
+.security-password-status.busy,.security-settings-status.busy { color:var(--accent); }
+.security-settings-card { display:flex; flex-direction:column; gap:12px; padding:14px; border:1px solid var(--border-soft); border-radius:var(--radius); background:var(--bg-panel-2); }
+.security-settings-summary { display:grid; grid-template-columns:34px minmax(0,1fr) auto; align-items:center; gap:10px; }
+.security-settings-icon { width:34px; height:34px; display:inline-flex; align-items:center; justify-content:center; border-radius:50%; color:var(--accent); background:var(--accent-soft); }
+.security-settings-copy { min-width:0; }
+.security-settings-copy strong { display:block; margin-bottom:3px; color:var(--fg-strong); }
+.security-settings-copy p { margin:0; color:var(--fg-muted); font-size:12px; line-height:1.45; }
+.security-state-badge { padding:4px 8px; border-radius:999px; border:1px solid var(--border-soft); color:var(--fg-muted); background:var(--bg-active); font-size:11px; font-weight:700; white-space:nowrap; }
+.security-state-badge.enabled { color:var(--success,#49a86b); border-color:color-mix(in srgb,var(--success,#49a86b) 38%,var(--border-soft)); background:color-mix(in srgb,var(--success,#49a86b) 12%,transparent); }
+.security-settings-warning,.security-password-warning { display:flex; align-items:flex-start; gap:8px; color:var(--warn); font-size:11.5px; line-height:1.45; }
+.security-settings-warning i,.security-password-warning i { margin-top:2px; }
+.security-settings-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.security-password-modal-box { width:min(500px,94vw); }
+.security-password-modal-box .body { display:flex; flex-direction:column; gap:12px; }
+.security-password-intro { margin:0; color:var(--fg-muted); font-size:12px; line-height:1.5; }
+.security-password-modal-box input { width:100%; }
+@media (max-width:560px) { .security-lock-card{padding:22px 18px}.security-settings-summary{grid-template-columns:34px minmax(0,1fr)}.security-state-badge{grid-column:2;justify-self:start}.security-settings-actions{align-items:stretch;flex-direction:column}.security-settings-actions .btn{width:100%;justify-content:center} }

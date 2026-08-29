@@ -35,6 +35,9 @@ const App = (() => {
   const activeMaintenanceActivities = new Map();
   let pendingConfirmAction = null;
   let backupBusy = false;
+  let securityState = { enabled: false, locked: false, runtimeReady: true };
+  let securityPasswordMode = 'enable';
+  let securityOperationBusy = false;
   let bulkSelection = [];
   let bulkSelectionMeta = { total: 0, allSelected: false };
   let quickLabelContext = null;
@@ -1042,11 +1045,20 @@ const App = (() => {
   // ---------- Démarrage ----------
   async function boot() {
     const security = await rpc('security.status');
+    securityState = { ...securityState, ...(security || {}) };
+
     if (security?.locked) {
-      startupMessage('LibraMail est verrouillé — mot de passe principal requis.');
+      document.documentElement.dataset.theme = security.theme || 'dark';
+      await I18N.load(security.locale || 'fr');
+      applyAppVersion();
+      startupMessage(t('security.lockedTitle'));
+      syncSecurityUi(securityState);
+      showSecurityLockScreen();
+      hideStartupScreen();
       return;
     }
 
+    hideSecurityLockScreen();
     startupMessage('Chargement de la configuration…');
     const state = await rpc('config.get');
     config = state.config;
@@ -1056,6 +1068,7 @@ const App = (() => {
     document.getElementById('app').dataset.layout = config.layout || 'vertical';
     applyAccentScheme();
     await I18N.load(config.locale || 'fr');
+    syncSecurityUi(securityState);
     startupMessage(t('startup.loading'));
     applyPaneDimensions();
     applyAppVersion();
@@ -8213,6 +8226,188 @@ const App = (() => {
     }
   }
 
+  // ---------- Sécurité / mot de passe principal 0.4.8 ----------
+  function setSecurityText(id, text, state = '') {
+    const element = document.getElementById(id);
+    if (!element) return;
+    element.textContent = String(text || '');
+    element.classList.remove('error', 'success', 'busy');
+    if (state) element.classList.add(state);
+  }
+
+  function syncSecurityUi(state = securityState) {
+    securityState = { ...securityState, ...(state || {}) };
+    const enabled = securityState.enabled === true;
+    document.getElementById('btn-lock-app')?.classList.toggle('hidden', !enabled);
+    const badge = document.getElementById('security-state-badge');
+    if (badge) {
+      badge.textContent = t(enabled ? 'security.enabled' : 'security.disabled');
+      badge.classList.toggle('enabled', enabled);
+    }
+    document.getElementById('btn-security-enable')?.classList.toggle('hidden', enabled);
+    document.getElementById('btn-security-change')?.classList.toggle('hidden', !enabled);
+    document.getElementById('btn-security-lock-settings')?.classList.toggle('hidden', !enabled);
+    document.getElementById('btn-security-disable')?.classList.toggle('hidden', !enabled);
+  }
+
+  function showSecurityLockScreen() {
+    const screen = document.getElementById('security-lock-screen');
+    if (!screen) return;
+    closeModals();
+    screen.classList.remove('hidden');
+    screen.setAttribute('aria-hidden', 'false');
+    setSecurityText('security-unlock-error', '');
+    const input = document.getElementById('security-unlock-password');
+    if (input) { input.value = ''; setTimeout(() => input.focus(), 30); }
+  }
+
+  function hideSecurityLockScreen() {
+    const screen = document.getElementById('security-lock-screen');
+    if (!screen) return;
+    screen.classList.add('hidden');
+    screen.setAttribute('aria-hidden', 'true');
+    const input = document.getElementById('security-unlock-password');
+    if (input) input.value = '';
+    setSecurityText('security-unlock-error', '');
+  }
+
+  async function unlockLibraMail() {
+    if (securityOperationBusy) return;
+    const input = document.getElementById('security-unlock-password');
+    const button = document.getElementById('btn-security-unlock');
+    const password = String(input?.value || '');
+    if (!password) {
+      setSecurityText('security-unlock-error', t('security.passwordRequired'), 'error');
+      input?.focus();
+      return;
+    }
+    securityOperationBusy = true;
+    if (button) button.disabled = true;
+    setSecurityText('security-unlock-error', t('security.unlocking'), 'busy');
+    try {
+      const next = await rpc('security.unlock', { password });
+      securityState = { ...securityState, ...(next || {}), locked: false };
+      hideSecurityLockScreen();
+      await boot();
+    } catch (error) {
+      console.error('[LibraMail] Déverrouillage :', error);
+      setSecurityText('security-unlock-error', t('security.incorrectPassword'), 'error');
+      if (input) { input.value = ''; input.focus(); }
+    } finally {
+      securityOperationBusy = false;
+      if (button) button.disabled = false;
+    }
+  }
+
+  async function lockLibraMail() {
+    if (securityOperationBusy || securityState.enabled !== true) return;
+    securityOperationBusy = true;
+    try {
+      closeModals();
+      await rpc('security.lock');
+      // Le rechargement détruit aussi les copies de messages et de comptes
+      // encore présentes dans le DOM / heap du frontend.
+      window.location.reload();
+    } catch (error) {
+      securityOperationBusy = false;
+      status(`${t('error')} : ${error.message}`, 'error');
+    }
+  }
+
+  async function refreshSecuritySettings() {
+    try {
+      const state = await rpc('security.status');
+      syncSecurityUi(state);
+      setSecurityText('security-settings-status', '');
+      return state;
+    } catch (error) {
+      setSecurityText('security-settings-status', `${t('error')} : ${error.message}`, 'error');
+      throw error;
+    }
+  }
+
+  function securityPasswordModeText(mode, part) {
+    const safeMode = ['enable', 'change', 'disable'].includes(mode) ? mode : 'enable';
+    return t(`security.${safeMode}.${part}`);
+  }
+
+  function closeSecurityPasswordDialog() {
+    document.getElementById('security-password-modal')?.classList.remove('open');
+    ['security-current-password', 'security-new-password', 'security-confirm-password'].forEach(id => {
+      const input = document.getElementById(id);
+      if (input) input.value = '';
+    });
+    setSecurityText('security-password-status', '');
+    securityOperationBusy = false;
+    const submit = document.getElementById('btn-security-password-submit');
+    if (submit) submit.disabled = false;
+  }
+
+  function openSecurityPasswordDialog(mode) {
+    if (securityOperationBusy) return;
+    securityPasswordMode = ['enable', 'change', 'disable'].includes(mode) ? mode : 'enable';
+    document.getElementById('security-current-field')?.classList.toggle('hidden', securityPasswordMode === 'enable');
+    document.getElementById('security-new-field')?.classList.toggle('hidden', securityPasswordMode === 'disable');
+    document.getElementById('security-confirm-field')?.classList.toggle('hidden', securityPasswordMode === 'disable');
+    document.getElementById('security-password-warning')?.classList.toggle('hidden', securityPasswordMode === 'change');
+    const title = document.getElementById('security-password-title');
+    const intro = document.getElementById('security-password-intro');
+    const submit = document.getElementById('btn-security-password-submit');
+    if (title) title.textContent = securityPasswordModeText(securityPasswordMode, 'title');
+    if (intro) intro.textContent = securityPasswordModeText(securityPasswordMode, 'description');
+    if (submit) submit.textContent = securityPasswordModeText(securityPasswordMode, 'action');
+    setSecurityText('security-password-status', '');
+    openModal('security-password-modal');
+    const focusId = securityPasswordMode === 'enable' ? 'security-new-password' : 'security-current-password';
+    setTimeout(() => document.getElementById(focusId)?.focus(), 30);
+  }
+
+  async function submitSecurityPasswordOperation() {
+    if (securityOperationBusy) return;
+    const currentPassword = String(document.getElementById('security-current-password')?.value || '');
+    const newPassword = String(document.getElementById('security-new-password')?.value || '');
+    const confirmation = String(document.getElementById('security-confirm-password')?.value || '');
+    if (securityPasswordMode !== 'enable' && !currentPassword) {
+      setSecurityText('security-password-status', t('security.passwordRequired'), 'error');
+      document.getElementById('security-current-password')?.focus();
+      return;
+    }
+    if (securityPasswordMode !== 'disable') {
+      if (newPassword.length < 8) {
+        setSecurityText('security-password-status', t('security.passwordTooShort'), 'error');
+        document.getElementById('security-new-password')?.focus();
+        return;
+      }
+      if (newPassword !== confirmation) {
+        setSecurityText('security-password-status', t('security.passwordMismatch'), 'error');
+        document.getElementById('security-confirm-password')?.focus();
+        return;
+      }
+    }
+    securityOperationBusy = true;
+    const submit = document.getElementById('btn-security-password-submit');
+    if (submit) submit.disabled = true;
+    setSecurityText('security-password-status', t('security.processing'), 'busy');
+    try {
+      let next;
+      if (securityPasswordMode === 'enable') next = await rpc('security.enable', { password: newPassword });
+      else if (securityPasswordMode === 'change') next = await rpc('security.changePassword', { currentPassword, newPassword });
+      else next = await rpc('security.disable', { password: currentPassword });
+      securityState = { ...securityState, ...(next || {}) };
+      const successKey = `security.${securityPasswordMode}.success`;
+      closeSecurityPasswordDialog();
+      syncSecurityUi(securityState);
+      setSecurityText('security-settings-status', t(successKey), 'success');
+      status(t(successKey), 'success');
+    } catch (error) {
+      console.error('[LibraMail] Mot de passe principal :', error);
+      const message = /incorrect/i.test(String(error?.message || '')) ? t('security.incorrectPassword') : `${t('error')} : ${error.message}`;
+      setSecurityText('security-password-status', message, 'error');
+      securityOperationBusy = false;
+      if (submit) submit.disabled = false;
+    }
+  }
+
   // ---------- Paramètres ----------
   function openSettings() {
     document.getElementById('set-theme').value = config.theme || 'dark';
@@ -8230,6 +8425,7 @@ const App = (() => {
       `<option value="${esc(account.id)}" ${account.id === config.defaultAccountId ? 'selected' : ''}>${esc(account.email)}</option>`).join('');
     populateSignatureAccountSelect();
     populateEmlImportAccounts();
+    refreshSecuritySettings().catch(() => {});
 
     const syncList = document.getElementById('sync-account-list');
     syncList.innerHTML = accounts.length ? accounts.map(account => `
@@ -8307,6 +8503,7 @@ const App = (() => {
     if (key === 'locale') {
       await I18N.load(value);
       applyAppVersion();
+      syncSecurityUi(securityState);
       applySidebarSectionStates();
       renderSidebar();
       syncListControls();
@@ -8892,6 +9089,16 @@ const App = (() => {
     });
     document.getElementById('contacts-group-filter').onchange = () => loadContacts().catch(() => {});
     document.getElementById('btn-settings').onclick = openSettings;
+    document.getElementById('btn-lock-app')?.addEventListener('click', lockLibraMail);
+    document.getElementById('btn-security-lock-settings')?.addEventListener('click', lockLibraMail);
+    document.getElementById('btn-security-enable')?.addEventListener('click', () => openSecurityPasswordDialog('enable'));
+    document.getElementById('btn-security-change')?.addEventListener('click', () => openSecurityPasswordDialog('change'));
+    document.getElementById('btn-security-disable')?.addEventListener('click', () => openSecurityPasswordDialog('disable'));
+    document.getElementById('btn-security-password-close')?.addEventListener('click', closeSecurityPasswordDialog);
+    document.getElementById('btn-security-password-cancel')?.addEventListener('click', closeSecurityPasswordDialog);
+    document.getElementById('security-password-form')?.addEventListener('submit', event => { event.preventDefault(); submitSecurityPasswordOperation(); });
+    document.getElementById('security-unlock-form')?.addEventListener('submit', event => { event.preventDefault(); unlockLibraMail(); });
+    document.getElementById('btn-security-unlock-quit')?.addEventListener('click', shutdownEngineAndExit);
     document.getElementById('btn-add-spam-rule')?.addEventListener('click', addSpamRuleFromSettings);
     document.getElementById('spam-rule-search')?.addEventListener('input', renderSpamRuleSettings);
     const collectedSpamDetails = document.querySelector('.spam-collected-box');

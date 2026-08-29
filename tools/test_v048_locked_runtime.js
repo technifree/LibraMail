@@ -27,7 +27,7 @@ assert(backend.includes("if (!masterPassword.isLocked()) initializeRuntimeState(
 assert(backend.includes('async function ensureStartupStorageMigration()'));
 assert(backend.includes("console.log('[LibraMail] Mot de passe principal requis avant chargement des données.');"));
 
-assert(backend.includes("'security.status': async () => ({"));
+assert(backend.includes("'security.status': async () => {"));
 assert(backend.includes("'security.unlock': async ({ password = '' } = {}) => {"));
 assert(backend.includes("'security.lock': async () => {"));
 assert(backend.includes("'security.status',\n        'security.unlock',\n        'app.shutdown',"));
@@ -56,6 +56,8 @@ const securityPos = boot.indexOf("rpc('security.status')");
 const configPos = boot.indexOf("rpc('config.get')");
 assert(securityPos >= 0 && configPos > securityPos);
 assert(boot.includes('if (security?.locked)'));
-assert(boot.includes('mot de passe principal requis'));
+assert(boot.includes("t('security.lockedTitle')"));
+assert(boot.includes('showSecurityLockScreen();'));
+assert(boot.includes('hideStartupScreen();'));
 
 console.log('[LibraMail] Tests runtime verrouillable 0.4.8 : OK');

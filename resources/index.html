@@ -88,6 +88,23 @@
     <div class="startup-message" id="startup-message">Initialisation…</div>
   </div>
 </div>
+<div id="security-lock-screen" class="security-lock-screen hidden" aria-hidden="true">
+  <div class="security-lock-card">
+    <img class="security-lock-logo" src="icons/appIcon.png" alt="">
+    <div class="security-lock-title">LibraMail</div>
+    <div class="security-lock-heading"><i class="fa-solid fa-lock"></i><span data-i18n="security.lockedTitle"></span></div>
+    <p class="security-lock-copy" data-i18n="security.lockedDescription"></p>
+    <form id="security-unlock-form" class="security-unlock-form">
+      <label class="field"><span data-i18n="security.masterPassword"></span>
+        <input id="security-unlock-password" type="password" minlength="8" autocomplete="current-password" data-i18n-ph="security.passwordPlaceholder">
+      </label>
+      <div id="security-unlock-error" class="security-unlock-error" aria-live="polite"></div>
+      <button class="btn primary security-unlock-button" id="btn-security-unlock" type="submit"><i class="fa-solid fa-lock-open"></i><span data-i18n="security.unlock"></span></button>
+      <button class="btn security-unlock-quit" id="btn-security-unlock-quit" type="button"><i class="fa-solid fa-power-off"></i><span data-i18n="app.quit"></span></button>
+    </form>
+  </div>
+</div>
+
 <div id="app" data-layout="vertical">
 
   <div id="topbar">
@@ -136,6 +153,9 @@
     </button>
     <button class="iconbtn" id="btn-settings" data-i18n-title="settings">
       <i class="fa-solid fa-gear"></i>
+    </button>
+    <button class="iconbtn hidden" id="btn-lock-app" type="button" data-i18n-title="security.lock">
+      <i class="fa-solid fa-lock"></i>
     </button>
     <button class="iconbtn exit-btn" id="btn-exit" data-i18n-title="app.quit">
       <i class="fa-solid fa-power-off"></i>
@@ -726,6 +746,26 @@
 
 
       <div class="settings-section-title">
+        <i class="fa-solid fa-shield-halved"></i>
+        <span data-i18n="security.sectionTitle"></span>
+      </div>
+      <div class="security-settings-card">
+        <div class="security-settings-summary">
+          <span class="security-settings-icon"><i class="fa-solid fa-key"></i></span>
+          <div class="security-settings-copy"><strong data-i18n="security.masterPassword"></strong><p data-i18n="security.description"></p></div>
+          <span id="security-state-badge" class="security-state-badge"></span>
+        </div>
+        <div class="security-settings-warning"><i class="fa-solid fa-triangle-exclamation"></i><span data-i18n="security.recoveryWarning"></span></div>
+        <div class="security-settings-actions">
+          <button class="btn primary" id="btn-security-enable" type="button"><i class="fa-solid fa-shield-halved"></i><span data-i18n="security.enable"></span></button>
+          <button class="btn hidden" id="btn-security-change" type="button"><i class="fa-solid fa-key"></i><span data-i18n="security.change"></span></button>
+          <button class="btn hidden" id="btn-security-lock-settings" type="button"><i class="fa-solid fa-lock"></i><span data-i18n="security.lock"></span></button>
+          <button class="btn danger hidden" id="btn-security-disable" type="button"><i class="fa-solid fa-shield"></i><span data-i18n="security.disable"></span></button>
+        </div>
+        <div id="security-settings-status" class="security-settings-status" aria-live="polite"></div>
+      </div>
+
+      <div class="settings-section-title">
         <i class="fa-regular fa-envelope-open"></i>
         <span data-i18n="settings.reading"></span>
       </div>
@@ -923,6 +963,21 @@
     </div>
     <footer><button class="btn primary" data-close data-i18n="close"></button></footer>
   </div>
+</div>
+
+<div class="modal-veil" id="security-password-modal">
+  <form class="modal security-password-modal-box" id="security-password-form">
+    <header><span id="security-password-title"></span><button class="iconbtn" id="btn-security-password-close" type="button"><i class="fa-solid fa-xmark"></i></button></header>
+    <div class="body">
+      <p class="security-password-intro" id="security-password-intro"></p>
+      <label class="field hidden" id="security-current-field"><span data-i18n="security.currentPassword"></span><input id="security-current-password" type="password" autocomplete="current-password"></label>
+      <label class="field" id="security-new-field"><span data-i18n="security.newPassword"></span><input id="security-new-password" type="password" minlength="8" autocomplete="new-password" data-i18n-ph="security.passwordPlaceholder"></label>
+      <label class="field" id="security-confirm-field"><span data-i18n="security.confirmPassword"></span><input id="security-confirm-password" type="password" minlength="8" autocomplete="new-password" data-i18n-ph="security.passwordPlaceholder"></label>
+      <div class="security-password-warning" id="security-password-warning"><i class="fa-solid fa-triangle-exclamation"></i><span data-i18n="security.recoveryWarning"></span></div>
+      <div id="security-password-status" class="security-password-status" aria-live="polite"></div>
+    </div>
+    <footer><button class="btn" id="btn-security-password-cancel" type="button" data-i18n="cancel"></button><button class="btn primary" id="btn-security-password-submit" type="submit"></button></footer>
+  </form>
 </div>
 
 <div class="modal-veil" id="contacts-modal">
