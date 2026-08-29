@@ -26,15 +26,24 @@ const credentialStore = require('./lib/credential_store');
 const mailStore = require('./lib/mail_store');
 const masterPassword = require('./lib/master_password');
 const emlImport = require('./lib/eml_import');
+const appPaths = require('./lib/app_paths');
 
 const PORT = 47800;
 const APP_VERSION = '0.4.7';
 const ROOT = path.resolve(__dirname, '..');
-const DATA = path.join(ROOT, 'data');
+
+// LibraMail 0.4.8 — séparation programme / données utilisateur.
+// Sans variable d'environnement, le mode portable conserve EXACTEMENT les
+// chemins historiques sous ROOT. Un paquet installé peut définir
+// LIBRAMAIL_STATE_ROOT vers un emplacement utilisateur inscriptible.
+const {
+  stateRoot: STATE_ROOT,
+  dataDir: DATA,
+  backupsDir: BACKUPS_DIR,
+  restoreStateFile: RESTORE_STATE_FILE,
+} = appPaths.createAppPaths(ROOT);
 const ACCOUNTS_FILE = path.join(DATA, 'accounts.json');
 const CONFIG_FILE = path.join(DATA, 'config.json');
-const BACKUPS_DIR = path.join(ROOT, 'backups');
-const RESTORE_STATE_FILE = path.join(ROOT, '.libramail-restore-state.json');
 const RETENTION_CHECK_MS = 6 * 60 * 60 * 1000;
 const OUTBOX_CHECK_MS = 30 * 1000;
 const CALENDAR_SUBSCRIPTION_CHECK_MS = 60 * 1000;
@@ -44,6 +53,7 @@ function isRuntimeDataFile(name) {
   return RUNTIME_DATA_FILES.has(String(name || '').replace(/\\/g, '/'));
 }
 
+fs.mkdirSync(STATE_ROOT, { recursive: true });
 fs.mkdirSync(DATA, { recursive: true });
 
 // LibraMail 0.4.8 — démarrage verrouillable par mot de passe principal.
@@ -57,8 +67,8 @@ function recoverInterruptedRestore() {
   try { state = JSON.parse(fs.readFileSync(RESTORE_STATE_FILE, 'utf8')); } catch {}
   const rollbackRoot = state?.rollbackRoot ? path.resolve(state.rollbackRoot) : '';
   const stagingRoot = state?.stagingRoot ? path.resolve(state.stagingRoot) : '';
-  const safeRollback = rollbackRoot && rollbackRoot.startsWith(ROOT + path.sep);
-  const safeStaging = stagingRoot && stagingRoot.startsWith(ROOT + path.sep);
+  const safeRollback = rollbackRoot && appPaths.isInsideStateRoot(rollbackRoot, STATE_ROOT);
+  const safeStaging = stagingRoot && appPaths.isInsideStateRoot(stagingRoot, STATE_ROOT);
 
   if (safeRollback && fs.existsSync(rollbackRoot)) {
     try {
@@ -1778,8 +1788,8 @@ async function importCompleteBackup(sourcePath, password = '') {
   broadcast('backup.progress', { kind: 'import', step: 'safety', completed: 0, total: 1, name: path.basename(safetyBackup) });
   await exportCompleteBackup(safetyBackup, { kind: 'import', step: 'safety', password });
 
-  const stagingRoot = fs.mkdtempSync(path.join(ROOT, '.libramail-restore-'));
-  const rollbackRoot = path.join(ROOT, `.libramail-rollback-${process.pid}-${Date.now()}`);
+  const stagingRoot = fs.mkdtempSync(path.join(STATE_ROOT, '.libramail-restore-'));
+  const rollbackRoot = path.join(STATE_ROOT, `.libramail-rollback-${process.pid}-${Date.now()}`);
   let databaseClosed = false;
   let oldDataMoved = false;
 
