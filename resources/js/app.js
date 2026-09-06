@@ -2413,6 +2413,8 @@ const App = (() => {
   // ancienne d'écraser la vue si l'utilisateur clique rapidement ailleurs.
   const listViewCache = new Map();
   let listRefreshToken = 0;
+  let mailListLoadingTimer = null;
+  let mailListLoadingToken = 0;
   let sidebarCountsTimer = null;
   let sidebarCountsBusy = false;
   let sidebarCountsAgain = false;
@@ -2890,6 +2892,32 @@ const App = (() => {
     }, Math.max(0, Number(delay) || 0));
   }
 
+  // LibraMail 0.5.0 — indicateur graphique de chargement.
+  // Le léger délai évite un clignotement sur les réponses quasi instantanées.
+  function prepareMailListLoading(token, shouldShow) {
+    mailListLoadingToken = token;
+    if (mailListLoadingTimer) clearTimeout(mailListLoadingTimer);
+    mailListLoadingTimer = null;
+
+    const indicator = document.getElementById('mail-list-loading');
+    if (!indicator) return;
+    indicator.classList.add('hidden');
+    if (!shouldShow) return;
+
+    mailListLoadingTimer = setTimeout(() => {
+      mailListLoadingTimer = null;
+      if (mailListLoadingToken !== token) return;
+      indicator.classList.remove('hidden');
+    }, 120);
+  }
+
+  function finishMailListLoading(token) {
+    if (mailListLoadingToken !== token) return;
+    if (mailListLoadingTimer) clearTimeout(mailListLoadingTimer);
+    mailListLoadingTimer = null;
+    document.getElementById('mail-list-loading')?.classList.add('hidden');
+  }
+
   async function refresh({
     preserveListState = false,
     preferCache = true,
@@ -2904,6 +2932,7 @@ const App = (() => {
     const cacheKey = listViewCacheKey(params, conversationMode);
     const token = ++listRefreshToken;
     const cached = preferCache ? listViewCache.get(cacheKey) : null;
+    prepareMailListLoading(token, !cached);
     const currentLocalFolderId = view.type === 'localFolder'
       ? view.localFolderId
       : null;
@@ -2958,6 +2987,8 @@ const App = (() => {
           `${t('error')} : ${error.message}`;
       }
       throw error;
+    } finally {
+      finishMailListLoading(token);
     }
   }
 

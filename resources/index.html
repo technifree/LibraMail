@@ -300,7 +300,13 @@
         <i class="fa-solid fa-xmark"></i>
       </button>
     </div>
-    <div id="mail-list"></div>
+    <div class="mail-list-stage">
+      <div id="mail-list"></div>
+      <div id="mail-list-loading" class="mail-list-loading hidden" role="status" aria-live="polite">
+        <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>
+        <span data-i18n="list.loading"></span>
+      </div>
+    </div>
     <div id="quick-label-menu" class="popover quick-label-menu hidden" role="menu"></div>
   </section>
 
