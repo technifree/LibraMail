@@ -3195,10 +3195,44 @@ const methods = {
     db.setMessageLocalFolder(messageId, folderId),
   'localFolders.batchAssign': async ({ messageIds = [], folderId = null } = {}) =>
     db.setMessagesLocalFolder(messageIds, folderId),
-  'localFolders.assignSelection': async ({ items = [], folderId = null } = {}) => {
-    const messages = resolveSelection(items);
-    const result = db.setMessagesLocalFolder(messages.map(message => message.id), folderId);
-    return { ...result, folders: db.listLocalFolders() };
+  'localFolders.assignSelection': async ({
+    items = [],
+    folderId = null,
+    restoreFromTrash = false,
+  } = {}) => {
+    const shouldRestoreLocalTrash = Boolean(restoreFromTrash)
+      && folderId !== null
+      && folderId !== undefined
+      && folderId !== '';
+
+    let messages = shouldRestoreLocalTrash
+      ? resolveTrashRestoreSelection(items)
+      : resolveSelection(items);
+    let restored = 0;
+
+    if (shouldRestoreLocalTrash) {
+      const targetId = Number(folderId);
+      const targetExists = Number.isInteger(targetId)
+        && targetId > 0
+        && db.listLocalFolders().some(folder => Number(folder.id) === targetId);
+      if (!targetExists) throw new Error('Dossier local introuvable');
+
+      const unsupported = messages.filter(message => !isLocalImportedMessage(message));
+      if (unsupported.length) {
+        throw new Error('LOCAL_FOLDER_TRASH_REMOTE_UNSUPPORTED');
+      }
+
+      const ids = messages
+        .map(message => Number(message.id))
+        .filter(id => Number.isInteger(id) && id > 0);
+      restored = db.moveLocalMessages(ids, 'Local/Imported', 'inbox');
+    }
+
+    const result = db.setMessagesLocalFolder(
+      messages.map(message => message.id),
+      folderId
+    );
+    return { ...result, restored, folders: db.listLocalFolders() };
   },
 
   // ---------- Étiquettes ----------

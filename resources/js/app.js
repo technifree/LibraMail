@@ -1230,8 +1230,9 @@ const App = (() => {
 
 
   // LibraMail 0.4.4 — classement dans les dossiers locaux.
-  // Ces opérations modifient exclusivement message_local_folder. Aucun MOVE,
-  // COPY ou DELETE n'est envoyé aux serveurs IMAP/POP.
+  // En usage normal, seule l'affectation locale est modifiée. Depuis la
+  // Corbeille, un EML importé peut aussi être restauré localement avant son
+  // classement. Aucun MOVE/COPY/DELETE serveur n'est émis dans ce cas.
   const LOCAL_FOLDER_DRAG_TYPE = 'application/x-libramail-selection';
 
   function closeLocalFolderMenu() {
@@ -1335,8 +1336,10 @@ const App = (() => {
     const currentStandardViewHidesClassified = sourceLocalFolderId === null
       && Boolean(folder)
       && ['unified', 'account', 'sent'].includes(view.type);
+    const restoreFromTrash = view.type === 'trash' && Boolean(folder);
     const currentListContentChanges = currentLocalFolderContentChanges
-      || currentStandardViewHidesClassified;
+      || currentStandardViewHidesClassified
+      || restoreFromTrash;
 
     status(folder
       ? t('localFolder.classifying', { name: folder.name })
@@ -1347,6 +1350,7 @@ const App = (() => {
       const result = await rpc('localFolders.assignSelection', {
         items: payload,
         folderId: folder?.id ?? null,
+        restoreFromTrash,
       });
 
       const count = Number(result?.processed) || 0;
@@ -1361,6 +1365,7 @@ const App = (() => {
       } else {
         rpc('localFolders.list').then(renderLocalFolders).catch(() => {});
       }
+      if (restoreFromTrash) scheduleSidebarCountsRefresh(100);
 
       list?.clearSelection();
 
@@ -1383,7 +1388,10 @@ const App = (() => {
         : t('localFolder.unclassified', { count }),
       'success');
     } catch (error) {
-      status(`${t('error')} : ${error.message}`, 'error');
+      const message = error.message === 'LOCAL_FOLDER_TRASH_REMOTE_UNSUPPORTED'
+        ? t('localFolder.trashRestoreRemoteUnsupported')
+        : error.message;
+      status(`${t('error')} : ${message}`, 'error');
     }
   }
 

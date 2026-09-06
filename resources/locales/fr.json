@@ -300,6 +300,7 @@
   "localFolder.noFolders": "Aucun dossier local. Créez-en un avec le bouton + de la barre latérale.",
   "localFolder.classified": "{count} message(s) classé(s) dans « {name} »",
   "localFolder.classifying": "Classement dans « {name} »…",
+  "localFolder.trashRestoreRemoteUnsupported": "Les messages IMAP/POP de la Corbeille doivent d’abord être restaurés avant d’être classés dans un dossier local.",
   "localFolder.unclassifying": "Retrait du dossier local…",
   "localFolder.unclassified": "{count} message(s) retiré(s) des dossiers locaux",
   "localFolder.add": "Créer un dossier local",

@@ -300,6 +300,7 @@
   "localFolder.noFolders": "No local folders yet. Create one with the + button in the sidebar.",
   "localFolder.classified": "{count} message(s) filed in “{name}”",
   "localFolder.classifying": "Filing in “{name}”…",
+  "localFolder.trashRestoreRemoteUnsupported": "IMAP/POP messages in Trash must first be restored before they can be classified in a local folder.",
   "localFolder.unclassifying": "Removing from local folder…",
   "localFolder.unclassified": "{count} message(s) removed from local folders",
   "localFolder.add": "Create local folder",
