@@ -968,6 +968,54 @@ function resolveSelection(items) {
   return db.getMessagesByIds([...messageIds]);
 }
 
+function selectionItemsForView(target = {}, conversationMode = true) {
+  const filters = markReadFiltersForView(target);
+  const useConversations = conversationMode !== false;
+  const counts = useConversations
+    ? db.countConversations(filters)
+    : db.countMessages(filters);
+  const total = Math.max(0, Number(counts?.n) || 0);
+
+  if (!total) {
+    return { items: [], total: 0, messages: 0 };
+  }
+
+  const rows = useConversations
+    ? db.listConversations({
+        ...filters,
+        limit: total,
+        offset: 0,
+        sortBy: 'date',
+        sortDirection: 'desc',
+      })
+    : db.listMessages({
+        ...filters,
+        limit: total,
+        offset: 0,
+        sortBy: 'date',
+        sortDirection: 'desc',
+      });
+
+  const items = rows.map(row => ({
+    type: useConversations ? 'thread' : 'message',
+    id: Number(row.id),
+    threadKey: useConversations ? String(row.thread_key || '') : undefined,
+    count: useConversations ? Math.max(1, Number(row.thread_count) || 1) : 1,
+    folderRole: String(row.folder_role || ''),
+    isSpam: Boolean(row.is_spam),
+    seen: Boolean(row.seen),
+    flagged: Boolean(row.flagged),
+  })).filter(item => Number.isInteger(item.id) && item.id > 0);
+
+  return {
+    items,
+    total: items.length,
+    messages: useConversations
+      ? Math.max(0, Number(counts?.messages) || 0)
+      : items.length,
+  };
+}
+
 // LibraMail 0.4.8 — marquer toute la vue comme lue.
 // Le frontend n'envoie jamais de clause SQL ni une sélection de 500 lignes :
 // il transmet seulement le type de vue, puis le backend reconstruit une liste
@@ -2857,6 +2905,8 @@ const methods = {
     return spam.stats();
   },
   'messages.markViewRead': async ({ view: target } = {}) => markViewRead(target),
+  'messages.selectionForView': async ({ view: target, conversationMode = true } = {}) =>
+    selectionItemsForView(target, conversationMode),
   'messages.batchSetFlag': async ({ items, flag, value }) => {
     if (!['seen', 'flagged'].includes(flag)) throw new Error('Drapeau invalide');
     const messages = resolveSelection(items);

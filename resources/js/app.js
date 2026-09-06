@@ -40,7 +40,7 @@ const App = (() => {
   let securityOperationBusy = false;
   let markViewReadBusy = false;
   let bulkSelection = [];
-  let bulkSelectionMeta = { total: 0, allSelected: false };
+  let bulkSelectionMeta = { total: 0, allSelected: false, allView: false };
   let quickLabelContext = null;
   let quickLabelRequestToken = 0;
   let statisticsState = { period: '30d', accountId: '', tab: 'overview' };
@@ -4794,6 +4794,41 @@ const App = (() => {
     return false;
   }
 
+  async function selectAllCurrentView() {
+    if (!list) return;
+
+    // Pendant une recherche, on conserve le comportement historique :
+    // sélectionner uniquement les résultats actuellement affichés.
+    const query = String(document.getElementById('search-input')?.value || '').trim();
+    if (query) {
+      list.selectAll();
+      return;
+    }
+
+    if (bulkSelectionMeta.allView) {
+      list.clearSelection();
+      return;
+    }
+
+    const target = currentMarkReadTarget();
+    if (!target) {
+      list.selectAll();
+      return;
+    }
+
+    const requestKey = JSON.stringify(target);
+    const result = await rpc('messages.selectionForView', {
+      view: target,
+      conversationMode: config.conversationView !== false,
+    });
+
+    // Une réponse arrivée après un changement de vue ne doit rien sélectionner.
+    if (JSON.stringify(currentMarkReadTarget()) !== requestKey) return;
+    if (String(document.getElementById('search-input')?.value || '').trim()) return;
+
+    list.setAllViewSelection(result?.items || []);
+  }
+
   function handleGlobalSelectAllShortcut(event) {
     if (event.defaultPrevented) return;
     if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
@@ -4803,7 +4838,9 @@ const App = (() => {
 
     event.preventDefault();
     event.stopPropagation();
-    list.selectAll();
+    selectAllCurrentView().catch(error =>
+      status(`${t('error')} : ${error.message}`, 'error')
+    );
   }
 
   async function runBulkExportEml() {
@@ -4845,6 +4882,7 @@ const App = (() => {
     bulkSelectionMeta = {
       total: Number(meta.total) || 0,
       allSelected: Boolean(meta.allSelected),
+      allView: Boolean(meta.allView),
     };
 
     const count = bulkSelection.length;
@@ -9047,7 +9085,10 @@ const App = (() => {
     document.addEventListener('click', event => {
       if (!event.target.closest('#sync-split')) closeSyncMenu();
     });
-    document.getElementById('btn-select-all').onclick = () => list.selectAll();
+    document.getElementById('btn-select-all').onclick = () =>
+      selectAllCurrentView().catch(error =>
+        status(`${t('error')} : ${error.message}`, 'error')
+      );
     document.addEventListener('keydown', handleGlobalSelectAllShortcut);
     document.getElementById('btn-clear-selection').onclick = () => list.clearSelection();
     document.getElementById('btn-bulk-read').onclick = () => runBulkFlag('seen', true);

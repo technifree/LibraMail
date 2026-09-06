@@ -10,6 +10,8 @@ class VirtualMailList {
     this.expandedThreads = new Map();
     this.collapsedGroups = new Set();
     this.selectedKeys = new Set();
+    // 0.5.0 — sélection globale de la vue, indépendante des lignes chargées.
+    this.allViewSelectionItems = null;
     this.selectionAnchorKey = null;
     this.activeMessageId = null;
     this.rowHeight = 64;
@@ -22,6 +24,7 @@ class VirtualMailList {
     if (!options.preserveExpansion) this.expandedThreads.clear();
     if (!options.preserveSelection) {
       this.selectedKeys.clear();
+      this.allViewSelectionItems = null;
       this.selectionAnchorKey = null;
     }
     if (!options.preserveActive) this.activeMessageId = null;
@@ -113,7 +116,7 @@ class VirtualMailList {
     div.classList.toggle('conversation-row', Boolean(row.is_thread && !row.is_thread_child));
     div.classList.toggle('thread-child', Boolean(row.is_thread_child));
     div.classList.toggle('thread-reply', Boolean(row.is_thread_child));
-    div.classList.toggle('bulk-selected', this.selectedKeys.has(key));
+    div.classList.toggle('bulk-selected', Boolean(this.allViewSelectionItems) || this.selectedKeys.has(key));
     div.classList.toggle('active-message', String(row.id) === String(this.activeMessageId));
     div.dataset.messageId = row.id || '';
     div.dataset.threadKey = row.thread_key || row.parent_thread_key || '';
@@ -135,7 +138,7 @@ class VirtualMailList {
       <span class="read-state-dot"></span>
       ${isThread ? `<button class="thread-toggle" type="button" aria-expanded="${expanded ? 'true' : 'false'}"><i class="fa-solid fa-chevron-${expanded ? 'down' : 'right'}"></i></button>` : ''}
       <button class="mail-select" type="button" title="${this.escape(window.t?.('selection.select') || 'Sélectionner')}">
-        <i class="${this.selectedKeys.has(key) ? 'fa-solid fa-square-check' : 'fa-regular fa-square'}"></i>
+        <i class="${(this.allViewSelectionItems || this.selectedKeys.has(key)) ? 'fa-solid fa-square-check' : 'fa-regular fa-square'}"></i>
       </button>
       ${this.avatarHtml(row, sender)}
       <span class="from"><span class="name">${this.escape(sender)}</span>${isThread ? `<span class="thread-count"><i class="fa-solid fa-comments"></i> ${count}</span>` : ''}</span>
@@ -188,9 +191,11 @@ class VirtualMailList {
       const currentItem = this.selectionItem(row);
       const currentKey = this.itemKey(currentItem);
       const items = this.selectedKeys.has(currentKey)
-        ? this.visibleRows
-            .map(visibleRow => this.selectionItem(visibleRow))
-            .filter(item => this.selectedKeys.has(this.itemKey(item)))
+        ? (this.allViewSelectionItems
+            ? this.allViewSelectionItems
+            : this.visibleRows
+                .map(visibleRow => this.selectionItem(visibleRow))
+                .filter(item => this.selectedKeys.has(this.itemKey(item))))
         : [currentItem];
       return items.map(item => ({
         type: item.type,
@@ -330,13 +335,38 @@ class VirtualMailList {
     this.render(true);
   }
 
+  setAllViewSelection(items = []) {
+    const normalized = Array.isArray(items) ? items.filter(Boolean) : [];
+    if (!normalized.length) {
+      this.clearSelection();
+      return;
+    }
+    this.allViewSelectionItems = normalized;
+    this.selectedKeys.clear();
+    for (const row of this.visibleRows) {
+      this.selectedKeys.add(this.itemKey(this.selectionItem(row)));
+    }
+    this.selectionAnchorKey = null;
+    this.render(true);
+  }
+
   clearSelection() {
     this.selectedKeys.clear();
+    this.allViewSelectionItems = null;
     this.selectionAnchorKey = null;
     this.render(true);
   }
 
   toggleSelection(row, extendRange = false) {
+    if (this.allViewSelectionItems) {
+      // Dès qu'une case est modifiée individuellement, on revient à la
+      // sélection explicite des lignes actuellement chargées.
+      this.selectedKeys.clear();
+      for (const visible of this.visibleRows) {
+        this.selectedKeys.add(this.itemKey(this.selectionItem(visible)));
+      }
+      this.allViewSelectionItems = null;
+    }
     const key = this.itemKey(this.selectionItem(row));
     if (extendRange && this.selectionAnchorKey) {
       const anchorIndex = this.visibleRows.findIndex(item =>
@@ -360,10 +390,20 @@ class VirtualMailList {
   }
 
   emitSelection() {
+    if (this.allViewSelectionItems) {
+      this.callbacks.onSelectionChange?.([...this.allViewSelectionItems], {
+        total: this.allViewSelectionItems.length,
+        allSelected: true,
+        allView: true,
+      });
+      return;
+    }
+
     const selected = this.visibleRows.map(row => this.selectionItem(row)).filter(item => this.selectedKeys.has(this.itemKey(item)));
     this.callbacks.onSelectionChange?.(selected, {
       total: this.visibleRows.length,
       allSelected: this.visibleRows.length > 0 && selected.length === this.visibleRows.length,
+      allView: false,
     });
   }
 
