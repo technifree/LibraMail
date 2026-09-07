@@ -499,6 +499,19 @@ function init(dataDir) {
   );
   CREATE INDEX IF NOT EXISTS idx_calendar_subscriptions_enabled ON calendar_subscriptions(enabled, last_sync_at);
 
+  CREATE TABLE IF NOT EXISTS calendar_categories (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL COLLATE NOCASE,
+    color TEXT NOT NULL DEFAULT '#4F8BD6',
+    icon TEXT NOT NULL DEFAULT 'fa-tag',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_calendar_categories_order
+    ON calendar_categories(active DESC, sort_order ASC, name COLLATE NOCASE);
+
   CREATE TABLE IF NOT EXISTS calendar_events (
     id INTEGER PRIMARY KEY,
     title TEXT NOT NULL,
@@ -535,7 +548,9 @@ function init(dataDir) {
   ensureColumn('calendar_events', 'import_key', 'TEXT');
   ensureColumn('calendar_subscriptions', 'refresh_minutes', 'INTEGER NOT NULL DEFAULT 30');
   ensureColumn('calendar_events', 'subscription_id', 'INTEGER');
+  ensureColumn('calendar_events', 'category_id', 'INTEGER REFERENCES calendar_categories(id) ON DELETE SET NULL');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_calendar_events_import_key ON calendar_events(import_key)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_calendar_events_category ON calendar_events(category_id, start_at)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_calendar_events_subscription ON calendar_events(subscription_id, start_at)');
 
   // LibraMail 0.4.4 — hiérarchie des dossiers locaux.
@@ -2300,6 +2315,162 @@ function normalizeCalendarEvent(input = {}) {
     color,
     importKey: String(input.importKey || '').trim().slice(0, 512) || null,
     subscriptionId: Number(input.subscriptionId) > 0 ? Number(input.subscriptionId) : null,
+    categoryId: Number(input.categoryId) > 0 ? Number(input.categoryId) : null,
+  };
+}
+
+const CALENDAR_CATEGORY_ICONS = new Set([
+  'fa-briefcase', 'fa-laptop', 'fa-building', 'fa-user', 'fa-users',
+  'fa-people-roof', 'fa-house', 'fa-baby', 'fa-heart-pulse', 'fa-stethoscope',
+  'fa-dumbbell', 'fa-person-running', 'fa-gamepad', 'fa-music', 'fa-film',
+  'fa-book', 'fa-graduation-cap', 'fa-utensils', 'fa-cart-shopping', 'fa-gift',
+  'fa-plane', 'fa-train', 'fa-car', 'fa-map-location-dot', 'fa-file-lines',
+  'fa-scale-balanced', 'fa-wallet', 'fa-paw', 'fa-phone', 'fa-video',
+  'fa-calendar-check', 'fa-tag',
+]);
+
+function calendarCategoryRow(row) {
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    name: String(row.name || ''),
+    color: String(row.color || '#4F8BD6'),
+    icon: String(row.icon || 'fa-tag'),
+    sortOrder: Number(row.sort_order) || 0,
+    active: Boolean(row.active),
+    createdAt: Number(row.created_at) || 0,
+    updatedAt: Number(row.updated_at) || 0,
+  };
+}
+
+function normalizeCalendarCategory(input = {}) {
+  const name = String(input.name || '').trim().slice(0, 80);
+  if (!name) throw new Error('Le nom de la catégorie est obligatoire');
+  const rawColor = String(input.color || '').trim();
+  const color = /^#[0-9a-fA-F]{6}$/.test(rawColor) ? rawColor.toUpperCase() : '#4F8BD6';
+  const requestedIcon = String(input.icon || '').trim();
+  const icon = CALENDAR_CATEGORY_ICONS.has(requestedIcon) ? requestedIcon : 'fa-tag';
+  return {
+    name,
+    color,
+    icon,
+    active: input.active === false || Number(input.active) === 0 ? 0 : 1,
+  };
+}
+
+function listCalendarCategories({ activeOnly = false } = {}) {
+  const where = activeOnly ? 'WHERE active=1' : '';
+  return db.prepare(`
+    SELECT * FROM calendar_categories
+    ${where}
+    ORDER BY sort_order ASC, name COLLATE NOCASE ASC, id ASC
+  `).all().map(calendarCategoryRow);
+}
+
+function getCalendarCategory(id) {
+  return calendarCategoryRow(
+    db.prepare('SELECT * FROM calendar_categories WHERE id=?').get(Number(id))
+  );
+}
+
+function saveCalendarCategory(input = {}, id = null) {
+  const category = normalizeCalendarCategory(input);
+  const now = Date.now();
+  const numericId = Number(id || input.id || 0);
+  const duplicate = db.prepare(`
+    SELECT id FROM calendar_categories
+    WHERE name = ? COLLATE NOCASE AND id <> ?
+  `).get(category.name, numericId || 0);
+  if (duplicate) throw new Error('Une catégorie portant ce nom existe déjà');
+
+  if (numericId > 0) {
+    const result = db.prepare(`
+      UPDATE calendar_categories
+         SET name=?, color=?, icon=?, active=?, updated_at=?
+       WHERE id=?
+    `).run(category.name, category.color, category.icon, category.active, now, numericId);
+    if (!result.changes) throw new Error('Catégorie introuvable');
+    return getCalendarCategory(numericId);
+  }
+
+  const nextOrder = Number(
+    db.prepare('SELECT COALESCE(MAX(sort_order), -1) + 1 AS value FROM calendar_categories').get()?.value
+  ) || 0;
+  const result = db.prepare(`
+    INSERT INTO calendar_categories
+      (name, color, icon, sort_order, active, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(category.name, category.color, category.icon, nextOrder, category.active, now, now);
+  return getCalendarCategory(result.lastInsertRowid);
+}
+
+function reorderCalendarCategories(ids = []) {
+  const normalized = [...new Set((ids || []).map(Number).filter(id => Number.isInteger(id) && id > 0))];
+  if (!normalized.length) return listCalendarCategories();
+  const update = db.prepare('UPDATE calendar_categories SET sort_order=?, updated_at=? WHERE id=?');
+  const now = Date.now();
+  db.transaction(categoryIds => {
+    categoryIds.forEach((id, index) => update.run(index, now, id));
+  })(normalized);
+  return listCalendarCategories();
+}
+
+function removeCalendarCategory(id) {
+  const numericId = Number(id);
+  if (!(numericId > 0)) return false;
+  return db.transaction(categoryId => {
+    db.prepare('UPDATE calendar_events SET category_id=NULL, updated_at=? WHERE category_id=?')
+      .run(Date.now(), categoryId);
+    return db.prepare('DELETE FROM calendar_categories WHERE id=?').run(categoryId).changes > 0;
+  })(numericId);
+}
+
+function ensureDefaultCalendarCategories(locale = 'fr') {
+  const count = Number(db.prepare('SELECT COUNT(*) AS count FROM calendar_categories').get()?.count) || 0;
+  if (count > 0) return listCalendarCategories();
+
+  const english = String(locale || '').toLowerCase().startsWith('en');
+  const defaults = english ? [
+    ['Work', '#4F8BD6', 'fa-briefcase'],
+    ['Personal', '#8B7DD8', 'fa-user'],
+    ['Leisure', '#49A86B', 'fa-gamepad'],
+    ['Family', '#CF5B78', 'fa-people-roof'],
+    ['Health', '#D66F4F', 'fa-heart-pulse'],
+    ['Administrative', '#667085', 'fa-file-lines'],
+    ['Other', '#A879DA', 'fa-tag'],
+  ] : [
+    ['Travail', '#4F8BD6', 'fa-briefcase'],
+    ['Personnel', '#8B7DD8', 'fa-user'],
+    ['Loisirs', '#49A86B', 'fa-gamepad'],
+    ['Famille', '#CF5B78', 'fa-people-roof'],
+    ['Santé', '#D66F4F', 'fa-heart-pulse'],
+    ['Administratif', '#667085', 'fa-file-lines'],
+    ['Autre', '#A879DA', 'fa-tag'],
+  ];
+
+  const now = Date.now();
+  const insert = db.prepare(`
+    INSERT INTO calendar_categories
+      (name, color, icon, sort_order, active, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 1, ?, ?)
+  `);
+  db.transaction(items => {
+    items.forEach((item, index) => insert.run(item[0], item[1], item[2], index, now, now));
+  })(defaults);
+  return listCalendarCategories();
+}
+
+function calendarEventWithCategoryRow(row) {
+  if (!row) return null;
+  return {
+    ...calendarRow(row),
+    categoryId: Number(row.category_id) > 0 ? Number(row.category_id) : null,
+    categoryName: String(row.category_name || ''),
+    categoryColor: String(row.category_color || ''),
+    categoryIcon: String(row.category_icon || ''),
+    categoryActive: row.category_active === null || row.category_active === undefined
+      ? null
+      : Boolean(row.category_active),
   };
 }
 
@@ -2314,17 +2485,32 @@ function listCalendarEvents({ from = null, to = null, accountId = null, limit = 
   const safeLimit = Math.max(1, Math.min(10000, Math.round(Number(limit) || 2000)));
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   return db.prepare(`
-    SELECT ce.*, COALESCE(cs.name, '') AS subscription_name
+    SELECT ce.*, COALESCE(cs.name, '') AS subscription_name,
+           COALESCE(cc.name, '') AS category_name,
+           COALESCE(cc.color, '') AS category_color,
+           COALESCE(cc.icon, '') AS category_icon,
+           cc.active AS category_active
       FROM calendar_events ce
       LEFT JOIN calendar_subscriptions cs ON cs.id = ce.subscription_id
+      LEFT JOIN calendar_categories cc ON cc.id = ce.category_id
     ${where}
     ORDER BY ce.start_at ASC, ce.all_day DESC, ce.title COLLATE NOCASE ASC
     LIMIT ${safeLimit}
-  `).all(...params).map(calendarRow);
+  `).all(...params).map(calendarEventWithCategoryRow);
 }
 
 function getCalendarEvent(id) {
-  return calendarRow(db.prepare('SELECT * FROM calendar_events WHERE id=?').get(Number(id)));
+  return calendarEventWithCategoryRow(db.prepare(`
+    SELECT ce.*, COALESCE(cs.name, '') AS subscription_name,
+           COALESCE(cc.name, '') AS category_name,
+           COALESCE(cc.color, '') AS category_color,
+           COALESCE(cc.icon, '') AS category_icon,
+           cc.active AS category_active
+      FROM calendar_events ce
+      LEFT JOIN calendar_subscriptions cs ON cs.id = ce.subscription_id
+      LEFT JOIN calendar_categories cc ON cc.id = ce.category_id
+     WHERE ce.id=?
+  `).get(Number(id)));
 }
 
 function saveCalendarEvent(input = {}, id = null) {
@@ -2335,22 +2521,22 @@ function saveCalendarEvent(input = {}, id = null) {
     const result = db.prepare(`
       UPDATE calendar_events
          SET title=?, start_at=?, end_at=?, all_day=?, location=?, notes=?,
-             account_id=?, color=?, updated_at=?
+             account_id=?, color=?, category_id=?, updated_at=?
        WHERE id=?
     `).run(
       event.title, event.startAt, event.endAt, event.allDay, event.location, event.notes,
-      event.accountId, event.color, now, numericId,
+      event.accountId, event.color, event.categoryId, now, numericId,
     );
     if (!result.changes) throw new Error('Rendez-vous introuvable');
     return getCalendarEvent(numericId);
   }
   const result = db.prepare(`
     INSERT INTO calendar_events
-      (title, start_at, end_at, all_day, location, notes, account_id, color, import_key, subscription_id, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (title, start_at, end_at, all_day, location, notes, account_id, color, import_key, subscription_id, category_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     event.title, event.startAt, event.endAt, event.allDay, event.location, event.notes,
-    event.accountId, event.color, event.importKey, event.subscriptionId, now, now,
+    event.accountId, event.color, event.importKey, event.subscriptionId, event.categoryId, now, now,
   );
   return getCalendarEvent(result.lastInsertRowid);
 }
@@ -2673,6 +2859,12 @@ module.exports = {
   setPop3State,
   markPop3ServerDeleted,
   setMessageStorage,
+  listCalendarCategories,
+  getCalendarCategory,
+  saveCalendarCategory,
+  reorderCalendarCategories,
+  removeCalendarCategory,
+  ensureDefaultCalendarCategories,
   listCalendarEvents,
   getCalendarEvent,
   saveCalendarEvent,

@@ -8714,6 +8714,211 @@ const App = (() => {
     activateSettingsTab('general');
   }
 
+
+  let calendarCategorySettings = [];
+  let calendarCategoryEditingId = null;
+
+  function setCalendarCategorySettingsStatus(message = '', state = '') {
+    const element = document.getElementById('calendar-category-settings-status');
+    if (!element) return;
+    element.textContent = message;
+    element.className = `field-hint ${state || ''}`.trim();
+  }
+
+  function setCalendarCategoryIconPopover(open) {
+    const popover = document.getElementById('calendar-category-icon-popover');
+    const trigger = document.getElementById('btn-calendar-category-icon-picker');
+    if (!popover || !trigger) return;
+    const visible = Boolean(open);
+    popover.classList.toggle('hidden', !visible);
+    trigger.setAttribute('aria-expanded', String(visible));
+  }
+
+  function selectCalendarCategoryIcon(icon = 'fa-tag') {
+    const input = document.getElementById('calendar-category-icon');
+    const preview = document.getElementById('calendar-category-icon-preview');
+    if (!input) return;
+    input.value = String(icon || 'fa-tag');
+    if (preview) preview.className = `fa-solid ${input.value}`;
+    document.querySelectorAll('[data-category-icon-choice]').forEach(button => {
+      const active = button.dataset.categoryIconChoice === input.value;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-pressed', String(active));
+    });
+  }
+
+  function wireCalendarCategoryIconPicker() {
+    const trigger = document.getElementById('btn-calendar-category-icon-picker');
+    const popover = document.getElementById('calendar-category-icon-popover');
+
+    trigger?.addEventListener('click', event => {
+      event.stopPropagation();
+      setCalendarCategoryIconPopover(popover?.classList.contains('hidden'));
+    });
+
+    document.querySelectorAll('[data-category-icon-choice]').forEach(button => {
+      button.addEventListener('click', event => {
+        event.stopPropagation();
+        selectCalendarCategoryIcon(button.dataset.categoryIconChoice);
+        setCalendarCategoryIconPopover(false);
+      });
+    });
+
+    document.addEventListener('click', event => {
+      if (!event.target.closest('.calendar-category-icon-control')) {
+        setCalendarCategoryIconPopover(false);
+      }
+    });
+
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') setCalendarCategoryIconPopover(false);
+    });
+
+    selectCalendarCategoryIcon(document.getElementById('calendar-category-icon')?.value || 'fa-tag');
+  }
+
+  function resetCalendarCategoryEditor() {
+    calendarCategoryEditingId = null;
+    const id = document.getElementById('calendar-category-id');
+    const name = document.getElementById('calendar-category-name');
+    const color = document.getElementById('calendar-category-color');
+    const icon = document.getElementById('calendar-category-icon');
+    const cancel = document.getElementById('btn-calendar-category-cancel');
+    const save = document.getElementById('btn-calendar-category-save');
+    if (id) id.value = '';
+    if (name) name.value = '';
+    if (color) color.value = '#4F8BD6';
+    if (icon) selectCalendarCategoryIcon('fa-tag');
+    setCalendarCategoryIconPopover(false);
+    cancel?.classList.add('hidden');
+    const saveLabel = save?.querySelector('span');
+    const saveIcon = save?.querySelector('i');
+    if (saveLabel) saveLabel.textContent = t('calendarCategory.add');
+    if (saveIcon) saveIcon.className = 'fa-solid fa-plus';
+  }
+
+  function renderCalendarCategorySettings() {
+    const root = document.getElementById('calendar-category-list');
+    if (!root) return;
+    if (!calendarCategorySettings.length) {
+      root.innerHTML = `<div class="empty-hint">${esc(t('calendarCategory.empty'))}</div>`;
+      return;
+    }
+
+    root.innerHTML = calendarCategorySettings.map((category, index) => `
+      <div class="calendar-category-row ${category.active ? '' : 'inactive'}" data-calendar-category-id="${Number(category.id)}">
+        <span class="calendar-category-swatch" style="--category-color:${safeColor(category.color)}"><i class="fa-solid ${esc(category.icon || 'fa-tag')}"></i></span>
+        <span class="calendar-category-main"><strong>${esc(category.name)}</strong><small>${esc(category.active ? t('calendarCategory.active') : t('calendarCategory.inactive'))}</small></span>
+        <span class="calendar-category-row-actions">
+          <button class="iconbtn" type="button" data-calendar-category-up="${Number(category.id)}" ${index === 0 ? 'disabled' : ''} title="${esc(t('calendarCategory.moveUp'))}"><i class="fa-solid fa-arrow-up"></i></button>
+          <button class="iconbtn" type="button" data-calendar-category-down="${Number(category.id)}" ${index === calendarCategorySettings.length - 1 ? 'disabled' : ''} title="${esc(t('calendarCategory.moveDown'))}"><i class="fa-solid fa-arrow-down"></i></button>
+          <button class="iconbtn" type="button" data-calendar-category-toggle="${Number(category.id)}" title="${esc(t(category.active ? 'calendarCategory.disable' : 'calendarCategory.enable'))}"><i class="fa-solid ${category.active ? 'fa-eye-slash' : 'fa-eye'}"></i></button>
+          <button class="iconbtn" type="button" data-calendar-category-edit="${Number(category.id)}" title="${esc(t('calendarCategory.edit'))}"><i class="fa-solid fa-pen"></i></button>
+          <button class="iconbtn danger-hover" type="button" data-calendar-category-remove="${Number(category.id)}" title="${esc(t('calendarCategory.remove'))}"><i class="fa-solid fa-trash"></i></button>
+        </span>
+      </div>
+    `).join('');
+
+    root.querySelectorAll('[data-calendar-category-edit]').forEach(button => button.addEventListener('click', () => {
+      const category = calendarCategorySettings.find(item => Number(item.id) === Number(button.dataset.calendarCategoryEdit));
+      if (!category) return;
+      calendarCategoryEditingId = Number(category.id);
+      document.getElementById('calendar-category-id').value = String(category.id);
+      document.getElementById('calendar-category-name').value = category.name || '';
+      document.getElementById('calendar-category-color').value = /^#[0-9a-fA-F]{6}$/.test(String(category.color || '')) ? category.color : '#4F8BD6';
+      selectCalendarCategoryIcon(category.icon || 'fa-tag');
+      setCalendarCategoryIconPopover(false);
+      document.getElementById('btn-calendar-category-cancel')?.classList.remove('hidden');
+      const save = document.getElementById('btn-calendar-category-save');
+      const label = save?.querySelector('span');
+      const icon = save?.querySelector('i');
+      if (label) label.textContent = t('calendarCategory.save');
+      if (icon) icon.className = 'fa-solid fa-floppy-disk';
+      document.getElementById('calendar-category-name')?.focus();
+    }));
+
+    root.querySelectorAll('[data-calendar-category-toggle]').forEach(button => button.addEventListener('click', async () => {
+      const category = calendarCategorySettings.find(item => Number(item.id) === Number(button.dataset.calendarCategoryToggle));
+      if (!category) return;
+      try {
+        await rpc('calendar.categories.save', {
+          id: category.id,
+          category: { ...category, active: !category.active },
+        });
+        await refreshCalendarCategorySettings();
+      } catch (error) {
+        setCalendarCategorySettingsStatus(`${t('error')} : ${error.message}`, 'error');
+      }
+    }));
+
+    const move = async (id, direction) => {
+      const index = calendarCategorySettings.findIndex(item => Number(item.id) === Number(id));
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= calendarCategorySettings.length) return;
+      const next = calendarCategorySettings.slice();
+      [next[index], next[target]] = [next[target], next[index]];
+      try {
+        calendarCategorySettings = await rpc('calendar.categories.reorder', { ids: next.map(item => item.id) }) || [];
+        renderCalendarCategorySettings();
+      } catch (error) {
+        setCalendarCategorySettingsStatus(`${t('error')} : ${error.message}`, 'error');
+      }
+    };
+    root.querySelectorAll('[data-calendar-category-up]').forEach(button => button.addEventListener('click', () => move(button.dataset.calendarCategoryUp, -1)));
+    root.querySelectorAll('[data-calendar-category-down]').forEach(button => button.addEventListener('click', () => move(button.dataset.calendarCategoryDown, 1)));
+
+    root.querySelectorAll('[data-calendar-category-remove]').forEach(button => button.addEventListener('click', async () => {
+      const category = calendarCategorySettings.find(item => Number(item.id) === Number(button.dataset.calendarCategoryRemove));
+      if (!category || !window.confirm(t('calendarCategory.removeConfirm', { name: category.name }))) return;
+      try {
+        await rpc('calendar.categories.remove', { id: category.id });
+        if (calendarCategoryEditingId === Number(category.id)) resetCalendarCategoryEditor();
+        await refreshCalendarCategorySettings();
+        setCalendarCategorySettingsStatus(t('calendarCategory.removed'), 'success');
+      } catch (error) {
+        setCalendarCategorySettingsStatus(`${t('error')} : ${error.message}`, 'error');
+      }
+    }));
+  }
+
+  async function refreshCalendarCategorySettings() {
+    try {
+      calendarCategorySettings = await rpc('calendar.categories.list', {
+        ensureDefaults: true,
+        locale: I18N.locale || config.locale || 'fr',
+      }) || [];
+      renderCalendarCategorySettings();
+    } catch (error) {
+      setCalendarCategorySettingsStatus(`${t('error')} : ${error.message}`, 'error');
+    }
+  }
+
+  async function saveCalendarCategorySettings() {
+    const name = document.getElementById('calendar-category-name')?.value.trim() || '';
+    const color = document.getElementById('calendar-category-color')?.value || '#4F8BD6';
+    const icon = document.getElementById('calendar-category-icon')?.value || 'fa-tag';
+    if (!name) {
+      setCalendarCategorySettingsStatus(t('calendarCategory.nameRequired'), 'error');
+      document.getElementById('calendar-category-name')?.focus();
+      return;
+    }
+    const button = document.getElementById('btn-calendar-category-save');
+    if (button) button.disabled = true;
+    try {
+      await rpc('calendar.categories.save', {
+        id: calendarCategoryEditingId,
+        category: { name, color, icon, active: true },
+      });
+      resetCalendarCategoryEditor();
+      await refreshCalendarCategorySettings();
+      setCalendarCategorySettingsStatus(t('calendarCategory.saved'), 'success');
+    } catch (error) {
+      setCalendarCategorySettingsStatus(`${t('error')} : ${error.message}`, 'error');
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
   function openSettings() {
     document.getElementById('set-theme').value = config.theme || 'dark';
     document.getElementById('set-locale').value = config.locale || 'fr';
@@ -8731,6 +8936,7 @@ const App = (() => {
     populateSignatureAccountSelect();
     populateEmlImportAccounts();
     refreshSecuritySettings().catch(() => {});
+    refreshCalendarCategorySettings().catch(() => {});
 
     const syncList = document.getElementById('sync-account-list');
     syncList.innerHTML = accounts.length ? accounts.map(account => `
@@ -9400,6 +9606,12 @@ const App = (() => {
     document.getElementById('contacts-group-filter').onchange = () => loadContacts().catch(() => {});
     document.getElementById('btn-settings').onclick = openSettings;
     wireSettingsTabs();
+    wireCalendarCategoryIconPicker();
+    document.getElementById('btn-calendar-category-save')?.addEventListener('click', saveCalendarCategorySettings);
+    document.getElementById('btn-calendar-category-cancel')?.addEventListener('click', () => {
+      resetCalendarCategoryEditor();
+      setCalendarCategorySettingsStatus('');
+    });
     document.getElementById('btn-lock-app')?.addEventListener('click', lockLibraMail);
     document.getElementById('btn-security-lock-settings')?.addEventListener('click', lockLibraMail);
     document.getElementById('btn-security-enable')?.addEventListener('click', () => openSecurityPasswordDialog('enable'));

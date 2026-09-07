@@ -3135,6 +3135,30 @@ const methods = {
     if (removed) broadcast('calendar.changed', { action: 'removed', id: Number(id) });
     return { removed };
   },
+  'calendar.categories.list': async ({ activeOnly = false, ensureDefaults = false, locale = 'fr' } = {}) => {
+    if (ensureDefaults) db.ensureDefaultCalendarCategories(locale);
+    return db.listCalendarCategories({ activeOnly });
+  },
+  'calendar.categories.save': async ({ id = null, category } = {}) => {
+    const saved = db.saveCalendarCategory(category || {}, id);
+    broadcast('calendar.categories.changed', { action: id ? 'updated' : 'created', id: saved.id });
+    broadcast('calendar.changed', { action: 'categories-updated', id: saved.id });
+    return saved;
+  },
+  'calendar.categories.reorder': async ({ ids = [] } = {}) => {
+    const categories = db.reorderCalendarCategories(ids);
+    broadcast('calendar.categories.changed', { action: 'reordered' });
+    broadcast('calendar.changed', { action: 'categories-reordered' });
+    return categories;
+  },
+  'calendar.categories.remove': async ({ id } = {}) => {
+    const removed = db.removeCalendarCategory(id);
+    if (removed) {
+      broadcast('calendar.categories.changed', { action: 'removed', id: Number(id) });
+      broadcast('calendar.changed', { action: 'category-removed', id: Number(id) });
+    }
+    return { removed };
+  },
   'calendar.import': async ({ text = '', fileName = '', accountId = '', color = '', locale = 'fr' } = {}) => {
     const parsed = calendarImport.parseCalendarImport({ text, fileName, accountId, color, locale });
     const result = db.importCalendarEvents(parsed.events);

@@ -8,6 +8,7 @@
     selected: startOfDay(new Date()),
     view: 'month',
     events: [],
+    categories: [],
     loading: false,
     importing: false,
     filterAccountId: '',
@@ -60,8 +61,13 @@
     return new Date(Number(d[1]), Number(d[2]) - 1, Number(d[3]), Number(clock[1]), Number(clock[2]), 0, 0).getTime();
   }
   function eventColor(event) {
+    if (/^#[0-9a-fA-F]{6}$/.test(String(event?.categoryColor || ''))) return event.categoryColor;
     if (/^#[0-9a-fA-F]{6}$/.test(String(event?.color || ''))) return event.color;
     return event?.accountId ? (App.accountColor(event.accountId) || 'var(--accent)') : 'var(--accent)';
+  }
+  function eventCategoryIcon(event) {
+    const icon = /^fa-[a-z0-9-]+$/i.test(String(event?.categoryIcon || '')) ? event.categoryIcon : '';
+    return icon ? `<i class="fa-solid ${esc(icon)} planner-event-category-icon"></i>` : '';
   }
   function formatTime(timestamp) {
     return new Date(Number(timestamp)).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' });
@@ -117,6 +123,31 @@
         `<option value="">${esc(t('planner.localCalendar'))}</option>`,
         ...App.accounts.map(account => `<option value="${esc(account.id)}">${esc(account.displayName || account.email)}</option>`),
       ].join('');
+    }
+  }
+
+
+  function populateCategorySelect(selected = '') {
+    const select = document.getElementById('planner-category');
+    if (!select) return;
+    const selectedId = Number(selected) > 0 ? Number(selected) : null;
+    const categories = state.categories.filter(category => category.active || Number(category.id) === selectedId);
+    select.innerHTML = [
+      `<option value="">${esc(t('calendarCategory.none'))}</option>`,
+      ...categories.map(category => `<option value="${Number(category.id)}">${esc(category.name)}</option>`),
+    ].join('');
+    select.value = selectedId ? String(selectedId) : '';
+  }
+
+  async function loadCategories() {
+    try {
+      state.categories = await App.rpc('calendar.categories.list', {
+        ensureDefaults: true,
+        locale: locale(),
+      }) || [];
+      populateCategorySelect(document.getElementById('planner-category')?.value || '');
+    } catch (error) {
+      App.status(`${t('error')} : ${error.message}`, 'error');
     }
   }
 
@@ -199,7 +230,7 @@
       const classes = ['planner-day', day.getMonth() === monthIndex ? '' : 'outside', key === todayKey ? 'today' : '', key === selectedKey ? 'selected' : ''].filter(Boolean).join(' ');
       const eventsHtml = visible.map(event => `
         <button class="planner-event-chip" type="button" data-planner-event="${Number(event.id)}" style="--event-color:${esc(eventColor(event))}" title="${esc(event.title)}">
-          <span class="planner-event-time">${esc(eventLabel(event))}</span><span>${esc(event.title)}</span>
+          <span class="planner-event-time">${esc(eventLabel(event))}</span><span>${eventCategoryIcon(event)}${esc(event.title)}</span>
         </button>`).join('');
       return `<div class="${classes}" role="gridcell" data-planner-day="${key}" tabindex="0">
         <div class="planner-day-number"><span>${day.getDate()}</span></div>
@@ -268,7 +299,7 @@
           const top = Math.round(clip.startMinutes * MINUTE_HEIGHT);
           const height = Math.max(24, Math.round(clip.durationMinutes * MINUTE_HEIGHT));
           return `<button class="planner-week-event" type="button" data-planner-event="${Number(event.id)}" style="--event-color:${esc(eventColor(event))};top:${top}px;height:${height}px" title="${esc(event.title)}">
-            <span>${esc(formatTime(clip.startAt))}</span><strong>${esc(event.title)}</strong>${event.location ? `<small>${esc(event.location)}</small>` : ''}
+            <span>${esc(formatTime(clip.startAt))}</span><strong>${eventCategoryIcon(event)}${esc(event.title)}</strong>${event.location ? `<small>${esc(event.location)}</small>` : ''}
           </button>`;
         }).join('')}
       </div>`;
@@ -367,7 +398,7 @@
     list.innerHTML = events.map(event => `
       <button class="planner-day-event" type="button" data-planner-day-event="${Number(event.id)}" style="--event-color:${esc(eventColor(event))}">
         <span class="planner-day-event-time">${esc(eventLabel(event))}</span>
-        <span class="planner-day-event-main"><strong>${esc(event.title)}</strong><small>${esc(accountLabel(event.accountId))}${event.location ? ` · ${esc(event.location)}` : ''}</small></span>
+        <span class="planner-day-event-main"><strong>${eventCategoryIcon(event)}${esc(event.title)}</strong><small>${esc(event.categoryName || accountLabel(event.accountId))}${event.location ? ` · ${esc(event.location)}` : ''}</small></span>
         <i class="fa-solid fa-chevron-right"></i>
       </button>`).join('');
     list.querySelectorAll('[data-planner-day-event]').forEach(button => {
@@ -441,6 +472,7 @@
     document.getElementById('planner-editor-title').textContent = t('planner.newEvent');
     document.getElementById('planner-title').value = '';
     document.getElementById('planner-account').value = state.filterAccountId || '';
+    populateCategorySelect('');
     document.getElementById('planner-all-day').checked = false;
     if (Number.isFinite(startMinutes)) setTimedRangeFromMinutes(day, startMinutes);
     else {
@@ -467,6 +499,7 @@
     document.getElementById('planner-editor-title').textContent = t('planner.editEvent');
     document.getElementById('planner-title').value = event.title || '';
     document.getElementById('planner-account').value = event.accountId || '';
+    populateCategorySelect(event.categoryId || '');
     document.getElementById('planner-all-day').checked = Boolean(event.allDay);
     document.getElementById('planner-start-date').value = dateKey(start);
     document.getElementById('planner-start-time').value = timeValue(start);
@@ -523,6 +556,7 @@
     const accountColor = accountId ? App.accountColor(accountId) : '';
     return {
       title, startAt, endAt, allDay, accountId,
+      categoryId: Number(document.getElementById('planner-category')?.value || 0) || null,
       color: /^#[0-9a-fA-F]{6}$/.test(String(accountColor || '')) ? accountColor : '',
       location: document.getElementById('planner-location').value.trim(),
       notes: document.getElementById('planner-notes').value.trim(),
@@ -586,7 +620,7 @@
     const source = event.location ? `${calendarSource} · ${event.location}` : calendarSource;
     return `<button class="planner-main-event" type="button" data-planner-summary-event="${Number(event.id)}" style="--event-color:${esc(eventColor(event))}" title="${esc(event.title)}">
       <span class="planner-main-event-time">${esc(event.allDay ? t('planner.allDayShort') : formatTime(event.startAt))}</span>
-      <span class="planner-main-event-main"><strong>${esc(event.title)}</strong><small>${esc(source)}</small></span>
+      <span class="planner-main-event-main"><strong>${eventCategoryIcon(event)}${esc(event.title)}</strong><small>${esc(event.categoryName ? `${event.categoryName} · ${source}` : source)}</small></span>
     </button>`;
   }
 
@@ -1043,7 +1077,7 @@
     state.anchor = startOfDay(state.selected || new Date());
     document.getElementById('planner-modal')?.classList.add('open');
     closeEditor();
-    await loadEvents();
+    await Promise.all([loadCategories(), loadEvents()]);
   }
 
   function wire() {
@@ -1105,6 +1139,10 @@
 
   function onEngineEvent(event) {
     if (event === 'calendar.changed') {
+      refreshSummary();
+      if (document.getElementById('planner-modal')?.classList.contains('open')) loadEvents();
+    } else if (event === 'calendar.categories.changed') {
+      loadCategories();
       refreshSummary();
       if (document.getElementById('planner-modal')?.classList.contains('open')) loadEvents();
     } else if (event === 'calendar.subscriptions.changed') {

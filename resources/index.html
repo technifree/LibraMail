@@ -774,10 +774,75 @@
       </section>
 
       <section class="settings-tab-panel hidden" role="tabpanel" data-settings-panel="planning" aria-labelledby="settings-tab-planning">
-        <div class="settings-planning-placeholder">
-          <i class="fa-solid fa-calendar-days"></i>
-          <strong data-i18n="settings.tab.planning"></strong>
-          <p data-i18n="settings.planningIntro"></p>
+        <div class="settings-section-title settings-planning-title">
+          <i class="fa-solid fa-tags"></i>
+          <span data-i18n="calendarCategory.settingsTitle"></span>
+        </div>
+        <div class="calendar-category-settings-card">
+          <p class="calendar-category-settings-intro" data-i18n="calendarCategory.settingsIntro"></p>
+          <div class="calendar-category-form">
+            <input id="calendar-category-id" type="hidden">
+            <div class="field">
+              <label for="calendar-category-name" data-i18n="calendarCategory.name"></label>
+              <input id="calendar-category-name" type="text" maxlength="80" autocomplete="off" data-i18n-ph="calendarCategory.namePlaceholder">
+            </div>
+            <div class="field calendar-category-color-field">
+              <label for="calendar-category-color" data-i18n="planner.color"></label>
+              <input id="calendar-category-color" type="color" value="#4F8BD6">
+            </div>
+            <div class="field calendar-category-icon-field">
+              <label data-i18n="calendarCategory.icon"></label>
+              <input id="calendar-category-icon" type="hidden" value="fa-tag">
+              <div class="calendar-category-icon-control">
+                <button id="btn-calendar-category-icon-picker" class="calendar-category-icon-trigger" type="button" aria-expanded="false">
+                  <i id="calendar-category-icon-preview" class="fa-solid fa-tag"></i>
+                  <i class="fa-solid fa-chevron-down calendar-category-icon-chevron"></i>
+                </button>
+                <div id="calendar-category-icon-popover" class="calendar-category-icon-popover hidden">
+                  <div id="calendar-category-icon-picker" class="calendar-category-icon-picker" role="group" data-i18n-aria-label="calendarCategory.icon">
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-briefcase" aria-pressed="false" data-i18n-title="calendarCategory.icon.work"><i class="fa-solid fa-briefcase"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-laptop" aria-pressed="false" data-i18n-title="calendarCategory.icon.computer"><i class="fa-solid fa-laptop"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-building" aria-pressed="false" data-i18n-title="calendarCategory.icon.company"><i class="fa-solid fa-building"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-user" aria-pressed="false" data-i18n-title="calendarCategory.icon.personal"><i class="fa-solid fa-user"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-users" aria-pressed="false" data-i18n-title="calendarCategory.icon.group"><i class="fa-solid fa-users"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-people-roof" aria-pressed="false" data-i18n-title="calendarCategory.icon.family"><i class="fa-solid fa-people-roof"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-house" aria-pressed="false" data-i18n-title="calendarCategory.icon.home"><i class="fa-solid fa-house"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-baby" aria-pressed="false" data-i18n-title="calendarCategory.icon.children"><i class="fa-solid fa-baby"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-heart-pulse" aria-pressed="false" data-i18n-title="calendarCategory.icon.health"><i class="fa-solid fa-heart-pulse"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-stethoscope" aria-pressed="false" data-i18n-title="calendarCategory.icon.doctor"><i class="fa-solid fa-stethoscope"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-dumbbell" aria-pressed="false" data-i18n-title="calendarCategory.icon.sport"><i class="fa-solid fa-dumbbell"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-person-running" aria-pressed="false" data-i18n-title="calendarCategory.icon.running"><i class="fa-solid fa-person-running"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-gamepad" aria-pressed="false" data-i18n-title="calendarCategory.icon.leisure"><i class="fa-solid fa-gamepad"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-music" aria-pressed="false" data-i18n-title="calendarCategory.icon.music"><i class="fa-solid fa-music"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-film" aria-pressed="false" data-i18n-title="calendarCategory.icon.cinema"><i class="fa-solid fa-film"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-book" aria-pressed="false" data-i18n-title="calendarCategory.icon.reading"><i class="fa-solid fa-book"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-graduation-cap" aria-pressed="false" data-i18n-title="calendarCategory.icon.study"><i class="fa-solid fa-graduation-cap"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-utensils" aria-pressed="false" data-i18n-title="calendarCategory.icon.food"><i class="fa-solid fa-utensils"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-cart-shopping" aria-pressed="false" data-i18n-title="calendarCategory.icon.shopping"><i class="fa-solid fa-cart-shopping"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-gift" aria-pressed="false" data-i18n-title="calendarCategory.icon.gift"><i class="fa-solid fa-gift"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-plane" aria-pressed="false" data-i18n-title="calendarCategory.icon.travel"><i class="fa-solid fa-plane"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-train" aria-pressed="false" data-i18n-title="calendarCategory.icon.train"><i class="fa-solid fa-train"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-car" aria-pressed="false" data-i18n-title="calendarCategory.icon.car"><i class="fa-solid fa-car"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-map-location-dot" aria-pressed="false" data-i18n-title="calendarCategory.icon.place"><i class="fa-solid fa-map-location-dot"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-file-lines" aria-pressed="false" data-i18n-title="calendarCategory.icon.admin"><i class="fa-solid fa-file-lines"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-scale-balanced" aria-pressed="false" data-i18n-title="calendarCategory.icon.legal"><i class="fa-solid fa-scale-balanced"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-wallet" aria-pressed="false" data-i18n-title="calendarCategory.icon.finance"><i class="fa-solid fa-wallet"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-paw" aria-pressed="false" data-i18n-title="calendarCategory.icon.pets"><i class="fa-solid fa-paw"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-phone" aria-pressed="false" data-i18n-title="calendarCategory.icon.phone"><i class="fa-solid fa-phone"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-video" aria-pressed="false" data-i18n-title="calendarCategory.icon.video"><i class="fa-solid fa-video"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-calendar-check" aria-pressed="false" data-i18n-title="calendarCategory.icon.appointment"><i class="fa-solid fa-calendar-check"></i></button>
+                <button class="calendar-category-icon-choice" type="button" data-category-icon-choice="fa-tag" aria-pressed="false" data-i18n-title="calendarCategory.icon.other"><i class="fa-solid fa-tag"></i></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="calendar-category-form-actions">
+              <button class="btn hidden" id="btn-calendar-category-cancel" type="button"><i class="fa-solid fa-xmark"></i><span data-i18n="cancel"></span></button>
+              <button class="btn primary" id="btn-calendar-category-save" type="button"><i class="fa-solid fa-plus"></i><span data-i18n="calendarCategory.add"></span></button>
+            </div>
+          </div>
+          <div id="calendar-category-settings-status" class="field-hint"></div>
+          <div id="calendar-category-list" class="calendar-category-list"></div>
         </div>
       </section>
 
@@ -1348,6 +1413,7 @@
           <input id="planner-event-id" type="hidden">
           <div class="field"><label for="planner-title" data-i18n="planner.eventTitle"></label><input id="planner-title" type="text" maxlength="240" autocomplete="off" data-i18n-ph="planner.eventTitlePlaceholder"></div>
           <div class="field"><label for="planner-account" data-i18n="planner.account"></label><select id="planner-account"></select></div>
+          <div class="field"><label for="planner-category" data-i18n="calendarCategory.category"></label><select id="planner-category"></select></div>
           <label class="planner-all-day"><input id="planner-all-day" type="checkbox"><span data-i18n="planner.allDay"></span></label>
           <div class="planner-date-grid">
             <div class="field"><label for="planner-start-date" data-i18n="planner.startDate"></label><input id="planner-start-date" type="date"></div>
