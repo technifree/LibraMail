@@ -68,3 +68,4 @@ LibraMail_patch_*/
 .cache/
 github-artifacts/
 listing.txt
+/.runtime/

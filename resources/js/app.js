@@ -2,6 +2,9 @@
 'use strict';
 const App = (() => {
   const ENGINE = 'ws://127.0.0.1:47800';
+  // LibraMail 0.5.0 - authentification RPC WebSocket locale.
+  const RPC_PROTOCOL_PREFIX = 'libramail-rpc-v1.';
+  let rpcSessionToken = '';
   let ws;
   let connecting = false;
   let reconnectTimer = null;
@@ -189,6 +192,49 @@ const App = (() => {
     }
   }
 
+
+
+  async function rpcStateRoot() {
+    let override = '';
+    try { override = String(await Neutralino.os.getEnv('LIBRAMAIL_STATE_ROOT') || '').trim(); } catch {}
+    if (override) return override.replace(/[\\/]+$/, '');
+    return String(window.NL_PATH || '').replace(/[\\/]+$/, '');
+  }
+
+  function rpcAuthFileForRoot(root) {
+    const separator = window.NL_OS === 'Windows' ? '\\' : '/';
+    return `${root}${separator}.runtime${separator}rpc-auth.json`;
+  }
+
+  function validRpcSessionToken(value) {
+    return /^[a-f0-9]{64}$/i.test(String(value || ''));
+  }
+
+  async function refreshRpcSessionToken({ wait = false } = {}) {
+    const attempts = wait ? 60 : 1;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        const root = await rpcStateRoot();
+        if (!root) throw new Error('Répertoire d’état LibraMail introuvable');
+        const raw = await Neutralino.filesystem.readFile(rpcAuthFileForRoot(root));
+        const auth = JSON.parse(String(raw || ''));
+        const token = String(auth?.token || '').trim().toLowerCase();
+        if (Number(auth?.port) === 47800 && validRpcSessionToken(token)) {
+          rpcSessionToken = token;
+          return token;
+        }
+      } catch {}
+      if (attempt + 1 < attempts) await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    rpcSessionToken = '';
+    return '';
+  }
+
+  function rpcWebSocketProtocol() {
+    if (!validRpcSessionToken(rpcSessionToken)) throw new Error('Session RPC locale indisponible');
+    return `${RPC_PROTOCOL_PREFIX}${rpcSessionToken}`;
+  }
+
   // ---------- Moteur embarqué Windows ----------
   function usesBundledWindowsEngine() {
     return window.NL_OS === 'Windows';
@@ -231,7 +277,9 @@ const App = (() => {
     } catch {}
   }
 
-  function probeEngine(timeout = 300) {
+  async function probeEngine(timeout = 300) {
+    const token = await refreshRpcSessionToken({ wait: false });
+    if (!token) return false;
     return new Promise(resolve => {
       let settled = false;
       let probe = null;
@@ -244,7 +292,7 @@ const App = (() => {
       };
       const timer = setTimeout(() => finish(false), timeout);
       try {
-        probe = new WebSocket(ENGINE);
+        probe = new WebSocket(ENGINE, rpcWebSocketProtocol());
         probe.onopen = () => finish(true);
         probe.onerror = () => finish(false);
         probe.onclose = () => finish(false);
@@ -428,14 +476,16 @@ const App = (() => {
     }, delay);
   }
 
-  function connect() {
+  async function connect() {
     if (shuttingDown) return;
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
     if (connecting) return;
     connecting = true;
     setEngine(false, true);
     try {
-      ws = new WebSocket(ENGINE);
+      const token = await refreshRpcSessionToken({ wait: true });
+      if (!token) throw new Error('Jeton de session du moteur introuvable');
+      ws = new WebSocket(ENGINE, rpcWebSocketProtocol());
     } catch (error) {
       connecting = false;
       status(`${t('error')} : ${error.message}`, 'error');
@@ -918,6 +968,8 @@ const App = (() => {
   function onEvent(event, data) {
     window.OutboxUI?.onEngineEvent?.(event, data);
     window.PlannerUI?.onEngineEvent?.(event, data);
+    updateStartupSummarySync(event, data);
+    if (event === 'mail.new') scheduleStartupSummaryRefresh(180);
     if (event === 'sync.started') {
       beginSyncActivity(data);
       status(t('status.syncStarting', { account: accountLabel(data.accountId) }), 'busy');
@@ -1043,6 +1095,231 @@ const App = (() => {
     }
   }
 
+
+  // LibraMail 0.5.0 - Résumé du jour au démarrage.
+  let startupSummaryShownThisRun = false;
+  let startupSummaryRefreshTimer = null;
+  const startupSummarySyncState = new Map();
+
+  function startupSummaryIsOpen() {
+    return document.getElementById('startup-summary-modal')?.classList.contains('open') === true;
+  }
+
+  function startupSummaryDayRange() {
+    const from = new Date();
+    from.setHours(0, 0, 0, 0);
+    const to = new Date(from);
+    to.setDate(to.getDate() + 1);
+    return { from: from.getTime(), to: to.getTime() };
+  }
+
+  function startupSummaryDateText() {
+    try {
+      const value = new Intl.DateTimeFormat(I18N.locale || config.locale || 'fr', {
+        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+      }).format(new Date());
+      return value ? value.charAt(0).toUpperCase() + value.slice(1) : '';
+    } catch {
+      return new Date().toLocaleDateString();
+    }
+  }
+
+  function startupSummaryTime(value) {
+    const date = new Date(Number(value) || value);
+    if (Number.isNaN(date.getTime())) return '';
+    try {
+      return new Intl.DateTimeFormat(I18N.locale || config.locale || 'fr', {
+        hour: '2-digit', minute: '2-digit',
+      }).format(date);
+    } catch {
+      return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+    }
+  }
+
+  function startupSummarySyncIcon(state) {
+    if (state === 'running') return 'fa-solid fa-rotate fa-spin';
+    if (state === 'done') return 'fa-solid fa-circle-check';
+    if (state === 'error') return 'fa-solid fa-triangle-exclamation';
+    if (state === 'cancelled') return 'fa-solid fa-circle-pause';
+    return 'fa-regular fa-clock';
+  }
+
+  function startupSummarySyncLabel(state) {
+    if (state === 'running') return t('startupSummary.syncRunning');
+    if (state === 'done') return t('startupSummary.syncDoneAccount');
+    if (state === 'error') return t('startupSummary.syncError');
+    if (state === 'cancelled') return t('startupSummary.syncCancelled');
+    return t('startupSummary.syncPending');
+  }
+
+  function renderStartupSummarySync() {
+    const root = document.getElementById('startup-summary-sync-accounts');
+    const progress = document.getElementById('startup-summary-sync-progress');
+    if (!root || !progress) return;
+
+    const total = accounts.length;
+    let terminal = 0;
+    let errors = 0;
+    root.innerHTML = accounts.length ? accounts.map(account => {
+      const info = startupSummarySyncState.get(String(account.id)) || { state: 'pending' };
+      if (['done', 'error', 'cancelled'].includes(info.state)) terminal++;
+      if (info.state === 'error') errors++;
+      const detail = info.state === 'running' && info.folder
+        ? `${startupSummarySyncLabel(info.state)} · ${info.folder}`
+        : startupSummarySyncLabel(info.state);
+      return `<div class="startup-summary-sync-row ${esc(info.state || 'pending')}">
+        <span class="startup-summary-sync-icon"><i class="${startupSummarySyncIcon(info.state)}"></i></span>
+        <span class="startup-summary-row-main"><strong>${esc(account.displayName || account.email)}</strong><small>${esc(detail)}</small></span>
+      </div>`;
+    }).join('') : `<div class="startup-summary-empty">${esc(t('startupSummary.noAccounts'))}</div>`;
+
+    if (!total) progress.textContent = t('startupSummary.noAccounts');
+    else if (terminal >= total) {
+      progress.textContent = errors
+        ? t('startupSummary.syncCompleteWithErrors', { errors })
+        : t('startupSummary.syncComplete');
+    } else {
+      progress.textContent = t('startupSummary.syncProgress', { done: terminal, total });
+    }
+  }
+
+  function renderStartupSummaryMail(globalResult, accountResults) {
+    const totalElement = document.getElementById('startup-summary-unread-total');
+    const root = document.getElementById('startup-summary-accounts');
+    if (!totalElement || !root) return;
+
+    const totalUnread = globalResult?.status === 'fulfilled'
+      ? Math.max(0, Number(globalResult.value?.counts?.unread) || 0)
+      : accountResults.reduce((sum, item) => item.result?.status === 'fulfilled'
+          ? sum + Math.max(0, Number(item.result.value?.counts?.unread) || 0)
+          : sum, 0);
+    totalElement.textContent = totalUnread
+      ? t('startupSummary.unreadCount', { count: numberFormat(totalUnread) })
+      : t('startupSummary.noUnread');
+
+    root.innerHTML = accounts.length ? accountResults.map(({ account, result }) => {
+      const available = result?.status === 'fulfilled';
+      const unread = available ? Math.max(0, Number(result.value?.counts?.unread) || 0) : null;
+      return `<div class="startup-summary-row">
+        <span class="startup-summary-account-dot" style="background:${safeColor(account.color)}"></span>
+        <span class="startup-summary-row-main"><strong>${esc(account.displayName || account.email)}</strong><small>${esc(account.email || '')}</small></span>
+        <span class="startup-summary-count ${unread > 0 ? 'has-unread' : ''}">${unread === null ? '—' : numberFormat(unread)}</span>
+      </div>`;
+    }).join('') : `<div class="startup-summary-empty">${esc(t('startupSummary.noAccounts'))}</div>`;
+  }
+
+  function renderStartupSummaryEvents(result) {
+    const countElement = document.getElementById('startup-summary-event-count');
+    const root = document.getElementById('startup-summary-events');
+    if (!countElement || !root) return;
+
+    if (result?.status !== 'fulfilled') {
+      countElement.textContent = t('startupSummary.unavailable');
+      root.innerHTML = `<div class="startup-summary-empty">${esc(t('startupSummary.unavailable'))}</div>`;
+      return;
+    }
+
+    const events = (Array.isArray(result.value) ? result.value : []).slice().sort((a, b) => {
+      if (Boolean(a.allDay) !== Boolean(b.allDay)) return a.allDay ? -1 : 1;
+      return (Number(a.startAt) || 0) - (Number(b.startAt) || 0);
+    });
+    countElement.textContent = events.length
+      ? t('startupSummary.eventCount', { count: numberFormat(events.length) })
+      : t('startupSummary.noEvents');
+
+    root.innerHTML = events.length ? events.map(event => {
+      const time = event.allDay ? t('startupSummary.allDay') : startupSummaryTime(event.startAt);
+      // Le résumé est informatif : une punaise colorée suffit pour repérer
+      // visuellement la catégorie sans multiplier les pictogrammes.
+      const paperclip = Math.max(0, Number(event.attachmentCount) || 0) > 0
+        ? '<i class="fa-solid fa-paperclip startup-summary-paperclip"></i>'
+        : '';
+      const meta = [event.categoryName, event.location].filter(Boolean).join(' · ');
+      const eventColor = safeColor(event.categoryColor || event.color || '#4F8BD6');
+      return `<div class="startup-summary-event-row" style="--startup-event-color:${eventColor}">
+        <span class="startup-summary-event-time">${esc(time)}</span>
+        <span class="startup-summary-event-pin" aria-hidden="true"><i class="fa-solid fa-thumbtack"></i></span>
+        <span class="startup-summary-row-main"><strong>${paperclip}${esc(event.title || t('mail.noSubject'))}</strong>${meta ? `<small>${esc(meta)}</small>` : ''}</span>
+      </div>`;
+    }).join('') : `<div class="startup-summary-empty"><i class="fa-regular fa-calendar-check"></i><span>${esc(t('startupSummary.noEvents'))}</span></div>`;
+  }
+
+  async function refreshStartupSummary() {
+    if (!startupSummaryIsOpen()) return;
+    const range = startupSummaryDayRange();
+    const requests = [
+      rpc('messages.list', { folderRole: 'inbox', spam: 0, limit: 1 }),
+      rpc('calendar.list', { from: range.from, to: range.to, limit: 250 }),
+      ...accounts.map(account => rpc('messages.list', {
+        folderRole: 'inbox', spam: 0, accountId: account.id, limit: 1,
+      })),
+    ];
+    const settled = await Promise.allSettled(requests);
+    if (!startupSummaryIsOpen()) return;
+    const accountResults = accounts.map((account, index) => ({
+      account,
+      result: settled[index + 2],
+    }));
+    renderStartupSummaryMail(settled[0], accountResults);
+    renderStartupSummaryEvents(settled[1]);
+  }
+
+  function scheduleStartupSummaryRefresh(delay = 250) {
+    if (!startupSummaryIsOpen()) return;
+    if (startupSummaryRefreshTimer) clearTimeout(startupSummaryRefreshTimer);
+    startupSummaryRefreshTimer = setTimeout(() => {
+      startupSummaryRefreshTimer = null;
+      refreshStartupSummary().catch(() => {});
+    }, Math.max(0, Number(delay) || 0));
+  }
+
+  function updateStartupSummarySync(event, data = {}) {
+    if (!startupSummaryIsOpen()) return;
+    const accountId = String(data.accountId || '');
+    if (!accountId) return;
+    const current = startupSummarySyncState.get(accountId) || { state: 'pending' };
+    if (event === 'sync.started') startupSummarySyncState.set(accountId, { state: 'running' });
+    else if (event === 'sync.progress') startupSummarySyncState.set(accountId, { ...current, state: 'running', folder: String(data.folder || '') });
+    else if (event === 'sync.done') startupSummarySyncState.set(accountId, { state: 'done' });
+    else if (event === 'sync.error') startupSummarySyncState.set(accountId, { state: 'error' });
+    else if (event === 'sync.cancelled') startupSummarySyncState.set(accountId, { state: 'cancelled' });
+    else return;
+    renderStartupSummarySync();
+    if (['sync.done', 'sync.error', 'sync.cancelled'].includes(event)) scheduleStartupSummaryRefresh(180);
+  }
+
+  async function openStartupSummary() {
+    if (startupSummaryShownThisRun || config.startupSummaryEnabled === false) return;
+    startupSummaryShownThisRun = true;
+    startupSummarySyncState.clear();
+    accounts.forEach(account => startupSummarySyncState.set(String(account.id), { state: 'pending' }));
+
+    const modal = document.getElementById('startup-summary-modal');
+    if (!modal) return;
+    document.getElementById('startup-summary-date').textContent = startupSummaryDateText();
+    const checkbox = document.getElementById('startup-summary-dont-show');
+    if (checkbox) checkbox.checked = false;
+    const unread = document.getElementById('startup-summary-unread-total');
+    const events = document.getElementById('startup-summary-event-count');
+    if (unread) unread.textContent = t('startupSummary.loading');
+    if (events) events.textContent = t('startupSummary.loading');
+    document.getElementById('startup-summary-accounts').innerHTML = `<div class="startup-summary-empty"><i class="fa-solid fa-rotate fa-spin"></i><span>${esc(t('startupSummary.loading'))}</span></div>`;
+    document.getElementById('startup-summary-events').innerHTML = `<div class="startup-summary-empty"><i class="fa-solid fa-rotate fa-spin"></i><span>${esc(t('startupSummary.loading'))}</span></div>`;
+
+    openModal('startup-summary-modal');
+    modal.setAttribute('aria-hidden', 'false');
+    renderStartupSummarySync();
+    await refreshStartupSummary();
+  }
+
+  function closeStartupSummary() {
+    if (startupSummaryRefreshTimer) clearTimeout(startupSummaryRefreshTimer);
+    startupSummaryRefreshTimer = null;
+    const modal = document.getElementById('startup-summary-modal');
+    modal?.classList.remove('open');
+    modal?.setAttribute('aria-hidden', 'true');
+  }
+
   // ---------- Démarrage ----------
   async function boot() {
     const security = await rpc('security.status');
@@ -1087,6 +1364,9 @@ const App = (() => {
     window.PlannerUI?.refreshSummary?.();
     status(t('status.connected'), 'success');
     hideStartupScreen();
+    if (config.startupSummaryEnabled !== false && !startupSummaryShownThisRun) {
+      openStartupSummary().catch(error => console.warn('[LibraMail] Résumé du jour :', error));
+    }
     checkForUpdates(false).catch(() => {});
 
     // Une seule relève est demandée lorsque l'interface est réellement prête.
@@ -1123,7 +1403,7 @@ const App = (() => {
   };
 
   function applyAppVersion() {
-    const rawVersion = String(window.NL_APPVERSION || '0.4.8').replace(/^v/i, '');
+    const rawVersion = String(window.NL_APPVERSION || '0.5.0').replace(/^v/i, '');
     const badge = document.getElementById('app-version');
     if (badge) {
       badge.textContent = `v${rawVersion}`;
@@ -8923,6 +9203,7 @@ const App = (() => {
     document.getElementById('set-theme').value = config.theme || 'dark';
     document.getElementById('set-locale').value = config.locale || 'fr';
     document.getElementById('set-layout').value = config.layout || 'vertical';
+    document.getElementById('set-startup-summary').value = config.startupSummaryEnabled === false ? '0' : '1';
     document.getElementById('set-blockremote').value = config.blockRemoteImages === false ? '0' : '1';
     document.getElementById('set-conversations').value = config.conversationView === false ? '0' : '1';
     document.getElementById('set-auto-read').value = config.autoMarkRead === false ? '0' : '1';
@@ -9606,6 +9887,13 @@ const App = (() => {
     document.getElementById('contacts-group-filter').onchange = () => loadContacts().catch(() => {});
     document.getElementById('btn-settings').onclick = openSettings;
     wireSettingsTabs();
+    document.getElementById('btn-close-startup-summary')?.addEventListener('click', closeStartupSummary);
+    document.getElementById('btn-enter-libramail')?.addEventListener('click', closeStartupSummary);
+    document.getElementById('startup-summary-dont-show')?.addEventListener('change', event => {
+      applySetting('startupSummaryEnabled', !event.currentTarget.checked).catch(error =>
+        status(`${t('error')} : ${error.message}`, 'error')
+      );
+    });
     wireCalendarCategoryIconPicker();
     document.getElementById('btn-calendar-category-save')?.addEventListener('click', saveCalendarCategorySettings);
     document.getElementById('btn-calendar-category-cancel')?.addEventListener('click', () => {
@@ -9810,6 +10098,8 @@ const App = (() => {
     document.getElementById('set-theme').onchange = event => applySetting('theme', event.target.value);
     document.getElementById('set-locale').onchange = event => applySetting('locale', event.target.value);
     document.getElementById('set-layout').onchange = event => applySetting('layout', event.target.value);
+    document.getElementById('set-startup-summary').onchange = event =>
+      applySetting('startupSummaryEnabled', event.target.value === '1');
     document.getElementById('set-blockremote').onchange = event =>
       applySetting('blockRemoteImages', event.target.value === '1');
     document.getElementById('set-conversations').onchange = event =>

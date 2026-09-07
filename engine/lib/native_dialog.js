@@ -303,4 +303,77 @@ async function showDirectoryDialog({ title = 'Choisir un dossier' } = {}) {
   return path.resolve(selected);
 }
 
-module.exports = { showBackupDialog, showEmlDialog, showDirectoryDialog };
+
+function linuxFilesCandidates({ title }) {
+  const directory = `${defaultDirectory()}${path.sep}`;
+  const common = [
+    '--file-selection',
+    '--multiple',
+    '--separator=\n',
+    `--title=${title}`,
+    '--file-filter=Tous les fichiers | *',
+    `--filename=${directory}`,
+  ];
+  return [
+    { command: 'zenity', args: common },
+    { command: 'yad', args: common },
+    {
+      command: 'kdialog',
+      args: ['--title', title, '--getopenfilename', defaultDirectory(), 'Tous les fichiers (*)', '--multiple', '--separate-output'],
+    },
+  ];
+}
+
+function macFilesCandidates({ title }) {
+  const escapedTitle = String(title).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const script = [
+    `set selectedFiles to choose file with prompt "${escapedTitle}" with multiple selections allowed`,
+    'set output to ""',
+    'repeat with selectedFile in selectedFiles',
+    'set output to output & (POSIX path of selectedFile) & linefeed',
+    'end repeat',
+    'return output',
+  ].join('\n');
+  return [{ command: 'osascript', args: ['-e', script] }];
+}
+
+function windowsFilesCandidates({ title }) {
+  const script = [
+    'Add-Type -AssemblyName System.Windows.Forms',
+    '$dialog = New-Object System.Windows.Forms.OpenFileDialog',
+    `$dialog.Title = ${JSON.stringify(String(title))}`,
+    '$dialog.Filter = "Tous les fichiers (*.*)|*.*"',
+    `$dialog.InitialDirectory = ${JSON.stringify(defaultDirectory())}`,
+    '$dialog.Multiselect = $true',
+    'if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $dialog.FileNames | ForEach-Object { Write-Output $_ } }',
+  ].join('; ');
+  return [
+    { command: 'powershell.exe', args: ['-NoProfile', '-STA', '-Command', script] },
+    { command: 'pwsh', args: ['-NoProfile', '-STA', '-Command', script] },
+  ];
+}
+
+async function showFilesDialog({ title = 'Choisir des fichiers' } = {}) {
+  let candidates;
+  if (process.platform === 'linux') {
+    candidates = linuxFilesCandidates({ title });
+  } else if (process.platform === 'darwin') {
+    candidates = macFilesCandidates({ title });
+  } else if (process.platform === 'win32') {
+    candidates = windowsFilesCandidates({ title });
+  } else {
+    throw new Error(`Sélecteur de fichiers non pris en charge sur ${process.platform}`);
+  }
+
+  for (const candidate of candidates) {
+    const result = await runCommand(candidate.command, candidate.args);
+    if (!result.available) continue;
+    if (result.cancelled) return [];
+    return splitSelectedPaths(result.output);
+  }
+  throw new Error(
+    'Aucun sélecteur de fichiers graphique n’est disponible. Installez zenity, yad ou kdialog.'
+  );
+}
+
+module.exports = { showBackupDialog, showEmlDialog, showDirectoryDialog, showFilesDialog };

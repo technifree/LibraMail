@@ -4866,3 +4866,1140 @@ body.reader-modal-active { overflow: hidden; }
     grid-template-columns: repeat(6, 34px);
   }
 }
+
+/* LibraMail 0.5.0 - pièces jointes des rendez-vous */
+.planner-attachments-section {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--bg-panel-2);
+}
+.planner-attachments-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.planner-attachments-heading > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--fg-strong);
+}
+.planner-attachments-heading > span > i {
+  color: var(--accent);
+}
+.planner-attachments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.planner-attachment-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 5px 4px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-panel);
+}
+.planner-attachment-row.pending {
+  border-style: dashed;
+}
+.planner-attachment-open {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  border: 0;
+  color: var(--fg);
+  background: transparent;
+  text-align: left;
+}
+button.planner-attachment-open {
+  cursor: pointer;
+}
+button.planner-attachment-open:hover strong {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.planner-attachment-open > i {
+  flex: none;
+  color: var(--accent);
+}
+.planner-attachment-open > span {
+  min-width: 0;
+}
+.planner-attachment-open strong,
+.planner-attachment-open small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.planner-attachment-open strong {
+  font-size: 11.5px;
+  font-weight: 650;
+}
+.planner-attachment-open small {
+  margin-top: 1px;
+  color: var(--fg-faint);
+  font-size: 10px;
+}
+.planner-attachments-empty {
+  padding: 4px 1px;
+  color: var(--fg-faint);
+  font-size: 10.5px;
+}
+
+/* LibraMail 0.5.0 - indicateur pièces jointes des rendez-vous */
+.planner-event-attachment-icon {
+  margin-right: 4px;
+  color: var(--fg-faint);
+  font-size: .9em;
+  opacity: .9;
+}
+
+/* LibraMail 0.5.0 - resume du jour au demarrage */
+.startup-summary-modal-box {
+  width: min(780px, 94vw);
+  max-height: min(760px, 92vh);
+  overflow: hidden;
+}
+.startup-summary-modal-box > header,
+.startup-summary-modal-box > footer { flex: none; }
+.startup-summary-body {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.startup-summary-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 2px 2px 4px;
+}
+.startup-summary-heading > div { min-width: 0; }
+.startup-summary-heading strong,
+.startup-summary-heading > div > span { display: block; }
+.startup-summary-heading strong {
+  color: var(--fg-strong);
+  font-size: 19px;
+  line-height: 1.25;
+}
+#startup-summary-date {
+  margin-top: 3px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.startup-summary-live {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.startup-summary-live > i { font-size: 6px; }
+.startup-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.startup-summary-card {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel-2);
+}
+.startup-summary-sync-card { grid-column: 1 / -1; }
+.startup-summary-card-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.startup-summary-card-title > div { min-width: 0; }
+.startup-summary-card-title strong,
+.startup-summary-card-title small { display: block; }
+.startup-summary-card-title strong { color: var(--fg-strong); font-size: 13px; }
+.startup-summary-card-title small { margin-top: 2px; color: var(--fg-muted); font-size: 10.5px; }
+.startup-summary-card-icon {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 14px;
+}
+.startup-summary-list,
+.startup-summary-sync-list {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.startup-summary-list { max-height: 230px; overflow-y: auto; }
+.startup-summary-row,
+.startup-summary-event-row,
+.startup-summary-sync-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  background: var(--bg-panel);
+}
+.startup-summary-row-main { min-width: 0; flex: 1; }
+.startup-summary-row-main strong,
+.startup-summary-row-main small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.startup-summary-row-main strong { color: var(--fg-strong); font-size: 11.5px; }
+.startup-summary-row-main small { margin-top: 1px; color: var(--fg-faint); font-size: 9.5px; }
+.startup-summary-account-dot {
+  width: 9px;
+  height: 9px;
+  flex: none;
+  border-radius: 50%;
+}
+.startup-summary-count {
+  flex: none;
+  min-width: 24px;
+  text-align: right;
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.startup-summary-count.has-unread { color: var(--accent); }
+.startup-summary-event-row {
+  position: relative;
+  padding-left: 9px;
+  border-left: 2px solid var(--startup-event-color, var(--accent));
+}
+.startup-summary-event-time {
+  width: 42px;
+  flex: none;
+  color: var(--startup-event-color, var(--accent));
+  font-size: 10px;
+  font-weight: 800;
+}
+.startup-summary-event-icon {
+  width: 18px;
+  flex: none;
+  text-align: center;
+  color: var(--startup-event-color, var(--accent));
+  font-size: 11px;
+}
+.startup-summary-paperclip {
+  margin-right: 5px;
+  color: var(--fg-faint);
+  font-size: .9em;
+}
+.startup-summary-sync-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.startup-summary-sync-icon {
+  width: 22px;
+  flex: none;
+  text-align: center;
+  color: var(--fg-faint);
+}
+.startup-summary-sync-row.running .startup-summary-sync-icon { color: var(--accent); }
+.startup-summary-sync-row.done .startup-summary-sync-icon { color: var(--success, #49a86b); }
+.startup-summary-sync-row.error .startup-summary-sync-icon { color: var(--danger); }
+.startup-summary-empty {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 10px;
+  color: var(--fg-faint);
+  font-size: 10.5px;
+  text-align: center;
+}
+.startup-summary-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.startup-summary-disable {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+.startup-summary-disable input { flex: none; }
+.startup-summary-setting .field-hint { margin-top: 5px; }
+@media (max-width: 680px) {
+  .startup-summary-grid { grid-template-columns: 1fr; }
+  .startup-summary-sync-card { grid-column: auto; }
+  .startup-summary-sync-list { grid-template-columns: 1fr; }
+  .startup-summary-heading { align-items: flex-start; }
+  .startup-summary-live { display: none; }
+  .startup-summary-footer { align-items: stretch; flex-direction: column; }
+  .startup-summary-footer .btn { width: 100%; justify-content: center; }
+}
+
+/* LibraMail 0.5.0 - resume du jour style bureau
+   Variante plus sobre : surfaces plates, séparateurs nets, moins de cartes/pastilles. */
+.startup-summary-modal-box {
+  width: min(820px, 94vw);
+  max-height: min(760px, 92vh);
+  border-radius: 6px;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, .20);
+}
+
+.startup-summary-windowbar {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 3px 7px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+.startup-summary-window-spacer { flex: 1; }
+.startup-summary-windowbar .iconbtn {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+}
+
+.startup-summary-body {
+  gap: 10px;
+  padding-top: 14px;
+  background: var(--bg-panel);
+}
+.startup-summary-heading {
+  padding: 0 2px 10px;
+  gap: 18px;
+}
+.startup-summary-heading strong {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+#startup-summary-date {
+  margin-top: 2px;
+  font-size: 11.5px;
+}
+
+/* Statut discret plutôt qu'une pastille décorative. */
+.startup-summary-live {
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.startup-summary-live > i {
+  font-size: 6px;
+  color: var(--accent);
+}
+
+/* Un seul bloc structuré, proche d'une vraie fenêtre de bureau. */
+.startup-summary-grid {
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--bg-panel);
+}
+.startup-summary-card {
+  gap: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.startup-summary-card:nth-child(2) {
+  border-left: 1px solid var(--border);
+}
+.startup-summary-sync-card {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--border);
+}
+
+.startup-summary-card-title {
+  min-height: 52px;
+  gap: 8px;
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel-2);
+}
+.startup-summary-card-title strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+.startup-summary-card-title small {
+  margin-top: 1px;
+  font-size: 10px;
+}
+.startup-summary-card-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 13px;
+}
+
+.startup-summary-list,
+.startup-summary-sync-list {
+  gap: 0;
+}
+.startup-summary-list {
+  max-height: 232px;
+}
+.startup-summary-row,
+.startup-summary-event-row,
+.startup-summary-sync-row {
+  min-height: 43px;
+  gap: 8px;
+  padding: 7px 11px;
+  border-radius: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+}
+.startup-summary-list > :last-child,
+.startup-summary-sync-list > :nth-last-child(-n+2) {
+  border-bottom-color: transparent;
+}
+.startup-summary-row:hover,
+.startup-summary-event-row:hover,
+.startup-summary-sync-row:hover {
+  background: var(--bg-hover);
+}
+
+.startup-summary-row-main strong {
+  font-size: 11.5px;
+  font-weight: 650;
+}
+.startup-summary-row-main small {
+  margin-top: 1px;
+  font-size: 9.5px;
+}
+.startup-summary-account-dot {
+  width: 8px;
+  height: 8px;
+}
+.startup-summary-count {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.startup-summary-event-row {
+  padding-left: 9px;
+  border-left-width: 3px;
+}
+.startup-summary-event-time {
+  width: 42px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.startup-summary-event-icon {
+  width: 17px;
+  font-size: 10.5px;
+}
+
+.startup-summary-sync-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.startup-summary-sync-row:nth-child(odd) {
+  border-right: 1px solid var(--border);
+}
+.startup-summary-sync-icon {
+  width: 18px;
+}
+
+.startup-summary-empty {
+  min-height: 44px;
+  padding: 10px 12px;
+}
+
+.startup-summary-footer {
+  min-height: 48px;
+  padding-top: 9px;
+  padding-bottom: 9px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+.startup-summary-footer .btn {
+  min-height: 34px;
+  border-radius: 5px;
+  padding-inline: 13px;
+}
+.startup-summary-disable {
+  font-size: 10.5px;
+}
+
+@media (max-width: 680px) {
+  .startup-summary-grid {
+    grid-template-columns: 1fr;
+  }
+  .startup-summary-card:nth-child(2) {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+  .startup-summary-sync-card {
+    grid-column: auto;
+  }
+  .startup-summary-sync-list {
+    grid-template-columns: 1fr;
+  }
+  .startup-summary-sync-row:nth-child(odd) {
+    border-right: 0;
+  }
+  .startup-summary-sync-list > :nth-last-child(-n+2) {
+    border-bottom-color: var(--border);
+  }
+  .startup-summary-sync-list > :last-child {
+    border-bottom-color: transparent;
+  }
+}
+
+/* LibraMail 0.5.0 - resume du jour style moderne equilibre
+   Variante plus contemporaine et plus crédible : cartes sobres, respiration,
+   relief léger, moins de quadrillage, sans effet "dashboard IA". */
+.startup-summary-modal-box {
+  width: min(840px, 94vw);
+  max-height: min(780px, 92vh);
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 14px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .18);
+  background: color-mix(in srgb, var(--bg-panel) 90%, white 10%);
+}
+
+.startup-summary-windowbar {
+  min-height: 40px;
+  padding: 6px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--bg-panel) 94%, white 6%);
+}
+.startup-summary-windowbar .iconbtn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: var(--fg-muted);
+}
+.startup-summary-windowbar .iconbtn:hover {
+  background: var(--bg-hover);
+  color: var(--fg-strong);
+}
+
+.startup-summary-body {
+  gap: 16px;
+  padding-top: 18px;
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--bg-panel) 96%, white 4%) 0%,
+      color-mix(in srgb, var(--bg) 97%, white 3%) 100%);
+}
+.startup-summary-heading {
+  align-items: flex-start;
+  gap: 20px;
+  padding: 2px 4px 2px;
+}
+.startup-summary-heading strong {
+  font-size: 18px;
+  font-weight: 750;
+  letter-spacing: -.01em;
+}
+#startup-summary-date {
+  margin-top: 4px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.startup-summary-live {
+  gap: 7px;
+  padding: 7px 11px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-panel));
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.startup-summary-live > i {
+  font-size: 6px;
+  color: currentColor;
+}
+
+.startup-summary-grid {
+  gap: 14px;
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
+  background: transparent;
+}
+.startup-summary-card {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-panel) 94%, white 6%);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .06);
+}
+.startup-summary-card:nth-child(2),
+.startup-summary-sync-card {
+  border-left: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+}
+.startup-summary-sync-card { grid-column: 1 / -1; }
+
+.startup-summary-card-title {
+  min-height: 60px;
+  gap: 10px;
+  padding: 13px 15px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  background: color-mix(in srgb, var(--bg-panel-2) 74%, var(--bg-panel) 26%);
+}
+.startup-summary-card-title strong {
+  font-size: 13px;
+  font-weight: 750;
+}
+.startup-summary-card-title small {
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--fg-muted);
+}
+.startup-summary-card-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: var(--accent);
+  font-size: 13px;
+}
+
+.startup-summary-list {
+  gap: 8px;
+  max-height: 240px;
+  padding: 12px;
+}
+.startup-summary-sync-list {
+  gap: 8px;
+  padding: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.startup-summary-row,
+.startup-summary-event-row,
+.startup-summary-sync-row {
+  min-height: 48px;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 78%, var(--bg-panel) 22%);
+  transition: background-color .16s ease, border-color .16s ease, transform .16s ease;
+}
+.startup-summary-row:hover,
+.startup-summary-event-row:hover,
+.startup-summary-sync-row:hover {
+  background: color-mix(in srgb, var(--bg-hover) 72%, var(--bg-panel) 28%);
+  border-color: color-mix(in srgb, var(--accent) 18%, var(--border));
+  transform: translateY(-1px);
+}
+.startup-summary-list > :last-child,
+.startup-summary-sync-list > :nth-last-child(-n+2) {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+.startup-summary-row-main strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+.startup-summary-row-main small {
+  margin-top: 2px;
+  color: var(--fg-faint);
+  font-size: 10px;
+}
+.startup-summary-account-dot {
+  width: 9px;
+  height: 9px;
+}
+.startup-summary-count {
+  min-width: 22px;
+  padding-left: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--accent);
+}
+.startup-summary-count:not(.has-unread) {
+  color: var(--fg-muted);
+}
+
+.startup-summary-event-row {
+  padding-left: 10px;
+  border-left: 3px solid var(--startup-event-color, var(--accent));
+}
+.startup-summary-event-time {
+  width: 44px;
+  font-size: 10.5px;
+  font-weight: 800;
+}
+.startup-summary-event-icon {
+  width: 18px;
+  font-size: 11px;
+}
+.startup-summary-paperclip {
+  margin-right: 5px;
+  color: var(--fg-faint);
+}
+
+.startup-summary-sync-row:nth-child(odd) {
+  border-right: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+}
+.startup-summary-sync-icon {
+  width: 20px;
+}
+
+.startup-summary-empty {
+  min-height: 52px;
+  padding: 14px;
+  border: 1px dashed color-mix(in srgb, var(--border) 85%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 82%, var(--bg-panel) 18%);
+}
+
+.startup-summary-footer {
+  min-height: 58px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background: color-mix(in srgb, var(--bg-panel) 94%, white 6%);
+}
+.startup-summary-footer .btn {
+  min-height: 38px;
+  border-radius: 10px;
+  padding-inline: 16px;
+}
+.startup-summary-disable {
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+@media (max-width: 680px) {
+  .startup-summary-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .startup-summary-card:nth-child(2) {
+    border-left: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+    border-top: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  }
+  .startup-summary-sync-card {
+    grid-column: auto;
+  }
+  .startup-summary-sync-list {
+    grid-template-columns: 1fr;
+  }
+  .startup-summary-sync-row:nth-child(odd) {
+    border-right: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  }
+  .startup-summary-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .startup-summary-footer .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+/* LibraMail 0.5.0 - resume du jour style macos
+   Variante plus proche d'une feuille macOS : matière douce, coins souples,
+   hiérarchie calme, cartes aérées, séparateurs discrets, sans look IA. */
+.startup-summary-modal-box {
+  width: min(848px, 94vw);
+  max-height: min(780px, 92vh);
+  border: 1px solid color-mix(in srgb, var(--border) 72%, white 28%);
+  border-radius: 18px;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, .18);
+  background: color-mix(in srgb, var(--bg-panel) 88%, white 12%);
+  overflow: hidden;
+  backdrop-filter: blur(14px) saturate(120%);
+}
+
+.startup-summary-windowbar {
+  min-height: 44px;
+  padding: 7px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 68%, white 32%);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-panel) 76%, white 24%) 0%,
+    color-mix(in srgb, var(--bg-panel) 88%, white 12%) 100%
+  );
+}
+.startup-summary-windowbar .iconbtn {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  color: var(--fg-muted);
+  background: transparent;
+}
+.startup-summary-windowbar .iconbtn:hover {
+  background: color-mix(in srgb, var(--bg-hover) 75%, white 25%);
+  border-color: color-mix(in srgb, var(--border) 70%, white 30%);
+  color: var(--fg-strong);
+}
+
+.startup-summary-body {
+  gap: 18px;
+  padding-top: 20px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-panel) 90%, white 10%) 0%,
+    color-mix(in srgb, var(--bg) 94%, white 6%) 100%
+  );
+}
+.startup-summary-heading {
+  align-items: flex-start;
+  gap: 18px;
+  padding: 0 4px 0;
+}
+.startup-summary-heading strong {
+  font-size: 19px;
+  font-weight: 760;
+  letter-spacing: -.015em;
+}
+#startup-summary-date {
+  margin-top: 5px;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.startup-summary-live {
+  gap: 7px;
+  padding: 7px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 14%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 7%, white 93%);
+  color: color-mix(in srgb, var(--accent) 88%, var(--fg-strong));
+  font-size: 10.5px;
+  font-weight: 700;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.55);
+}
+.startup-summary-live > i {
+  font-size: 6px;
+  color: var(--accent);
+}
+
+.startup-summary-grid {
+  gap: 14px;
+  border: 0;
+  background: transparent;
+  overflow: visible;
+}
+.startup-summary-card {
+  border: 1px solid color-mix(in srgb, var(--border) 66%, white 34%);
+  border-radius: 16px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg-panel) 82%, white 18%);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, .06),
+    inset 0 1px 0 rgba(255, 255, 255, .65);
+}
+.startup-summary-card:nth-child(2),
+.startup-summary-sync-card {
+  border-left: 1px solid color-mix(in srgb, var(--border) 66%, white 34%);
+  border-top: 1px solid color-mix(in srgb, var(--border) 66%, white 34%);
+}
+.startup-summary-sync-card { grid-column: 1 / -1; }
+
+.startup-summary-card-title {
+  min-height: 60px;
+  gap: 11px;
+  padding: 14px 16px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 54%, white 46%);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-panel-2) 55%, white 45%) 0%,
+    color-mix(in srgb, var(--bg-panel) 86%, white 14%) 100%
+  );
+}
+.startup-summary-card-title strong {
+  font-size: 13px;
+  font-weight: 760;
+}
+.startup-summary-card-title small {
+  margin-top: 2px;
+  color: var(--fg-muted);
+  font-size: 10.5px;
+}
+.startup-summary-card-icon {
+  width: 31px;
+  height: 31px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 12%, white 88%);
+  color: var(--accent);
+  font-size: 13px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.65);
+}
+
+.startup-summary-list {
+  max-height: 242px;
+  padding: 10px 12px 12px;
+  gap: 6px;
+}
+.startup-summary-sync-list {
+  padding: 10px 12px 12px;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.startup-summary-row,
+.startup-summary-event-row,
+.startup-summary-sync-row {
+  min-height: 46px;
+  gap: 10px;
+  padding: 10px 11px;
+  border: 0;
+  border-bottom: 0;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg) 72%, white 28%);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.62),
+    0 1px 1px rgba(0, 0, 0, .02);
+  transition: background-color .16s ease, transform .16s ease, box-shadow .16s ease;
+}
+.startup-summary-row:hover,
+.startup-summary-event-row:hover,
+.startup-summary-sync-row:hover {
+  background: color-mix(in srgb, var(--bg-hover) 65%, white 35%);
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.62),
+    0 5px 14px rgba(0, 0, 0, .05);
+}
+.startup-summary-list > :last-child,
+.startup-summary-sync-list > :nth-last-child(-n+2) {
+  border-bottom: 0;
+}
+.startup-summary-row-main strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+.startup-summary-row-main small {
+  margin-top: 2px;
+  color: var(--fg-faint);
+  font-size: 10px;
+}
+.startup-summary-account-dot {
+  width: 9px;
+  height: 9px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 10%, transparent);
+}
+.startup-summary-count {
+  min-width: 22px;
+  padding-left: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--accent);
+}
+.startup-summary-count:not(.has-unread) {
+  color: var(--fg-muted);
+}
+
+.startup-summary-event-row {
+  padding-left: 10px;
+  border-left: 3px solid var(--startup-event-color, var(--accent));
+}
+.startup-summary-event-time {
+  width: 44px;
+  font-size: 10.5px;
+  font-weight: 800;
+}
+.startup-summary-event-icon {
+  width: 18px;
+  font-size: 11px;
+}
+.startup-summary-paperclip {
+  margin-right: 5px;
+  color: var(--fg-faint);
+}
+
+.startup-summary-sync-row:nth-child(odd) {
+  border-right: 0;
+}
+.startup-summary-sync-icon {
+  width: 20px;
+}
+
+.startup-summary-empty {
+  min-height: 54px;
+  padding: 14px;
+  border: 1px dashed color-mix(in srgb, var(--border) 72%, white 28%);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg) 78%, white 22%);
+}
+
+.startup-summary-footer {
+  min-height: 60px;
+  padding-top: 13px;
+  padding-bottom: 13px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 66%, white 34%);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-panel) 88%, white 12%) 0%,
+    color-mix(in srgb, var(--bg-panel) 80%, white 20%) 100%
+  );
+}
+.startup-summary-footer .btn {
+  min-height: 40px;
+  border-radius: 12px;
+  padding-inline: 16px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.28);
+}
+.startup-summary-disable {
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+
+@media (max-width: 680px) {
+  .startup-summary-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .startup-summary-card:nth-child(2) {
+    border-left: 1px solid color-mix(in srgb, var(--border) 66%, white 34%);
+    border-top: 1px solid color-mix(in srgb, var(--border) 66%, white 34%);
+  }
+  .startup-summary-sync-card {
+    grid-column: auto;
+  }
+  .startup-summary-sync-list {
+    grid-template-columns: 1fr;
+  }
+  .startup-summary-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .startup-summary-footer .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+/* LibraMail 0.5.0 - resume du jour pastilles couleur
+   Remplace le liseré vertical trop générique par une vraie pastille colorée,
+   plus naturelle et plus proche d'une application bureau. */
+.startup-summary-event-row {
+  position: relative;
+  padding-left: 16px;
+  border-left: 0;
+}
+.startup-summary-event-row::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  transform: translateY(-50%);
+  background: var(--startup-event-color, var(--accent));
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--startup-event-color, var(--accent)) 16%, transparent),
+    inset 0 1px 0 rgba(255,255,255,.45);
+}
+.startup-summary-event-time {
+  width: 46px;
+  margin-left: 6px;
+}
+.startup-summary-event-icon {
+  width: 18px;
+}
+.startup-summary-event-row:hover::before {
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--startup-event-color, var(--accent)) 20%, transparent),
+    inset 0 1px 0 rgba(255,255,255,.45);
+}
+
+/* LibraMail 0.5.0 - resume du jour punaises sans hover
+   Le résumé est purement informatif : aucun effet de survol. Les rendez-vous
+   utilisent une punaise colorée au lieu d'un liseré ou d'une pastille. */
+.startup-summary-row,
+.startup-summary-event-row,
+.startup-summary-sync-row {
+  transition: none;
+  cursor: default;
+}
+.startup-summary-row:hover,
+.startup-summary-event-row:hover,
+.startup-summary-sync-row:hover {
+  background: color-mix(in srgb, var(--bg) 72%, white 28%);
+  border-color: transparent;
+  transform: none;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.62),
+    0 1px 1px rgba(0, 0, 0, .02);
+}
+
+/* Neutralise l'ancienne pastille ajoutée par le correctif précédent. */
+.startup-summary-event-row::before {
+  content: none;
+  display: none;
+}
+.startup-summary-event-row:hover::before {
+  content: none;
+  display: none;
+}
+
+.startup-summary-event-row {
+  padding-left: 11px;
+  border-left: 0;
+}
+.startup-summary-event-time {
+  width: 46px;
+  margin-left: 0;
+}
+.startup-summary-event-icon {
+  display: none;
+}
+.startup-summary-event-pin {
+  width: 18px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--startup-event-color, var(--accent));
+  font-size: 12px;
+  transform: rotate(-18deg);
+  transform-origin: 50% 50%;
+}
+.startup-summary-event-pin i {
+  pointer-events: none;
+}

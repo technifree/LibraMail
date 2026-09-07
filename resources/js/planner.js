@@ -9,6 +9,8 @@
     view: 'month',
     events: [],
     categories: [],
+    editorAttachments: [],
+    pendingAttachments: [],
     loading: false,
     importing: false,
     filterAccountId: '',
@@ -68,6 +70,14 @@
   function eventCategoryIcon(event) {
     const icon = /^fa-[a-z0-9-]+$/i.test(String(event?.categoryIcon || '')) ? event.categoryIcon : '';
     return icon ? `<i class="fa-solid ${esc(icon)} planner-event-category-icon"></i>` : '';
+  }
+  function eventAttachmentIcon(event) {
+    const count = Math.max(0, Number(event?.attachmentCount) || 0);
+    if (!count) return '';
+    const label = count > 1
+      ? `${t('planner.attachments')} (${count})`
+      : t('planner.attachments');
+    return `<i class="fa-solid fa-paperclip planner-event-attachment-icon" title="${esc(label)}" aria-hidden="true"></i>`;
   }
   function formatTime(timestamp) {
     return new Date(Number(timestamp)).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' });
@@ -230,7 +240,7 @@
       const classes = ['planner-day', day.getMonth() === monthIndex ? '' : 'outside', key === todayKey ? 'today' : '', key === selectedKey ? 'selected' : ''].filter(Boolean).join(' ');
       const eventsHtml = visible.map(event => `
         <button class="planner-event-chip" type="button" data-planner-event="${Number(event.id)}" style="--event-color:${esc(eventColor(event))}" title="${esc(event.title)}">
-          <span class="planner-event-time">${esc(eventLabel(event))}</span><span>${eventCategoryIcon(event)}${esc(event.title)}</span>
+          <span class="planner-event-time">${esc(eventLabel(event))}</span><span>${eventCategoryIcon(event)}${eventAttachmentIcon(event)}${esc(event.title)}</span>
         </button>`).join('');
       return `<div class="${classes}" role="gridcell" data-planner-day="${key}" tabindex="0">
         <div class="planner-day-number"><span>${day.getDate()}</span></div>
@@ -284,7 +294,7 @@
     const allDay = days.map(day => {
       const events = sortedEvents(state.events.filter(event => event.allDay && eventOverlapsDay(event, day)));
       return `<div class="planner-week-all-day-cell ${isWeekend(day) ? 'weekend' : ''}" data-planner-week-day="${dateKey(day)}">${events.slice(0, 4).map(event => `
-        <button class="planner-event-chip" type="button" data-planner-event="${Number(event.id)}" style="--event-color:${esc(eventColor(event))}" title="${esc(event.title)}"><span>${esc(event.title)}</span></button>`).join('')}${events.length > 4 ? `<span class="planner-week-more">+${events.length - 4}</span>` : ''}</div>`;
+        <button class="planner-event-chip" type="button" data-planner-event="${Number(event.id)}" style="--event-color:${esc(eventColor(event))}" title="${esc(event.title)}"><span>${eventAttachmentIcon(event)}${esc(event.title)}</span></button>`).join('')}${events.length > 4 ? `<span class="planner-week-more">+${events.length - 4}</span>` : ''}</div>`;
     }).join('');
 
     const timeGutter = Array.from({ length: 24 }, (_, hour) => `<span style="top:${hour * 60 * MINUTE_HEIGHT}px">${String(hour).padStart(2, '0')}:00</span>`).join('');
@@ -299,7 +309,7 @@
           const top = Math.round(clip.startMinutes * MINUTE_HEIGHT);
           const height = Math.max(24, Math.round(clip.durationMinutes * MINUTE_HEIGHT));
           return `<button class="planner-week-event" type="button" data-planner-event="${Number(event.id)}" style="--event-color:${esc(eventColor(event))};top:${top}px;height:${height}px" title="${esc(event.title)}">
-            <span>${esc(formatTime(clip.startAt))}</span><strong>${eventCategoryIcon(event)}${esc(event.title)}</strong>${event.location ? `<small>${esc(event.location)}</small>` : ''}
+            <span>${esc(formatTime(clip.startAt))}</span><strong>${eventCategoryIcon(event)}${eventAttachmentIcon(event)}${esc(event.title)}</strong>${event.location ? `<small>${esc(event.location)}</small>` : ''}
           </button>`;
         }).join('')}
       </div>`;
@@ -398,7 +408,7 @@
     list.innerHTML = events.map(event => `
       <button class="planner-day-event" type="button" data-planner-day-event="${Number(event.id)}" style="--event-color:${esc(eventColor(event))}">
         <span class="planner-day-event-time">${esc(eventLabel(event))}</span>
-        <span class="planner-day-event-main"><strong>${eventCategoryIcon(event)}${esc(event.title)}</strong><small>${esc(event.categoryName || accountLabel(event.accountId))}${event.location ? ` · ${esc(event.location)}` : ''}</small></span>
+        <span class="planner-day-event-main"><strong>${eventCategoryIcon(event)}${eventAttachmentIcon(event)}${esc(event.title)}</strong><small>${esc(event.categoryName || accountLabel(event.accountId))}${event.location ? ` · ${esc(event.location)}` : ''}</small></span>
         <i class="fa-solid fa-chevron-right"></i>
       </button>`).join('');
     list.querySelectorAll('[data-planner-day-event]').forEach(button => {
@@ -446,10 +456,139 @@
     renderSelectedDay();
   }
 
+
+  function plannerAttachmentSize(bytes) {
+    const value = Math.max(0, Number(bytes) || 0);
+    if (value < 1024) return `${value} o`;
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(value < 10240 ? 1 : 0)} Ko`;
+    if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(value < 10 * 1024 * 1024 ? 1 : 0)} Mo`;
+    return `${(value / (1024 * 1024 * 1024)).toFixed(1)} Go`;
+  }
+
+  function renderPlannerAttachments() {
+    const root = document.getElementById('planner-attachments-list');
+    const empty = document.getElementById('planner-attachments-empty');
+    if (!root || !empty) return;
+
+    const stored = state.editorAttachments.map(item => `
+      <div class="planner-attachment-row" data-planner-attachment-id="${Number(item.id)}">
+        <button class="planner-attachment-open" type="button" data-planner-attachment-open="${Number(item.id)}" title="${esc(t('planner.attachmentOpen'))}">
+          <i class="fa-solid fa-paperclip"></i>
+          <span><strong>${esc(item.filename)}</strong><small>${esc(plannerAttachmentSize(item.size))}</small></span>
+        </button>
+        <button class="iconbtn danger-hover" type="button" data-planner-attachment-remove="${Number(item.id)}" title="${esc(t('planner.attachmentRemove'))}">
+          <i class="fa-solid fa-trash"></i>
+        </button>
+      </div>
+    `);
+
+    const pending = state.pendingAttachments.map((item, index) => `
+      <div class="planner-attachment-row pending">
+        <div class="planner-attachment-open">
+          <i class="fa-solid fa-paperclip"></i>
+          <span><strong>${esc(item.name)}</strong><small>${esc(plannerAttachmentSize(item.size))} · ${esc(t('planner.attachmentPending'))}</small></span>
+        </div>
+        <button class="iconbtn danger-hover" type="button" data-planner-pending-attachment-remove="${index}" title="${esc(t('planner.attachmentRemove'))}">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+    `);
+
+    const rows = [...stored, ...pending];
+    root.innerHTML = rows.join('');
+    empty.classList.toggle('hidden', rows.length > 0);
+
+    root.querySelectorAll('[data-planner-attachment-open]').forEach(button => {
+      const open = async () => {
+        try {
+          await App.rpc('calendar.attachments.open', { id: Number(button.dataset.plannerAttachmentOpen) });
+        } catch (error) {
+          if (String(error?.message || '').includes('ATTACHMENT_OPEN_BLOCKED')) {
+            App.status(t('attachment.openBlocked'), 'error');
+          } else {
+            App.status(t('planner.attachmentOpenFailed', { error: error.message }), 'error');
+          }
+        }
+      };
+      button.addEventListener('click', open);
+      button.addEventListener('dblclick', event => { event.preventDefault(); open(); });
+    });
+
+    root.querySelectorAll('[data-planner-attachment-remove]').forEach(button => {
+      button.addEventListener('click', async () => {
+        const id = Number(button.dataset.plannerAttachmentRemove);
+        const item = state.editorAttachments.find(candidate => Number(candidate.id) === id);
+        if (!item || !window.confirm(t('planner.attachmentRemoveConfirm', { name: item.filename }))) return;
+        try {
+          await App.rpc('calendar.attachments.remove', { id });
+          state.editorAttachments = state.editorAttachments.filter(candidate => Number(candidate.id) !== id);
+          renderPlannerAttachments();
+          App.status(t('planner.attachmentRemoved'), 'success');
+        } catch (error) {
+          App.status(`${t('error')} : ${error.message}`, 'error');
+        }
+      });
+    });
+
+    root.querySelectorAll('[data-planner-pending-attachment-remove]').forEach(button => {
+      button.addEventListener('click', () => {
+        const index = Number(button.dataset.plannerPendingAttachmentRemove);
+        if (!Number.isInteger(index) || index < 0) return;
+        state.pendingAttachments.splice(index, 1);
+        renderPlannerAttachments();
+      });
+    });
+  }
+
+  function resetPlannerAttachments() {
+    state.editorAttachments = [];
+    state.pendingAttachments = [];
+    renderPlannerAttachments();
+  }
+
+  async function loadPlannerAttachments(eventId) {
+    const numericId = Number(eventId);
+    if (!(numericId > 0)) {
+      state.editorAttachments = [];
+      renderPlannerAttachments();
+      return;
+    }
+    try {
+      const rows = await App.rpc('calendar.attachments.list', { eventId: numericId }) || [];
+      if (Number(document.getElementById('planner-event-id')?.value || 0) !== numericId) return;
+      state.editorAttachments = rows;
+      renderPlannerAttachments();
+    } catch (error) {
+      App.status(`${t('error')} : ${error.message}`, 'error');
+    }
+  }
+
+  async function selectPlannerAttachments() {
+    try {
+      const result = await App.rpc('calendar.attachments.selectPaths', {
+        title: t('planner.attachmentSelect'),
+      });
+      const existing = new Set(state.pendingAttachments.map(item => String(item.path)));
+      for (const item of result?.items || []) {
+        if (!item?.path || existing.has(String(item.path))) continue;
+        existing.add(String(item.path));
+        state.pendingAttachments.push({
+          path: String(item.path),
+          name: String(item.name || ''),
+          size: Math.max(0, Number(item.size) || 0),
+        });
+      }
+      renderPlannerAttachments();
+    } catch (error) {
+      App.status(`${t('error')} : ${error.message}`, 'error');
+    }
+  }
+
   function closeEditor() {
     document.getElementById('planner-editor')?.classList.add('hidden');
     const error = document.getElementById('planner-form-error');
     if (error) error.textContent = '';
+    resetPlannerAttachments();
   }
 
   function setEditorAllDay(allDay) {
@@ -483,6 +622,7 @@
     }
     document.getElementById('planner-location').value = '';
     document.getElementById('planner-notes').value = '';
+    resetPlannerAttachments();
     document.getElementById('planner-form-error').textContent = '';
     document.getElementById('btn-planner-delete').classList.add('hidden');
     setEditorAllDay(false);
@@ -507,6 +647,10 @@
     document.getElementById('planner-end-time').value = timeValue(end);
     document.getElementById('planner-location').value = event.location || '';
     document.getElementById('planner-notes').value = event.notes || '';
+    state.pendingAttachments = [];
+    state.editorAttachments = [];
+    renderPlannerAttachments();
+    loadPlannerAttachments(event.id);
     document.getElementById('planner-form-error').textContent = '';
     document.getElementById('btn-planner-delete').classList.remove('hidden');
     setEditorAllDay(Boolean(event.allDay));
@@ -571,6 +715,21 @@
     try {
       const id = Number(document.getElementById('planner-event-id').value || 0) || null;
       const saved = await App.rpc('calendar.save', { id, event: editorPayload() });
+      document.getElementById('planner-event-id').value = String(saved.id);
+      if (state.pendingAttachments.length) {
+        try {
+          const result = await App.rpc('calendar.attachments.addPaths', {
+            eventId: saved.id,
+            paths: state.pendingAttachments.map(item => item.path),
+          });
+          state.pendingAttachments = [];
+          state.editorAttachments = result?.attachments || [];
+        } catch (attachmentError) {
+          document.getElementById('planner-editor-title').textContent = t('planner.editEvent');
+          renderPlannerAttachments();
+          throw new Error(t('planner.attachmentAddFailed', { error: attachmentError.message }));
+        }
+      }
       state.selected = startOfDay(new Date(saved.startAt));
       state.anchor = startOfDay(state.selected);
       closeEditor();
@@ -620,7 +779,7 @@
     const source = event.location ? `${calendarSource} · ${event.location}` : calendarSource;
     return `<button class="planner-main-event" type="button" data-planner-summary-event="${Number(event.id)}" style="--event-color:${esc(eventColor(event))}" title="${esc(event.title)}">
       <span class="planner-main-event-time">${esc(event.allDay ? t('planner.allDayShort') : formatTime(event.startAt))}</span>
-      <span class="planner-main-event-main"><strong>${eventCategoryIcon(event)}${esc(event.title)}</strong><small>${esc(event.categoryName ? `${event.categoryName} · ${source}` : source)}</small></span>
+      <span class="planner-main-event-main"><strong>${eventCategoryIcon(event)}${eventAttachmentIcon(event)}${esc(event.title)}</strong><small>${esc(event.categoryName ? `${event.categoryName} · ${source}` : source)}</small></span>
     </button>`;
   }
 
@@ -1101,6 +1260,7 @@
     document.getElementById('btn-planner-cancel')?.addEventListener('click', closeEditor);
     document.getElementById('btn-planner-save')?.addEventListener('click', saveEvent);
     document.getElementById('btn-planner-delete')?.addEventListener('click', deleteEvent);
+    document.getElementById('btn-planner-attachment-add')?.addEventListener('click', selectPlannerAttachments);
     document.getElementById('planner-all-day')?.addEventListener('change', event => setEditorAllDay(event.target.checked));
     document.getElementById('planner-start-date')?.addEventListener('change', () => syncEndConstraints(true));
     document.getElementById('planner-start-time')?.addEventListener('change', () => syncEndConstraints(true));

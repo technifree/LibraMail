@@ -27,9 +27,10 @@ const mailStore = require('./lib/mail_store');
 const masterPassword = require('./lib/master_password');
 const emlImport = require('./lib/eml_import');
 const appPaths = require('./lib/app_paths');
+const rpcSecurity = require('./lib/rpc_security');
 
 const PORT = 47800;
-const APP_VERSION = '0.4.8';
+const APP_VERSION = '0.5.0';
 const ROOT = path.resolve(__dirname, '..');
 
 // LibraMail 0.4.8 — séparation programme / données utilisateur.
@@ -44,6 +45,10 @@ const {
 } = appPaths.createAppPaths(ROOT);
 const ACCOUNTS_FILE = path.join(DATA, 'accounts.json');
 const CONFIG_FILE = path.join(DATA, 'config.json');
+
+// LibraMail 0.5.0 - protection RPC WebSocket local.
+const RPC_SESSION_TOKEN = rpcSecurity.createSessionToken();
+const CALENDAR_ATTACHMENTS_DIR = path.join(DATA, 'planner-attachments');
 const RETENTION_CHECK_MS = 6 * 60 * 60 * 1000;
 const OUTBOX_CHECK_MS = 30 * 1000;
 const CALENDAR_SUBSCRIPTION_CHECK_MS = 60 * 1000;
@@ -55,6 +60,7 @@ function isRuntimeDataFile(name) {
 
 fs.mkdirSync(STATE_ROOT, { recursive: true });
 fs.mkdirSync(DATA, { recursive: true });
+fs.mkdirSync(CALENDAR_ATTACHMENTS_DIR, { recursive: true });
 
 // LibraMail 0.4.8 — démarrage verrouillable par mot de passe principal.
 // masterPassword.init() ne lit aucun secret du trousseau système. Il inspecte
@@ -337,6 +343,7 @@ function initializeRuntimeState() {
   db.init(DATA);
   mailStore.init(DATA);
   outbox.init(db.db, DATA);
+  cleanupOrphanCalendarAttachmentFiles();
   loadRuntimeState();
   runtimeInitialized = true;
   return true;
@@ -382,7 +389,17 @@ function restartRuntimeAfterSecurityChange() {
 
 if (!masterPassword.isLocked()) initializeRuntimeState();
 
-const wss = new WebSocketServer({ host: '127.0.0.1', port: PORT });
+// LibraMail 0.5.0 - protection RPC WebSocket local :
+// - écoute loopback uniquement ;
+// - authentification par sous-protocole WebSocket éphémère ;
+// - contrôle d'Origin ;
+// - taille maximale des requêtes.
+const wss = new WebSocketServer({
+  host: '127.0.0.1',
+  port: PORT,
+  maxPayload: rpcSecurity.MAX_PAYLOAD_BYTES,
+  verifyClient: info => rpcSecurity.isClientAllowed(info, RPC_SESSION_TOKEN),
+});
 const sockets = new Set();
 const syncTimers = new Map();
 const activeSyncs = new Map();
@@ -448,6 +465,13 @@ async function ensureStartupStorageMigration() {
 }
 
 wss.on('listening', () => {
+  try {
+    rpcSecurity.publishSessionFile(STATE_ROOT, { token: RPC_SESSION_TOKEN, port: PORT });
+  } catch (error) {
+    console.error('[LibraMail] Impossible de publier la session RPC locale :', error.message);
+    shutdown();
+    return;
+  }
   serverReady = true;
   const locked = masterPassword.isLocked();
   console.log(
@@ -1600,6 +1624,7 @@ async function syncCalendarSubscription(id, { announce = true } = {}) {
       importNamespace: `sub-${subscription.id}`,
     });
     const result = db.syncCalendarSubscriptionEvents(subscription.id, parsed.events);
+    cleanupOrphanCalendarAttachmentFiles();
     let current = subscription;
     if (!subscription.name && parsed.calendarName) {
       current = db.saveCalendarSubscription({ ...subscription, name: parsed.calendarName }, subscription.id);
@@ -2087,6 +2112,152 @@ async function extractAttachmentForOpen(messageId, index) {
     filename,
     size: Number(attachment.size) || attachment.content?.length || 0,
   };
+}
+
+
+function publicCalendarAttachment(row) {
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    eventId: Number(row.eventId),
+    filename: String(row.filename || ''),
+    size: Math.max(0, Number(row.size) || 0),
+    createdAt: Number(row.createdAt) || 0,
+  };
+}
+
+function calendarAttachmentStoredPath(row) {
+  const eventId = Number(row?.eventId);
+  const storedName = path.basename(String(row?.storedName || ''));
+  if (!(eventId > 0) || !storedName) throw new Error('Pièce jointe de rendez-vous invalide');
+  const eventDir = path.join(CALENDAR_ATTACHMENTS_DIR, String(eventId));
+  const target = path.resolve(eventDir, storedName);
+  const allowedRoot = path.resolve(CALENDAR_ATTACHMENTS_DIR) + path.sep;
+  if (!target.startsWith(allowedRoot)) throw new Error('Chemin de pièce jointe invalide');
+  return target;
+}
+
+function cleanupCalendarEventAttachmentDirectory(eventId) {
+  const numericId = Number(eventId);
+  if (!(numericId > 0)) return;
+  const directory = path.join(CALENDAR_ATTACHMENTS_DIR, String(numericId));
+  try { fs.rmSync(directory, { recursive: true, force: true }); } catch {}
+}
+
+function cleanupOrphanCalendarAttachmentFiles() {
+  if (!fs.existsSync(CALENDAR_ATTACHMENTS_DIR) || !db.db) return;
+  const referenced = new Set();
+  for (const row of db.listAllCalendarAttachments()) {
+    try { referenced.add(calendarAttachmentStoredPath(row)); } catch {}
+  }
+
+  for (const entry of fs.readdirSync(CALENDAR_ATTACHMENTS_DIR, { withFileTypes: true })) {
+    const absolute = path.join(CALENDAR_ATTACHMENTS_DIR, entry.name);
+    if (!entry.isDirectory()) {
+      try { fs.rmSync(absolute, { force: true }); } catch {}
+      continue;
+    }
+
+    for (const child of fs.readdirSync(absolute, { withFileTypes: true })) {
+      const childPath = path.resolve(absolute, child.name);
+      if (!child.isFile() || !referenced.has(childPath)) {
+        try { fs.rmSync(childPath, { recursive: true, force: true }); } catch {}
+      }
+    }
+
+    try {
+      if (!fs.readdirSync(absolute).length) fs.rmdirSync(absolute);
+    } catch {}
+  }
+}
+
+function calendarAttachmentSelectionInfo(sourcePath) {
+  const resolved = path.resolve(String(sourcePath || ''));
+  const stat = fs.statSync(resolved);
+  if (!stat.isFile()) throw new Error('Le chemin sélectionné n’est pas un fichier');
+  return {
+    path: resolved,
+    name: safeTemporaryAttachmentName(path.basename(resolved)),
+    size: Number(stat.size) || 0,
+  };
+}
+
+function copyCalendarAttachmentFiles(eventId, sourcePaths = []) {
+  const numericEventId = Number(eventId);
+  if (!(numericEventId > 0) || !db.getCalendarEvent(numericEventId)) {
+    throw new Error('Rendez-vous introuvable');
+  }
+
+  const uniquePaths = [...new Set((Array.isArray(sourcePaths) ? sourcePaths : [])
+    .map(value => String(value || '').trim())
+    .filter(Boolean))];
+  if (!uniquePaths.length) return db.listCalendarAttachments(numericEventId).map(publicCalendarAttachment);
+
+  const eventDir = path.join(CALENDAR_ATTACHMENTS_DIR, String(numericEventId));
+  fs.mkdirSync(eventDir, { recursive: true });
+  const copied = [];
+
+  try {
+    for (const sourcePath of uniquePaths) {
+      const source = calendarAttachmentSelectionInfo(sourcePath);
+      const originalExt = path.extname(source.name).slice(0, 24);
+      const storedName = `${crypto.randomUUID()}${originalExt}`;
+      const target = path.join(eventDir, storedName);
+      fs.copyFileSync(source.path, target, fs.constants.COPYFILE_EXCL);
+      copied.push({
+        path: target,
+        filename: source.name,
+        storedName,
+        size: source.size,
+      });
+    }
+
+    const rows = db.addCalendarAttachments(numericEventId, copied.map(item => ({
+      filename: item.filename,
+      storedName: item.storedName,
+      size: item.size,
+    })));
+    return rows.map(publicCalendarAttachment);
+  } catch (error) {
+    for (const item of copied) {
+      try { fs.rmSync(item.path, { force: true }); } catch {}
+    }
+    throw error;
+  }
+}
+
+async function openCalendarAttachment(attachmentId) {
+  const row = db.getCalendarAttachment(attachmentId);
+  if (!row) throw new Error('Pièce jointe introuvable');
+  if (attachmentOpenIsBlocked(row.filename)) throw new Error('ATTACHMENT_OPEN_BLOCKED');
+
+  const source = calendarAttachmentStoredPath(row);
+  if (!fs.existsSync(source)) throw new Error('Fichier de pièce jointe introuvable');
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'libramail-planner-attachment-'));
+  const target = path.join(tempDir, safeTemporaryAttachmentName(row.filename));
+  fs.copyFileSync(source, target, fs.constants.COPYFILE_EXCL);
+
+  const cleanup = setTimeout(() => {
+    try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch {}
+  }, 6 * 60 * 60 * 1000);
+  cleanup.unref?.();
+
+  await openLocalFileWithSystem(target);
+  return publicCalendarAttachment(row);
+}
+
+function removeCalendarAttachmentFile(attachmentId) {
+  const row = db.getCalendarAttachment(attachmentId);
+  if (!row) return false;
+  const removed = db.removeCalendarAttachment(row.id);
+  if (!removed) return false;
+  try { fs.rmSync(calendarAttachmentStoredPath(row), { force: true }); } catch {}
+  const eventDir = path.join(CALENDAR_ATTACHMENTS_DIR, String(row.eventId));
+  try {
+    if (fs.existsSync(eventDir) && !fs.readdirSync(eventDir).length) fs.rmdirSync(eventDir);
+  } catch {}
+  return true;
 }
 
 async function checkLatestRelease() {
@@ -3131,8 +3302,40 @@ const methods = {
     return saved;
   },
   'calendar.remove': async ({ id } = {}) => {
-    const removed = db.removeCalendarEvent(id);
-    if (removed) broadcast('calendar.changed', { action: 'removed', id: Number(id) });
+    const numericId = Number(id);
+    const removed = db.removeCalendarEvent(numericId);
+    if (removed) {
+      cleanupCalendarEventAttachmentDirectory(numericId);
+      broadcast('calendar.changed', { action: 'removed', id: numericId });
+    }
+    return { removed };
+  },
+  'calendar.attachments.selectPaths': async ({ title = '' } = {}) => {
+    const paths = await nativeDialog.showFilesDialog({
+      title: String(title || 'Choisir des fichiers à joindre au rendez-vous'),
+    });
+    const items = [];
+    for (const sourcePath of paths || []) {
+      try { items.push(calendarAttachmentSelectionInfo(sourcePath)); }
+      catch {}
+    }
+    return { items };
+  },
+  'calendar.attachments.list': async ({ eventId } = {}) =>
+    db.listCalendarAttachments(eventId).map(publicCalendarAttachment),
+  'calendar.attachments.addPaths': async ({ eventId, paths = [] } = {}) => {
+    const attachments = copyCalendarAttachmentFiles(eventId, paths);
+    broadcast('calendar.changed', { action: 'attachments-updated', id: Number(eventId) });
+    return { attachments };
+  },
+  'calendar.attachments.open': async ({ id } = {}) =>
+    openCalendarAttachment(id),
+  'calendar.attachments.remove': async ({ id } = {}) => {
+    const row = db.getCalendarAttachment(id);
+    const removed = removeCalendarAttachmentFile(id);
+    if (removed && row) {
+      broadcast('calendar.changed', { action: 'attachments-updated', id: Number(row.eventId) });
+    }
     return { removed };
   },
   'calendar.categories.list': async ({ activeOnly = false, ensureDefaults = false, locale = 'fr' } = {}) => {
@@ -3257,6 +3460,7 @@ const methods = {
   'calendar.subscriptions.remove': async ({ id } = {}) => {
     const result = db.removeCalendarSubscription(id);
     if (result.removed) {
+      cleanupOrphanCalendarAttachmentFiles();
       broadcast('calendar.changed', { action: 'subscription-removed', id: Number(id), removed: result.removedEvents });
       broadcast('calendar.subscriptions.changed', { action: 'removed', id: Number(id) });
     }
@@ -3473,6 +3677,7 @@ wss.on('connection', socket => {
 function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
+  rpcSecurity.removeSessionFile(STATE_ROOT, RPC_SESSION_TOKEN);
   stopAccountRuntime();
   try { mailStore.close(); } catch {}
   try { db.close(); } catch {}
@@ -3523,4 +3728,5 @@ startupMigrationPromise.then(() => {
 
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+process.on('exit', () => rpcSecurity.removeSessionFile(STATE_ROOT, RPC_SESSION_TOKEN));
 

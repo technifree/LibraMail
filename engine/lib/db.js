@@ -530,6 +530,17 @@ function init(dataDir) {
   CREATE INDEX IF NOT EXISTS idx_calendar_events_range ON calendar_events(start_at, end_at);
   CREATE INDEX IF NOT EXISTS idx_calendar_events_account ON calendar_events(account_id, start_at);
 
+  CREATE TABLE IF NOT EXISTS calendar_event_attachments (
+    id INTEGER PRIMARY KEY,
+    event_id INTEGER NOT NULL REFERENCES calendar_events(id) ON DELETE CASCADE,
+    filename TEXT NOT NULL,
+    stored_name TEXT NOT NULL,
+    size INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_calendar_event_attachments_event
+    ON calendar_event_attachments(event_id, created_at, id);
+
   CREATE TABLE IF NOT EXISTS calendar_mail_imports (
     message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
     attachment_index INTEGER NOT NULL,
@@ -2471,6 +2482,7 @@ function calendarEventWithCategoryRow(row) {
     categoryActive: row.category_active === null || row.category_active === undefined
       ? null
       : Boolean(row.category_active),
+    attachmentCount: Math.max(0, Number(row.attachment_count) || 0),
   };
 }
 
@@ -2489,7 +2501,10 @@ function listCalendarEvents({ from = null, to = null, accountId = null, limit = 
            COALESCE(cc.name, '') AS category_name,
            COALESCE(cc.color, '') AS category_color,
            COALESCE(cc.icon, '') AS category_icon,
-           cc.active AS category_active
+           cc.active AS category_active,
+           (SELECT COUNT(*)
+              FROM calendar_event_attachments cea
+             WHERE cea.event_id = ce.id) AS attachment_count
       FROM calendar_events ce
       LEFT JOIN calendar_subscriptions cs ON cs.id = ce.subscription_id
       LEFT JOIN calendar_categories cc ON cc.id = ce.category_id
@@ -2505,7 +2520,10 @@ function getCalendarEvent(id) {
            COALESCE(cc.name, '') AS category_name,
            COALESCE(cc.color, '') AS category_color,
            COALESCE(cc.icon, '') AS category_icon,
-           cc.active AS category_active
+           cc.active AS category_active,
+           (SELECT COUNT(*)
+              FROM calendar_event_attachments cea
+             WHERE cea.event_id = ce.id) AS attachment_count
       FROM calendar_events ce
       LEFT JOIN calendar_subscriptions cs ON cs.id = ce.subscription_id
       LEFT JOIN calendar_categories cc ON cc.id = ce.category_id
@@ -2755,6 +2773,76 @@ function syncCalendarSubscriptionEvents(subscriptionId, items = []) {
   return { created, updated, unchanged, skipped, removed, total: created + updated + unchanged };
 }
 
+
+function calendarAttachmentRow(row) {
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    eventId: Number(row.event_id),
+    filename: String(row.filename || ''),
+    storedName: String(row.stored_name || ''),
+    size: Math.max(0, Number(row.size) || 0),
+    createdAt: Number(row.created_at) || 0,
+  };
+}
+
+function listCalendarAttachments(eventId) {
+  const numericEventId = Number(eventId);
+  if (!(numericEventId > 0)) return [];
+  return db.prepare(`
+    SELECT * FROM calendar_event_attachments
+     WHERE event_id=?
+     ORDER BY created_at ASC, id ASC
+  `).all(numericEventId).map(calendarAttachmentRow);
+}
+
+function listAllCalendarAttachments() {
+  return db.prepare(`
+    SELECT * FROM calendar_event_attachments
+    ORDER BY event_id ASC, id ASC
+  `).all().map(calendarAttachmentRow);
+}
+
+function getCalendarAttachment(id) {
+  return calendarAttachmentRow(
+    db.prepare('SELECT * FROM calendar_event_attachments WHERE id=?').get(Number(id))
+  );
+}
+
+function addCalendarAttachments(eventId, items = []) {
+  const numericEventId = Number(eventId);
+  if (!(numericEventId > 0) || !getCalendarEvent(numericEventId)) {
+    throw new Error('Rendez-vous introuvable');
+  }
+
+  const rows = (Array.isArray(items) ? items : []).map(item => ({
+    filename: String(item?.filename || '').trim().slice(0, 240),
+    storedName: String(item?.storedName || '').trim().slice(0, 260),
+    size: Math.max(0, Math.round(Number(item?.size) || 0)),
+  })).filter(item => item.filename && item.storedName);
+
+  if (!rows.length) return listCalendarAttachments(numericEventId);
+
+  const insert = db.prepare(`
+    INSERT INTO calendar_event_attachments
+      (event_id, filename, stored_name, size, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  const now = Date.now();
+  db.transaction(values => {
+    for (const item of values) {
+      insert.run(numericEventId, item.filename, item.storedName, item.size, now);
+    }
+  })(rows);
+
+  return listCalendarAttachments(numericEventId);
+}
+
+function removeCalendarAttachment(id) {
+  return db.prepare('DELETE FROM calendar_event_attachments WHERE id=?')
+    .run(Number(id)).changes > 0;
+}
+
 function removeCalendarSubscription(id) {
   const subId = Number(id);
   const transaction = db.transaction(() => {
@@ -2766,7 +2854,11 @@ function removeCalendarSubscription(id) {
 }
 
 function removeCalendarEvent(id) {
-  return db.prepare('DELETE FROM calendar_events WHERE id=?').run(Number(id)).changes > 0;
+  const numericId = Number(id);
+  return db.transaction(eventId => {
+    db.prepare('DELETE FROM calendar_event_attachments WHERE event_id=?').run(eventId);
+    return db.prepare('DELETE FROM calendar_events WHERE id=?').run(eventId).changes > 0;
+  })(numericId);
 }
 
 module.exports = {
@@ -2872,6 +2964,11 @@ module.exports = {
   getCalendarMailImport,
   markCalendarMailImport,
   removeCalendarEvent,
+  listCalendarAttachments,
+  listAllCalendarAttachments,
+  getCalendarAttachment,
+  addCalendarAttachments,
+  removeCalendarAttachment,
   listCalendarSubscriptions,
   getCalendarSubscription,
   saveCalendarSubscription,

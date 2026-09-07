@@ -1,3 +1,55 @@
+# LibraMail 0.5.0 - 2026-09-07
+
+LibraMail 0.5.0 améliore la fiabilité du courrier, enrichit fortement le planning, réorganise les paramètres et renforce la sécurité de l’API locale utilisée entre l’interface et le moteur.
+
+## Sécurité locale
+
+- Authentification de session pour l’API WebSocket locale du moteur LibraMail.
+- Jeton éphémère renouvelé à chaque démarrage et conservé hors des données sauvegardées.
+- Contrôle des origines et limitation stricte aux connexions locales autorisées.
+- Limitation de la taille des requêtes WebSocket et refus des connexions non authentifiées.
+- Améliorations de l’ergonomie et du comportement du mot de passe principal et du verrouillage.
+
+## Planning
+
+- Ajout de catégories de rendez-vous avec couleur et icône personnalisables.
+- Gestion des pièces jointes dans les rendez-vous, stockées localement et intégrées aux sauvegardes complètes.
+- Indicateur de pièce jointe dans les différentes vues du planning.
+- Amélioration de l’affichage et de l’organisation des événements.
+
+## Résumé au démarrage
+
+- Nouveau résumé de la journée affichable au lancement de LibraMail.
+- Affichage des messages non lus par compte, des rendez-vous du jour et de l’état de synchronisation.
+- Mise à jour du résumé pendant la relève des comptes.
+- Option activée par défaut, désactivable directement depuis le résumé ou dans les paramètres.
+
+## Courrier et stabilité
+
+- Renforcement de la stabilité des synchronisations IMAP et du cycle de relève.
+- Indicateur de chargement plus clair pendant les opérations longues.
+- Sélection globale étendue à l’ensemble de la vue courante, et pas uniquement aux lignes déjà chargées.
+- Amélioration du classement de messages depuis la corbeille vers les dossiers locaux.
+- Nettoyage du transport SMTP et de plusieurs chemins d’erreur associés.
+
+## Paramètres et interface
+
+- Réorganisation des paramètres en sections dédiées : Général, Courrier, Indésirables, Planning, Sécurité et Données & sauvegarde.
+- Nouvelle section de réglages pour les indésirables.
+- Intégration des catégories de planning dans les paramètres.
+- Harmonisation de plusieurs messages, états de chargement et comportements d’interface.
+
+## Linux et Windows
+
+- Publication des archives portables Linux x86_64 et du paquet Debian amd64.
+- Publication du paquet portable Windows x86_64.
+- Les constructions Linux et Windows sont vérifiées séparément par GitHub Actions avant la publication de la release.
+
+## Tests
+
+- Ajout de tests ciblés pour les pièces jointes du planning, le résumé de démarrage et la sécurisation de l’API WebSocket locale.
+- Maintien des contrôles de syntaxe JavaScript, JSON, sécurité du dépôt et cohérence des numéros de version.
+
 # LibraMail 0.4.8 - 2026-08-29
 
 LibraMail 0.4.8 renforce la sécurité locale, ajoute une action globale de lecture et introduit un paquet Debian natif en complément des archives portables.

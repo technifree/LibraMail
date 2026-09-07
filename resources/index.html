@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LibraMail 0.4.8</title>
+  <title>LibraMail 0.5.0</title>
   <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
   <link rel="stylesheet" href="themes/dark.css">
   <link rel="stylesheet" href="themes/light.css">
@@ -112,13 +112,13 @@
 <div id="app" data-layout="vertical">
 
   <div id="topbar">
-    <button id="brand" class="brand-button" type="button" title="LibraMail 0.4.8" data-i18n-title="about.open">
+    <button id="brand" class="brand-button" type="button" title="LibraMail 0.5.0" data-i18n-title="about.open">
       <span class="brand-logo-box" aria-hidden="true">
         <img class="brand-logo brand-logo-light" src="assets/logo-light.png" alt="">
         <img class="brand-logo brand-logo-dark" src="assets/logo-dark.png" alt="">
       </span>
       <span class="brand-name">LibraMail</span>
-      <span class="version-badge" id="app-version">v0.4.8</span>
+      <span class="version-badge" id="app-version">v0.5.0</span>
     </button>
     <button class="btn primary" id="btn-compose">
       <i class="fa-solid fa-pen"></i><span data-i18n="compose"></span>
@@ -694,6 +694,54 @@
   </div>
 </div>
 
+<div class="modal-veil" id="startup-summary-modal" aria-hidden="true">
+  <div class="modal startup-summary-modal-box" role="dialog" aria-modal="true" aria-labelledby="startup-summary-heading-title">
+    <header class="startup-summary-windowbar">
+      <span class="startup-summary-window-spacer" aria-hidden="true"></span>
+      <button class="iconbtn" id="btn-close-startup-summary" type="button" data-i18n-title="close"><i class="fa-solid fa-xmark"></i></button>
+    </header>
+    <div class="body startup-summary-body">
+      <div class="startup-summary-heading">
+        <div>
+          <strong id="startup-summary-heading-title" data-i18n="startupSummary.greeting"></strong>
+          <span id="startup-summary-date"></span>
+        </div>
+        <span class="startup-summary-live"><i class="fa-solid fa-circle"></i><span data-i18n="startupSummary.live"></span></span>
+      </div>
+
+      <div class="startup-summary-grid">
+        <section class="startup-summary-card">
+          <div class="startup-summary-card-title">
+            <span class="startup-summary-card-icon"><i class="fa-regular fa-envelope"></i></span>
+            <div><strong data-i18n="startupSummary.mail"></strong><small id="startup-summary-unread-total" data-i18n="startupSummary.loading"></small></div>
+          </div>
+          <div id="startup-summary-accounts" class="startup-summary-list"></div>
+        </section>
+
+        <section class="startup-summary-card">
+          <div class="startup-summary-card-title">
+            <span class="startup-summary-card-icon"><i class="fa-regular fa-calendar-check"></i></span>
+            <div><strong data-i18n="startupSummary.today"></strong><small id="startup-summary-event-count" data-i18n="startupSummary.loading"></small></div>
+          </div>
+          <div id="startup-summary-events" class="startup-summary-list"></div>
+        </section>
+
+        <section class="startup-summary-card startup-summary-sync-card">
+          <div class="startup-summary-card-title">
+            <span class="startup-summary-card-icon"><i class="fa-solid fa-arrows-rotate"></i></span>
+            <div><strong data-i18n="startupSummary.sync"></strong><small id="startup-summary-sync-progress" data-i18n="startupSummary.syncWaiting"></small></div>
+          </div>
+          <div id="startup-summary-sync-accounts" class="startup-summary-sync-list"></div>
+        </section>
+      </div>
+    </div>
+    <footer class="startup-summary-footer">
+      <label class="startup-summary-disable"><input id="startup-summary-dont-show" type="checkbox"><span data-i18n="startupSummary.dontShowAgain"></span></label>
+      <button class="btn primary" id="btn-enter-libramail" type="button"><i class="fa-solid fa-arrow-right"></i><span data-i18n="startupSummary.enterApp"></span></button>
+    </footer>
+  </div>
+</div>
+
 <div class="modal-veil" id="settings-modal">
   <div class="modal settings-modal-box">
     <header><span data-i18n="settings"></span>
@@ -752,6 +800,14 @@
             <option value="vertical" data-i18n="settings.layout.vertical"></option>
             <option value="horizontal" data-i18n="settings.layout.horizontal"></option>
           </select></div>
+        <div class="field startup-summary-setting">
+          <label for="set-startup-summary" data-i18n="startupSummary.setting"></label>
+          <select id="set-startup-summary">
+            <option value="1" data-i18n="settings.enabled"></option>
+            <option value="0" data-i18n="settings.disabled"></option>
+          </select>
+          <div class="field-hint" data-i18n="startupSummary.settingHint"></div>
+        </div>
         </div>
       </section>
 
@@ -1423,6 +1479,14 @@
           </div>
           <div class="field"><label for="planner-location" data-i18n="planner.location"></label><input id="planner-location" type="text" maxlength="500" data-i18n-ph="planner.locationPlaceholder"></div>
           <div class="field"><label for="planner-notes" data-i18n="planner.notes"></label><textarea id="planner-notes" rows="5" data-i18n-ph="planner.notesPlaceholder"></textarea></div>
+          <div class="planner-attachments-section">
+            <div class="planner-attachments-heading">
+              <span><i class="fa-solid fa-paperclip"></i><strong data-i18n="planner.attachments"></strong></span>
+              <button class="btn compact" id="btn-planner-attachment-add" type="button"><i class="fa-solid fa-plus"></i><span data-i18n="planner.attachmentAdd"></span></button>
+            </div>
+            <div id="planner-attachments-list" class="planner-attachments-list"></div>
+            <div id="planner-attachments-empty" class="planner-attachments-empty" data-i18n="planner.attachmentEmpty"></div>
+          </div>
           <div id="planner-form-error" class="planner-form-error" role="alert"></div>
           <div class="planner-editor-actions">
             <button class="btn danger hidden" id="btn-planner-delete" type="button"><i class="fa-solid fa-trash"></i><span data-i18n="planner.delete"></span></button><span></span>
