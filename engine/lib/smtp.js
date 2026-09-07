@@ -6,6 +6,7 @@
  */
 'use strict';
 const crypto = require('crypto');
+const fs = require('fs');
 const nodemailer = require('nodemailer');
 const MailComposer = require('nodemailer/lib/mail-composer');
 
@@ -28,6 +29,53 @@ function normalizeAttachments(attachments) {
         filename: attachment.filename,
         content: Buffer.from(attachment.content || '', 'base64'),
       });
+}
+
+
+function attachmentMetrics(attachments) {
+  let count = 0;
+  let bytes = 0;
+
+  for (const attachment of attachments || []) {
+    count++;
+    try {
+      if (attachment?.path) {
+        bytes += Number(fs.statSync(attachment.path).size) || 0;
+      } else if (attachment?.content) {
+        bytes += Buffer.from(attachment.content || '', 'base64').length;
+      }
+    } catch {
+      // Le diagnostic ne doit jamais interrompre ni modifier l'envoi.
+    }
+  }
+
+  return { count, bytes };
+}
+
+function smtpDiagnostic(account, mail, error, elapsedMs) {
+  const metrics = attachmentMetrics(mail?.attachments);
+  return [
+    `platform=${process.platform}/${process.arch}`,
+    `host=${String(account?.smtp?.host || '(unknown)')}`,
+    `port=${Number(account?.smtp?.port) || 465}`,
+    `secure=${account?.smtp?.secure !== false}`,
+    `attachments=${metrics.count}`,
+    `attachmentBytes=${metrics.bytes}`,
+    `elapsedMs=${Math.max(0, Number(elapsedMs) || 0)}`,
+    `code=${String(error?.code || '')}`,
+    `syscall=${String(error?.syscall || '')}`,
+    `command=${String(error?.command || '')}`,
+    `responseCode=${String(error?.responseCode || '')}`,
+  ].join(' ');
+}
+
+function closeTransport(transport) {
+  if (!transport || typeof transport.close !== 'function') return;
+  try {
+    transport.close();
+  } catch (error) {
+    console.warn(`[LibraMail][SMTP] Fermeture transport impossible : ${error.message}`);
+  }
 }
 
 function createMessage(account, mail) {
@@ -70,23 +118,43 @@ function createMessage(account, mail) {
 async function send(account, mail) {
   const message = createMessage(account, mail);
   const transport = transporter(account);
-  const info = await transport.sendMail(message);
+  const startedAt = Date.now();
 
-  // La copie du dossier Envoyés ne doit pas exposer l'en-tête Bcc à d'autres
-  // destinataires. Elle reste néanmoins une copie complète du contenu envoyé.
-  const sentCopy = { ...message, bcc: undefined, dsn: undefined };
-  const raw = await new MailComposer(sentCopy).compile().build();
+  try {
+    const info = await transport.sendMail(message);
 
-  return {
-    messageId: info.messageId || message.messageId,
-    accepted: info.accepted,
-    rejected: info.rejected,
-    raw,
-  };
+    // La copie du dossier Envoyés ne doit pas exposer l'en-tête Bcc à d'autres
+    // destinataires. Elle reste néanmoins une copie complète du contenu envoyé.
+    const sentCopy = { ...message, bcc: undefined, dsn: undefined };
+    const raw = await new MailComposer(sentCopy).compile().build();
+
+    return {
+      messageId: info.messageId || message.messageId,
+      accepted: info.accepted,
+      rejected: info.rejected,
+      raw,
+    };
+  } catch (error) {
+    // Pas de retry automatique : après une coupure pendant DATA, le serveur
+    // peut avoir accepté le message et une relance risquerait un doublon.
+    console.error(
+      `[LibraMail][SMTP] Échec envoi ${smtpDiagnostic(account, mail, error, Date.now() - startedAt)}`
+    );
+    throw error;
+  } finally {
+    // Notamment sous Windows, ne jamais laisser un transport/socket SMTP
+    // survivre à un ECONNRESET ou à une autre erreur d'écriture.
+    closeTransport(transport);
+  }
 }
 
 async function verify(account) {
-  return transporter(account).verify();
+  const transport = transporter(account);
+  try {
+    return await transport.verify();
+  } finally {
+    closeTransport(transport);
+  }
 }
 
 module.exports = { send, verify };
