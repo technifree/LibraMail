@@ -698,8 +698,17 @@
   <div class="modal settings-modal-box">
     <header><span data-i18n="settings"></span>
       <button class="iconbtn" data-close><i class="fa-solid fa-xmark"></i></button></header>
-    <div class="body">
-      <div class="grid2">
+    <div class="settings-tabs" role="tablist" aria-label="Paramètres">
+      <button class="settings-tab-button active" id="settings-tab-general" type="button" role="tab" aria-selected="true" data-settings-tab="general"><i class="fa-solid fa-sliders"></i><span data-i18n="settings.tab.general"></span></button>
+      <button class="settings-tab-button" id="settings-tab-mail" type="button" role="tab" aria-selected="false" data-settings-tab="mail"><i class="fa-regular fa-envelope"></i><span data-i18n="settings.tab.mail"></span></button>
+      <button class="settings-tab-button" id="settings-tab-spam" type="button" role="tab" aria-selected="false" data-settings-tab="spam"><i class="fa-solid fa-shield-virus"></i><span data-i18n="settings.tab.spam"></span></button>
+      <button class="settings-tab-button" id="settings-tab-planning" type="button" role="tab" aria-selected="false" data-settings-tab="planning"><i class="fa-solid fa-calendar-days"></i><span data-i18n="settings.tab.planning"></span></button>
+      <button class="settings-tab-button" id="settings-tab-security" type="button" role="tab" aria-selected="false" data-settings-tab="security"><i class="fa-solid fa-shield-halved"></i><span data-i18n="settings.tab.security"></span></button>
+      <button class="settings-tab-button" id="settings-tab-data" type="button" role="tab" aria-selected="false" data-settings-tab="data"><i class="fa-solid fa-box-archive"></i><span data-i18n="settings.tab.data"></span></button>
+    </div>
+    <div class="body settings-body">
+      <section class="settings-tab-panel" role="tabpanel" data-settings-panel="general" aria-labelledby="settings-tab-general">
+        <div class="grid2">
         <div class="field"><label data-i18n="settings.theme"></label>
           <select id="set-theme">
             <option value="dark" data-i18n="settings.theme.dark"></option>
@@ -743,6 +752,11 @@
             <option value="vertical" data-i18n="settings.layout.vertical"></option>
             <option value="horizontal" data-i18n="settings.layout.horizontal"></option>
           </select></div>
+        </div>
+      </section>
+
+      <section class="settings-tab-panel hidden" role="tabpanel" data-settings-panel="mail" aria-labelledby="settings-tab-mail">
+        <div class="grid2">
         <div class="field"><label data-i18n="settings.blockremote"></label>
           <select id="set-blockremote"><option value="1">✓</option><option value="0">✗</option></select></div>
         <div class="field"><label data-i18n="settings.conversations"></label>
@@ -756,9 +770,18 @@
             <option value="0" data-i18n="settings.disabled"></option>
           </select></div>
         <div class="field"><label data-i18n="account.default"></label><select id="set-default-account"></select></div>
-      </div>
+        </div>
+      </section>
 
+      <section class="settings-tab-panel hidden" role="tabpanel" data-settings-panel="planning" aria-labelledby="settings-tab-planning">
+        <div class="settings-planning-placeholder">
+          <i class="fa-solid fa-calendar-days"></i>
+          <strong data-i18n="settings.tab.planning"></strong>
+          <p data-i18n="settings.planningIntro"></p>
+        </div>
+      </section>
 
+      <section class="settings-tab-panel hidden" role="tabpanel" data-settings-panel="security" aria-labelledby="settings-tab-security">
       <div class="settings-section-title">
         <i class="fa-solid fa-shield-halved"></i>
         <span data-i18n="security.sectionTitle"></span>
@@ -778,7 +801,9 @@
         </div>
         <div id="security-settings-status" class="security-settings-status" aria-live="polite"></div>
       </div>
+      </section>
 
+      <section class="settings-tab-panel hidden" role="tabpanel" data-settings-panel="mail" aria-labelledby="settings-tab-mail">
       <div class="settings-section-title">
         <i class="fa-regular fa-envelope-open"></i>
         <span data-i18n="settings.reading"></span>
@@ -869,7 +894,9 @@
       </div>
       <div id="sync-account-list"></div>
       <div class="field-hint" data-i18n="settings.syncDisabledHint"></div>
+      </section>
 
+      <section class="settings-tab-panel hidden" role="tabpanel" data-settings-panel="spam" aria-labelledby="settings-tab-spam">
       <div class="settings-section-title">
         <i class="fa-solid fa-shield-virus"></i>
         <span data-i18n="settings.spamAndTrash"></span>
@@ -913,6 +940,9 @@
         </details>
       </div>
 
+      </section>
+
+      <section class="settings-tab-panel hidden" role="tabpanel" data-settings-panel="data" aria-labelledby="settings-tab-data">
       <div class="settings-section-title">
         <i class="fa-solid fa-box-archive"></i>
         <span data-i18n="backup.sectionTitle"></span>
@@ -974,6 +1004,7 @@
         </div>
         <div id="backup-operation-status" class="backup-operation-status" aria-live="polite"></div>
       </div>
+      </section>
     </div>
     <footer><button class="btn primary" data-close data-i18n="close"></button></footer>
   </div>

@@ -4609,3 +4609,108 @@ body.reader-modal-active { overflow: hidden; }
   font-size: 12px;
   font-weight: 600;
 }
+
+/* LibraMail 0.5.0 - Parametres organises en onglets */
+.settings-modal-box {
+  width: min(940px, 96vw);
+  height: min(820px, 92vh);
+  overflow: hidden;
+}
+.settings-modal-box > header,
+.settings-modal-box > footer {
+  flex: none;
+}
+.settings-modal-box > .settings-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.settings-tabs {
+  flex: none;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  margin: 0;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+.settings-tab-button {
+  flex: none;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 6px 11px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--fg-muted);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.settings-tab-button:hover {
+  color: var(--fg-strong);
+  background: var(--bg-hover);
+}
+.settings-tab-button.active {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+  background: var(--accent-soft);
+}
+.settings-tab-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.settings-tab-panel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+.settings-tab-panel > .settings-section-title:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.settings-planning-placeholder {
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 28px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+  color: var(--fg-muted);
+  background: var(--bg-panel-2);
+  text-align: center;
+}
+.settings-planning-placeholder > i {
+  font-size: 34px;
+  color: var(--accent);
+}
+.settings-planning-placeholder > strong {
+  color: var(--fg-strong);
+  font-size: 15px;
+}
+.settings-planning-placeholder > p {
+  max-width: 520px;
+  margin: 0;
+  line-height: 1.5;
+}
+@media (max-width: 760px) {
+  .settings-modal-box {
+    width: min(96vw, 940px);
+    height: min(94vh, 820px);
+  }
+  .settings-tabs {
+    padding-inline: 12px;
+  }
+  .settings-tab-button span {
+    font-size: 11.5px;
+  }
+}

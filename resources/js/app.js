@@ -8671,6 +8671,49 @@ const App = (() => {
   }
 
   // ---------- Paramètres ----------
+
+  function activateSettingsTab(name = 'general') {
+    const allowed = ['general', 'mail', 'spam', 'planning', 'security', 'data'];
+    const safeName = allowed.includes(String(name || '')) ? String(name) : 'general';
+    activateSettingsTab.current = safeName;
+
+    document.querySelectorAll('[data-settings-tab]').forEach(button => {
+      const active = button.dataset.settingsTab === safeName;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-selected', String(active));
+      button.tabIndex = active ? 0 : -1;
+    });
+
+    document.querySelectorAll('[data-settings-panel]').forEach(panel => {
+      panel.classList.toggle('hidden', panel.dataset.settingsPanel !== safeName);
+    });
+  }
+
+  function wireSettingsTabs() {
+    const buttons = [...document.querySelectorAll('[data-settings-tab]')];
+    buttons.forEach((button, index) => {
+      button.addEventListener('click', () => activateSettingsTab(button.dataset.settingsTab));
+      button.addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+
+        let nextIndex = index;
+        if (event.key === 'Home') nextIndex = 0;
+        else if (event.key === 'End') nextIndex = buttons.length - 1;
+        else {
+          const direction = event.key === 'ArrowRight' ? 1 : -1;
+          nextIndex = (index + direction + buttons.length) % buttons.length;
+        }
+
+        const next = buttons[nextIndex];
+        if (!next) return;
+        activateSettingsTab(next.dataset.settingsTab);
+        next.focus();
+      });
+    });
+    activateSettingsTab('general');
+  }
+
   function openSettings() {
     document.getElementById('set-theme').value = config.theme || 'dark';
     document.getElementById('set-locale').value = config.locale || 'fr';
@@ -8715,6 +8758,8 @@ const App = (() => {
         }
       };
     });
+
+    activateSettingsTab(activateSettingsTab.current || 'general');
 
     const retentionList = document.getElementById('spam-retention-account-list');
     retentionList.innerHTML = accounts.length ? accounts.map(account => `
@@ -9354,6 +9399,7 @@ const App = (() => {
     });
     document.getElementById('contacts-group-filter').onchange = () => loadContacts().catch(() => {});
     document.getElementById('btn-settings').onclick = openSettings;
+    wireSettingsTabs();
     document.getElementById('btn-lock-app')?.addEventListener('click', lockLibraMail);
     document.getElementById('btn-security-lock-settings')?.addEventListener('click', lockLibraMail);
     document.getElementById('btn-security-enable')?.addEventListener('click', () => openSecurityPasswordDialog('enable'));
