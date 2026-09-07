@@ -947,5 +947,9 @@
   "status.markViewReadBusy": "Marquage de tous les messages de cette vue comme lus…",
   "status.markViewReadDone": "{count} message(s) marqué(s) comme lu(s).",
   "status.markViewReadNone": "Aucun message non lu dans cette vue.",
-  "status.markViewReadPartial": "{count} message(s) marqué(s) comme lu(s), {errors} erreur(s) de synchronisation."
+  "status.markViewReadPartial": "{count} message(s) marqué(s) comme lu(s), {errors} erreur(s) de synchronisation.",
+  "security.showPassword": "Afficher le mot de passe",
+  "security.hidePassword": "Masquer le mot de passe",
+  "security.capsLockOn": "Verr. Maj activée",
+  "security.retryIn": "Trop de tentatives. Réessayez dans {seconds} s."
 }

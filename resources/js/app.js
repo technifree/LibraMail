@@ -8413,6 +8413,92 @@ const App = (() => {
     document.getElementById('btn-security-disable')?.classList.toggle('hidden', !enabled);
   }
 
+
+  function securityRetryRemainingMs() {
+    return Math.max(0, Number(updateSecurityRetryUi.blockedUntil || 0) - Date.now());
+  }
+
+  function updateSecurityRetryUi(retryAfterMs = 0) {
+    if (updateSecurityRetryUi.timer) clearTimeout(updateSecurityRetryUi.timer);
+    updateSecurityRetryUi.timer = null;
+    updateSecurityRetryUi.blockedUntil = Date.now() + Math.max(0, Number(retryAfterMs) || 0);
+
+    const button = document.getElementById('btn-security-unlock');
+    const tick = () => {
+      const remaining = securityRetryRemainingMs();
+      if (remaining <= 0) {
+        updateSecurityRetryUi.blockedUntil = 0;
+        if (button) button.disabled = Boolean(securityOperationBusy);
+        if (!securityOperationBusy) setSecurityText('security-unlock-error', '');
+        return;
+      }
+
+      if (button) button.disabled = true;
+      setSecurityText(
+        'security-unlock-error',
+        t('security.retryIn', { seconds: Math.max(1, Math.ceil(remaining / 1000)) }),
+        'error'
+      );
+      updateSecurityRetryUi.timer = setTimeout(tick, Math.min(1000, remaining));
+    };
+    tick();
+  }
+
+  function resetSecurityPasswordUi(scope = document) {
+    const root = scope || document;
+    root.querySelectorAll('[data-password-toggle]').forEach(button => {
+      const input = document.getElementById(button.dataset.passwordToggle || '');
+      if (input) input.type = 'password';
+      const icon = button.querySelector('i');
+      if (icon) icon.className = 'fa-solid fa-eye';
+      button.title = t('security.showPassword');
+      button.setAttribute('aria-label', button.title);
+    });
+    root.querySelectorAll('[data-caps-warning-for]').forEach(warning => {
+      warning.classList.add('hidden');
+    });
+  }
+
+  function wireSecurityPasswordInputs() {
+    document.querySelectorAll('[data-password-toggle]').forEach(button => {
+      if (button.dataset.securityWired === '1') return;
+      button.dataset.securityWired = '1';
+      button.addEventListener('click', () => {
+        const input = document.getElementById(button.dataset.passwordToggle || '');
+        if (!input) return;
+        const visible = input.type !== 'password';
+        input.type = visible ? 'password' : 'text';
+        const icon = button.querySelector('i');
+        if (icon) icon.className = visible ? 'fa-solid fa-eye' : 'fa-solid fa-eye-slash';
+        button.title = t(visible ? 'security.showPassword' : 'security.hidePassword');
+        button.setAttribute('aria-label', button.title);
+        input.focus();
+      });
+    });
+
+    [
+      'security-unlock-password',
+      'security-current-password',
+      'security-new-password',
+      'security-confirm-password',
+    ].forEach(id => {
+      const input = document.getElementById(id);
+      const warning = document.querySelector(`[data-caps-warning-for="${id}"]`);
+      if (!input || !warning || input.dataset.capsWired === '1') return;
+      input.dataset.capsWired = '1';
+
+      const updateCaps = event => {
+        const active = Boolean(event?.getModifierState?.('CapsLock'));
+        warning.classList.toggle('hidden', !active);
+      };
+      input.addEventListener('keydown', updateCaps);
+      input.addEventListener('keyup', updateCaps);
+      input.addEventListener('blur', () => warning.classList.add('hidden'));
+    });
+
+    resetSecurityPasswordUi(document);
+  }
+
   function showSecurityLockScreen() {
     const screen = document.getElementById('security-lock-screen');
     if (!screen) return;
@@ -8420,6 +8506,8 @@ const App = (() => {
     screen.classList.remove('hidden');
     screen.setAttribute('aria-hidden', 'false');
     setSecurityText('security-unlock-error', '');
+    resetSecurityPasswordUi(screen);
+    updateSecurityRetryUi(Number(securityState.retryAfterMs) || 0);
     const input = document.getElementById('security-unlock-password');
     if (input) { input.value = ''; setTimeout(() => input.focus(), 30); }
   }
@@ -8431,11 +8519,12 @@ const App = (() => {
     screen.setAttribute('aria-hidden', 'true');
     const input = document.getElementById('security-unlock-password');
     if (input) input.value = '';
+    updateSecurityRetryUi(0);
     setSecurityText('security-unlock-error', '');
   }
 
   async function unlockLibraMail() {
-    if (securityOperationBusy) return;
+    if (securityOperationBusy || securityRetryRemainingMs() > 0) return;
     const input = document.getElementById('security-unlock-password');
     const button = document.getElementById('btn-security-unlock');
     const password = String(input?.value || '');
@@ -8454,11 +8543,19 @@ const App = (() => {
       await boot();
     } catch (error) {
       console.error('[LibraMail] Déverrouillage :', error);
-      setSecurityText('security-unlock-error', t('security.incorrectPassword'), 'error');
+      const rawMessage = String(error?.message || '');
+      const retryMatch = rawMessage.match(/^SECURITY_RETRY_AFTER:(\d+)$/);
+      if (retryMatch) {
+        const retryAfterMs = Math.max(1, Number(retryMatch[1]) || 0);
+        securityState.retryAfterMs = retryAfterMs;
+        updateSecurityRetryUi(retryAfterMs);
+      } else {
+        setSecurityText('security-unlock-error', t('security.incorrectPassword'), 'error');
+      }
       if (input) { input.value = ''; input.focus(); }
     } finally {
       securityOperationBusy = false;
-      if (button) button.disabled = false;
+      if (button && securityRetryRemainingMs() <= 0) button.disabled = false;
     }
   }
 
@@ -8500,6 +8597,7 @@ const App = (() => {
       const input = document.getElementById(id);
       if (input) input.value = '';
     });
+    resetSecurityPasswordUi(document.getElementById('security-password-modal'));
     setSecurityText('security-password-status', '');
     securityOperationBusy = false;
     const submit = document.getElementById('btn-security-password-submit');
@@ -8520,6 +8618,7 @@ const App = (() => {
     if (intro) intro.textContent = securityPasswordModeText(securityPasswordMode, 'description');
     if (submit) submit.textContent = securityPasswordModeText(securityPasswordMode, 'action');
     setSecurityText('security-password-status', '');
+    resetSecurityPasswordUi(document.getElementById('security-password-modal'));
     openModal('security-password-modal');
     const focusId = securityPasswordMode === 'enable' ? 'security-new-password' : 'security-current-password';
     setTimeout(() => document.getElementById(focusId)?.focus(), 30);
@@ -9264,6 +9363,7 @@ const App = (() => {
     document.getElementById('btn-security-password-cancel')?.addEventListener('click', closeSecurityPasswordDialog);
     document.getElementById('security-password-form')?.addEventListener('submit', event => { event.preventDefault(); submitSecurityPasswordOperation(); });
     document.getElementById('security-unlock-form')?.addEventListener('submit', event => { event.preventDefault(); unlockLibraMail(); });
+    wireSecurityPasswordInputs();
     document.getElementById('btn-security-unlock-quit')?.addEventListener('click', shutdownEngineAndExit);
     document.getElementById('btn-add-spam-rule')?.addEventListener('click', addSpamRuleFromSettings);
     document.getElementById('spam-rule-search')?.addEventListener('input', renderSpamRuleSettings);

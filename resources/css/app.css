@@ -4569,3 +4569,43 @@ body.reader-modal-active { overflow: hidden; }
 .security-password-intro { margin:0; color:var(--fg-muted); font-size:12px; line-height:1.5; }
 .security-password-modal-box input { width:100%; }
 @media (max-width:560px) { .security-lock-card{padding:22px 18px}.security-settings-summary{grid-template-columns:34px minmax(0,1fr)}.security-state-badge{grid-column:2;justify-self:start}.security-settings-actions{align-items:stretch;flex-direction:column}.security-settings-actions .btn{width:100%;justify-content:center} }
+
+/* LibraMail 0.5.0 - mot de passe principal : visibilite / Caps Lock */
+.security-password-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+.security-password-input-wrap > input {
+  width: 100%;
+  padding-right: 38px;
+}
+.security-password-toggle {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  opacity: .72;
+  cursor: pointer;
+}
+.security-password-toggle:hover,
+.security-password-toggle:focus-visible {
+  opacity: 1;
+  background: rgba(127, 127, 127, .14);
+}
+.security-password-toggle i {
+  pointer-events: none;
+}
+.security-caps-warning {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}

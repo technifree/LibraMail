@@ -947,5 +947,9 @@
   "status.markViewReadBusy": "Marking all messages in this view as read…",
   "status.markViewReadDone": "{count} message(s) marked as read.",
   "status.markViewReadNone": "No unread messages in this view.",
-  "status.markViewReadPartial": "{count} message(s) marked as read, {errors} synchronization error(s)."
+  "status.markViewReadPartial": "{count} message(s) marked as read, {errors} synchronization error(s).",
+  "security.showPassword": "Show password",
+  "security.hidePassword": "Hide password",
+  "security.capsLockOn": "Caps Lock is on",
+  "security.retryIn": "Too many attempts. Try again in {seconds} s."
 }

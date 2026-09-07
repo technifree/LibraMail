@@ -2180,6 +2180,57 @@ async function processScheduledMessages() {
   }
 }
 
+
+// LibraMail 0.5.0 - temporisation progressive du deverrouillage.
+// Protection cote moteur pour qu'un appel RPC direct ne contourne pas l'attente.
+const SECURITY_UNLOCK_FREE_FAILURES = 4;
+const SECURITY_UNLOCK_BASE_DELAY_MS = 10_000;
+const SECURITY_UNLOCK_MAX_DELAY_MS = 5 * 60_000;
+const securityUnlockThrottle = {
+  failures: 0,
+  blockedUntil: 0,
+};
+
+function securityUnlockRetryAfterMs(now = Date.now()) {
+  return Math.max(0, Number(securityUnlockThrottle.blockedUntil) - Number(now));
+}
+
+function securityUnlockThrottleStatus(now = Date.now()) {
+  return {
+    failedAttempts: Math.max(0, Number(securityUnlockThrottle.failures) || 0),
+    retryAfterMs: securityUnlockRetryAfterMs(now),
+  };
+}
+
+function resetSecurityUnlockThrottle() {
+  securityUnlockThrottle.failures = 0;
+  securityUnlockThrottle.blockedUntil = 0;
+}
+
+function registerSecurityUnlockFailure(now = Date.now()) {
+  securityUnlockThrottle.failures++;
+  const failures = securityUnlockThrottle.failures;
+  if (failures <= SECURITY_UNLOCK_FREE_FAILURES) {
+    securityUnlockThrottle.blockedUntil = 0;
+    return securityUnlockThrottleStatus(now);
+  }
+
+  const exponent = failures - SECURITY_UNLOCK_FREE_FAILURES - 1;
+  const delay = Math.min(
+    SECURITY_UNLOCK_MAX_DELAY_MS,
+    SECURITY_UNLOCK_BASE_DELAY_MS * (2 ** exponent),
+  );
+  securityUnlockThrottle.blockedUntil = Number(now) + delay;
+  return securityUnlockThrottleStatus(now);
+}
+
+function assertSecurityUnlockAllowed() {
+  const retryAfterMs = securityUnlockRetryAfterMs();
+  if (retryAfterMs > 0) {
+    throw new Error(`SECURITY_RETRY_AFTER:${Math.ceil(retryAfterMs)}`);
+  }
+}
+
 const methods = {
   // ---------- Sécurité 0.4.8 ----------
   'security.status': async () => {
@@ -2196,6 +2247,7 @@ const methods = {
       theme: ['dark', 'light'].includes(String(publicConfig.theme || ''))
         ? String(publicConfig.theme)
         : defaultConfig.theme,
+      ...securityUnlockThrottleStatus(),
     };
   },
 
@@ -2209,7 +2261,20 @@ const methods = {
       return { ...before, runtimeReady: runtimeInitialized };
     }
 
-    masterPassword.unlock(password);
+    assertSecurityUnlockAllowed();
+    try {
+      masterPassword.unlock(password);
+      resetSecurityUnlockThrottle();
+    } catch (error) {
+      if (/Mot de passe principal incorrect/i.test(String(error?.message || ''))) {
+        const throttle = registerSecurityUnlockFailure();
+        if (throttle.retryAfterMs > 0) {
+          throw new Error(`SECURITY_RETRY_AFTER:${Math.ceil(throttle.retryAfterMs)}`);
+        }
+      }
+      throw error;
+    }
+
     const migrationWasAlreadyComplete = startupMigrationCompleted;
     try {
       // Une coupure brutale pendant l'activation peut laisser un mélange de

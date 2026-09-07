@@ -96,7 +96,11 @@
     <p class="security-lock-copy" data-i18n="security.lockedDescription"></p>
     <form id="security-unlock-form" class="security-unlock-form">
       <label class="field"><span data-i18n="security.masterPassword"></span>
-        <input id="security-unlock-password" type="password" minlength="8" autocomplete="current-password" data-i18n-ph="security.passwordPlaceholder">
+        <div class="security-password-input-wrap">
+          <input id="security-unlock-password" type="password" minlength="8" autocomplete="current-password" data-i18n-ph="security.passwordPlaceholder">
+          <button class="security-password-toggle" type="button" data-password-toggle="security-unlock-password" data-i18n-title="security.showPassword"><i class="fa-solid fa-eye"></i></button>
+        </div>
+        <small class="security-caps-warning hidden" data-caps-warning-for="security-unlock-password" data-i18n="security.capsLockOn"></small>
       </label>
       <div id="security-unlock-error" class="security-unlock-error" aria-live="polite"></div>
       <button class="btn primary security-unlock-button" id="btn-security-unlock" type="submit"><i class="fa-solid fa-lock-open"></i><span data-i18n="security.unlock"></span></button>
@@ -980,9 +984,27 @@
     <header><span id="security-password-title"></span><button class="iconbtn" id="btn-security-password-close" type="button"><i class="fa-solid fa-xmark"></i></button></header>
     <div class="body">
       <p class="security-password-intro" id="security-password-intro"></p>
-      <label class="field hidden" id="security-current-field"><span data-i18n="security.currentPassword"></span><input id="security-current-password" type="password" autocomplete="current-password"></label>
-      <label class="field" id="security-new-field"><span data-i18n="security.newPassword"></span><input id="security-new-password" type="password" minlength="8" autocomplete="new-password" data-i18n-ph="security.passwordPlaceholder"></label>
-      <label class="field" id="security-confirm-field"><span data-i18n="security.confirmPassword"></span><input id="security-confirm-password" type="password" minlength="8" autocomplete="new-password" data-i18n-ph="security.passwordPlaceholder"></label>
+      <label class="field hidden" id="security-current-field"><span data-i18n="security.currentPassword"></span>
+        <div class="security-password-input-wrap">
+          <input id="security-current-password" type="password" autocomplete="current-password">
+          <button class="security-password-toggle" type="button" data-password-toggle="security-current-password" data-i18n-title="security.showPassword"><i class="fa-solid fa-eye"></i></button>
+        </div>
+        <small class="security-caps-warning hidden" data-caps-warning-for="security-current-password" data-i18n="security.capsLockOn"></small>
+      </label>
+      <label class="field" id="security-new-field"><span data-i18n="security.newPassword"></span>
+        <div class="security-password-input-wrap">
+          <input id="security-new-password" type="password" minlength="8" autocomplete="new-password" data-i18n-ph="security.passwordPlaceholder">
+          <button class="security-password-toggle" type="button" data-password-toggle="security-new-password" data-i18n-title="security.showPassword"><i class="fa-solid fa-eye"></i></button>
+        </div>
+        <small class="security-caps-warning hidden" data-caps-warning-for="security-new-password" data-i18n="security.capsLockOn"></small>
+      </label>
+      <label class="field" id="security-confirm-field"><span data-i18n="security.confirmPassword"></span>
+        <div class="security-password-input-wrap">
+          <input id="security-confirm-password" type="password" minlength="8" autocomplete="new-password" data-i18n-ph="security.passwordPlaceholder">
+          <button class="security-password-toggle" type="button" data-password-toggle="security-confirm-password" data-i18n-title="security.showPassword"><i class="fa-solid fa-eye"></i></button>
+        </div>
+        <small class="security-caps-warning hidden" data-caps-warning-for="security-confirm-password" data-i18n="security.capsLockOn"></small>
+      </label>
       <div class="security-password-warning" id="security-password-warning"><i class="fa-solid fa-triangle-exclamation"></i><span data-i18n="security.recoveryWarning"></span></div>
       <div id="security-password-status" class="security-password-status" aria-live="polite"></div>
     </div>
