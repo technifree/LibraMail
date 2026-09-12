@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const atomicFile = require('./atomic_file');
 
 const FORMAT = 'LibraMail-master-password';
 const VERSION = 1;
@@ -89,21 +90,7 @@ function loadMetadata() {
 }
 
 function writeMetadataAtomic(value) {
-  const dir = path.dirname(securityFile);
-  fs.mkdirSync(dir, { recursive: true });
-  const temp = `${securityFile}.tmp-${process.pid}-${Date.now()}`;
-  try {
-    fs.writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, {
-      encoding: 'utf8',
-      mode: 0o600,
-    });
-    try { fs.chmodSync(temp, 0o600); } catch {}
-    fs.renameSync(temp, securityFile);
-    try { fs.chmodSync(securityFile, 0o600); } catch {}
-  } catch (error) {
-    try { fs.rmSync(temp, { force: true }); } catch {}
-    throw error;
-  }
+  atomicFile.writeJsonAtomicSync(securityFile, value);
 }
 
 function deriveWrappingKey(password, salt, candidate = metadata) {

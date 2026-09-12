@@ -28,6 +28,7 @@ const masterPassword = require('./lib/master_password');
 const emlImport = require('./lib/eml_import');
 const appPaths = require('./lib/app_paths');
 const rpcSecurity = require('./lib/rpc_security');
+const atomicFile = require('./lib/atomic_file');
 
 const PORT = 47800;
 const APP_VERSION = '0.5.0';
@@ -105,7 +106,7 @@ function recoverInterruptedRestore() {
 function loadJson(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
 }
-const saveJson = (file, object) => fs.writeFileSync(file, JSON.stringify(object, null, 2));
+const saveJson = (file, object) => atomicFile.writeJsonAtomicSync(file, object);
 const saveAccounts = () => saveJson(ACCOUNTS_FILE, accounts.map(credentialStore.serialize));
 
 function writeEmlImportLog({ account, result, localFolderId = null, selectedCount = 0 } = {}) {
@@ -1883,13 +1884,13 @@ async function importCompleteBackup(sourcePath, password = '') {
       keyRollbackSecret = `mailstore-rollback-${process.pid}-${Date.now()}`;
       if (!mailStore.stashMasterKey(keyRollbackSecret)) keyRollbackSecret = '';
     }
-    fs.writeFileSync(RESTORE_STATE_FILE, JSON.stringify({
+    atomicFile.writeJsonAtomicSync(RESTORE_STATE_FILE, {
       rollbackRoot,
       stagingRoot,
       sourcePath: resolvedSource,
       keyRollbackSecret,
       createdAt: new Date().toISOString(),
-    }, null, 2));
+    });
 
     broadcast('backup.progress', { kind: 'import', step: 'apply', completed: 0, total: 1, name: '' });
     mailStore.close();

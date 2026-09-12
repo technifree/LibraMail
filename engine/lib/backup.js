@@ -17,6 +17,7 @@ const crypto = require('crypto');
 const { Transform, Writable } = require('stream');
 const { pipeline } = require('stream/promises');
 const mailStore = require('./mail_store');
+const atomicFile = require('./atomic_file');
 
 const UINT16_MAX = 0xffff;
 const UINT32_MAX = 0xffffffff;
@@ -624,8 +625,8 @@ async function exportArchive({ dataDir, database, targetPath, appVersion, passwo
     await database.backup(snapshotPath);
     const accountsPath = path.join(resolvedData, 'accounts.json');
     const configPath = path.join(resolvedData, 'config.json');
-    if (!fs.existsSync(accountsPath)) await fsp.writeFile(accountsPath, '[]\n', { mode: 0o600 });
-    if (!fs.existsSync(configPath)) await fsp.writeFile(configPath, '{}\n', { mode: 0o600 });
+    if (!fs.existsSync(accountsPath)) await atomicFile.writeJsonAtomic(accountsPath, []);
+    if (!fs.existsSync(configPath)) await atomicFile.writeJsonAtomic(configPath, {});
     const dataFiles = await walkFiles(resolvedData);
     const safeAccountsPath = path.join(tempDir, 'accounts.json');
     let safeAccounts = [];
@@ -640,7 +641,7 @@ async function exportArchive({ dataDir, database, targetPath, appVersion, passwo
       if (copy.smtp) delete copy.smtp.pass;
       return copy;
     });
-    await fsp.writeFile(safeAccountsPath, JSON.stringify(safeAccounts, null, 2) + '\n', { mode: 0o600 });
+    await atomicFile.writeJsonAtomic(safeAccountsPath, safeAccounts);
 
     const coverage = mailStore.verifyIndexCoverage(database, resolvedData);
     const summary = summaryFromDatabase(database, dataFiles, coverage);
@@ -668,7 +669,7 @@ async function exportArchive({ dataDir, database, targetPath, appVersion, passwo
         keyEnvelope,
       },
     };
-    await fsp.writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n', { mode: 0o600 });
+    await atomicFile.writeJsonAtomic(manifestPath, manifest);
 
     const entries = [
       { name: 'manifest.json', path: manifestPath },

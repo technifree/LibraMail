@@ -7,6 +7,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const atomicFile = require('./atomic_file');
 
 const PROTOCOL_PREFIX = 'libramail-rpc-v1.';
 const TOKEN_BYTES = 32;
@@ -100,16 +101,14 @@ function publishSessionFile(stateRoot, { token, port, pid = process.pid } = {}) 
   const target = authFilePath(stateRoot);
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
   try { fs.chmodSync(directory, 0o700); } catch {}
-  const payload = JSON.stringify({
+  atomicFile.writeJsonAtomicSync(target, {
     version: 1,
     protocol: PROTOCOL_PREFIX.slice(0, -1),
     token: String(token).toLowerCase(),
     port: Number(port) || 0,
     pid: Number(pid) || process.pid,
     startedAt: Date.now(),
-  });
-  fs.writeFileSync(target, `${payload}\n`, { encoding: 'utf8', mode: 0o600 });
-  try { fs.chmodSync(target, 0o600); } catch {}
+  }, { space: 0 });
   return target;
 }
 
