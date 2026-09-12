@@ -8,6 +8,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const nodemailer = require('nodemailer');
+const mailAuth = require('./mail_auth'); // LibraMail 0.5.1 — socle d'authentification mail
 const MailComposer = require('nodemailer/lib/mail-composer');
 
 function transporter(account) {
@@ -15,10 +16,7 @@ function transporter(account) {
     host: account.smtp.host,
     port: account.smtp.port || 465,
     secure: account.smtp.secure !== false,
-    auth: {
-      user: account.smtp.user || account.pop3?.user || account.imap?.user,
-      pass: account.smtp.pass || account.pop3?.pass || account.imap?.pass,
-    },
+    auth: mailAuth.smtpAuth(account),
   });
 }
 

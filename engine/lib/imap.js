@@ -5,6 +5,7 @@
  */
 'use strict';
 const { ImapFlow } = require('imapflow');
+const mailAuth = require('./mail_auth'); // LibraMail 0.5.1 — socle d'authentification mail
 const { simpleParser } = require('mailparser');
 const db = require('./db');
 const spam = require('./spam');
@@ -184,7 +185,7 @@ function makeClient(account) {
     host: account.imap.host,
     port: account.imap.port || 993,
     secure: account.imap.secure !== false,
-    auth: { user: account.imap.user, pass: account.imap.pass },
+    auth: mailAuth.imapAuth(account),
     logger: false,
     qresync: true,
     connectionTimeout: 30000,

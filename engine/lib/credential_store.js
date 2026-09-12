@@ -3,6 +3,7 @@
 const masterPassword = require('./master_password');
 
 const SERVICE = 'LibraMail';
+const OAUTH_REFRESH_KIND = 'oauth2-refresh'; // LibraMail 0.5.1 — jeton OAuth2 de renouvellement
 
 // LibraMail 0.4.8 — secrets du trousseau protégés par le coffre principal.
 // Les entrées restent dans le keyring de l'OS mais, lorsque la protection est
@@ -122,6 +123,19 @@ function removePair(accountId) {
   remove(accountId, 'imap');
   remove(accountId, 'pop3');
   remove(accountId, 'smtp');
+  remove(accountId, OAUTH_REFRESH_KIND);
+}
+
+function readOAuthRefreshToken(accountId) {
+  return read(accountId, OAUTH_REFRESH_KIND);
+}
+
+function writeOAuthRefreshToken(accountId, refreshToken) {
+  return write(accountId, OAUTH_REFRESH_KIND, refreshToken);
+}
+
+function removeOAuthRefreshToken(accountId) {
+  return remove(accountId, OAUTH_REFRESH_KIND);
 }
 
 function hydrate(account) {
@@ -173,7 +187,7 @@ function secretDescriptors(accountIds = [], serviceNames = []) {
   const ids = [...new Set((Array.isArray(accountIds) ? accountIds : [])
     .map(value => String(value || '').trim()).filter(Boolean))];
   for (const accountId of ids) {
-    for (const kind of ['imap', 'pop3', 'smtp']) {
+    for (const kind of ['imap', 'pop3', 'smtp', OAUTH_REFRESH_KIND]) {
       descriptors.push({
         scope: 'account',
         accountId,
@@ -275,6 +289,19 @@ function serialize(account) {
   const copy = JSON.parse(JSON.stringify(account));
   delete copy.providerKey;
   delete copy._credentialWarning;
+
+  // Les access tokens OAuth2 sont éphémères et ne doivent jamais atteindre
+  // accounts.json, même si un futur appelant les place par erreur sur le compte.
+  delete copy._oauthAccessToken;
+  if (copy.oauth2 && typeof copy.oauth2 === 'object') {
+    delete copy.oauth2.accessToken;
+    delete copy.oauth2.refreshToken;
+  }
+  if (copy.authentication && typeof copy.authentication === 'object') {
+    delete copy.authentication.accessToken;
+    delete copy.authentication.refreshToken;
+  }
+
   if (copy.credentials?.store === 'system') {
     if (copy.imap) delete copy.imap.pass;
     if (copy.pop3) delete copy.pop3.pass;
@@ -285,6 +312,7 @@ function serialize(account) {
 
 module.exports = {
   read, write, storePair, storeIncoming, removePair, hydrate, migrateLegacy, serialize,
+  readOAuthRefreshToken, writeOAuthRefreshToken, removeOAuthRefreshToken, OAUTH_REFRESH_KIND,
   readServiceSecret, writeServiceSecret, removeServiceSecret,
   accountSecretContext, serviceSecretContext, isProtectedValue,
   encodeForStorage, decodeForStorage,
