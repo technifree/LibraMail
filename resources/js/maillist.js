@@ -94,10 +94,24 @@ class VirtualMailList {
     if (this.collapsedGroups.has(item.key.id)) button.classList.add('collapsed');
     button.style.top = `${top}px`;
     button.style.height = `${item.height}px`;
+    const totalLabel = window.t?.('group.total') || 'Total';
+    const unreadLabel = window.t?.('stats.unread') || 'Non lus';
+    const totalTitle = `${totalLabel} : ${item.count}`;
+    const unreadTitle = `${unreadLabel} : ${item.unread}`;
     button.innerHTML = `<i class="fa-solid fa-chevron-down mail-group-chevron"></i>
       <span class="mail-group-title">${this.escape(item.key.label)}</span>
-      <span class="mail-group-count">${item.count}</span>
-      ${item.unread ? `<span class="mail-group-unread">${item.unread}</span>` : ''}`;
+      <span class="mail-group-count"
+            title="${this.escapeAttr(totalTitle)}"
+            aria-label="${this.escapeAttr(totalTitle)}">
+        <i class="fa-regular fa-envelope mail-group-count-icon" aria-hidden="true"></i>
+        <span>${item.count}</span>
+      </span>
+      ${item.unread ? `<span class="mail-group-unread"
+            title="${this.escapeAttr(unreadTitle)}"
+            aria-label="${this.escapeAttr(unreadTitle)}">
+          <span class="mail-group-unread-dot" aria-hidden="true"></span>
+          <span>${item.unread}</span>
+        </span>` : ''}`;
     button.onclick = () => {
       if (this.collapsedGroups.has(item.key.id)) this.collapsedGroups.delete(item.key.id);
       else this.collapsedGroups.add(item.key.id);

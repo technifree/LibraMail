@@ -956,18 +956,34 @@ body.resizing-panes.resize-rows { cursor: row-resize; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 4px;
   font-size: 10px;
   line-height: 18px;
   letter-spacing: 0;
 }
 .mail-group-count {
   margin-left: auto;
-  background: var(--bg-active);
+  background: var(--bg-panel-2);
+  border: 1px solid var(--border-soft);
   color: var(--fg-muted);
+  font-weight: 600;
+}
+.mail-group-count-icon {
+  color: var(--fg-faint);
+  font-size: 9px;
 }
 .mail-group-unread {
   background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
   color: var(--accent);
+  font-weight: 700;
+}
+.mail-group-unread-dot {
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--accent);
 }
 .mail-group-header.collapsed {
   background: color-mix(in srgb, var(--bg-panel) 82%, var(--accent-soft));
