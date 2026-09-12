@@ -27,6 +27,10 @@ assert(verify.includes('ubuntu-24.04'), 'la CI doit tester Linux');
 assert(verify.includes('windows-2022'), 'la CI doit tester Windows');
 assert(verify.includes('dev-*'), 'la CI doit vérifier les branches de développement');
 assert(verify.includes('npm test'), 'la CI doit lancer npm test');
+assert(
+  verify.includes('working-directory: engine\n        run: |\n          node -e "const Database=require(\'better-sqlite3\')'),
+  'la commande SQLite du workflow doit utiliser un bloc YAML run: |'
+);
 assert(github.includes('tools/run_tests.js'), './github.sh check doit exécuter la suite complète');
 
 console.log('[LibraMail] Test runner/CI 0.5.1 : OK');
