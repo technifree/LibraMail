@@ -31,7 +31,7 @@ const rpcSecurity = require('./lib/rpc_security');
 const atomicFile = require('./lib/atomic_file');
 
 const PORT = 47800;
-const APP_VERSION = '0.5.0';
+const APP_VERSION = '0.5.1';
 const ROOT = path.resolve(__dirname, '..');
 
 // LibraMail 0.4.8 — séparation programme / données utilisateur.

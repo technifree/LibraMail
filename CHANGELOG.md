@@ -1,3 +1,48 @@
+# LibraMail 0.5.1 - 2026-09-12
+
+LibraMail 0.5.1 est une version de durcissement qui renforce le stockage local, sécurise davantage les abonnements Planning, fiabilise la validation Linux/Windows et clarifie les compteurs de messages.
+
+## Sécurité et stockage local
+
+- Le stockage des nouveaux messages devient fail-secure : si la clé de chiffrement n'est pas disponible, LibraMail refuse l'écriture au lieu de créer un fichier EML en clair.
+- Les extraits de messages (`snippet`) deviennent eux aussi fail-secure et ne peuvent plus être insérés en clair dans l'index lorsque le coffre est indisponible.
+- Les chemins IMAP et POP3 n'utilisent plus de fallback de snippet en clair.
+- Sous POSIX, `index.db` et les bases du `mailstore` sont créés ou resserrés en `0600`, le répertoire `mailstore` en `0700`, et les fichiers SQLite WAL/SHM sont également resserrés lorsqu'ils existent.
+- Sous Windows, le durcissement des permissions reste appliqué en best-effort, les ACL du profil utilisateur restant gérées par Windows.
+- Les écritures JSON persistantes importantes sont désormais atomiques : fichier temporaire privé, écriture, synchronisation, renommage puis synchronisation du répertoire sous POSIX.
+- Les échecs simulés d'écriture, de synchronisation ou de renommage conservent l'ancien fichier intact et nettoient le temporaire.
+
+## Abonnements Planning et SSRF
+
+- Les nouveaux abonnements distants sont limités à HTTPS / `webcal`.
+- Les destinations localhost, loopback, privées, link-local, CGNAT et autres plages réservées sont bloquées.
+- La résolution DNS est contrôlée avant connexion afin de limiter les risques de rebinding.
+- Chaque redirection est revalidée et une redirection vers HTTP ou une destination interne est refusée.
+- Le nombre de redirections reste borné et la limite de taille des calendriers distants est conservée.
+
+## OAuth2 / XOAUTH2
+
+- Ajout d'un socle générique d'authentification OAuth2/XOAUTH2 pour IMAP et SMTP.
+- Le chemin historique par mot de passe reste inchangé tant qu'un compte n'est pas explicitement configuré en OAuth2.
+- Les jetons d'accès sont destinés à rester en mémoire et ne sont pas enregistrés dans `accounts.json`.
+- Les jetons de rafraîchissement utilisent le stockage protégé des identifiants et sont pris en compte dans les migrations liées au mot de passe principal.
+- Aucun flux fournisseur complet n'est activé dans cette version : Microsoft et les autres fournisseurs nécessitent toujours leur propre inscription d'application et leur propre mécanisme d'autorisation.
+
+## Tests et intégration continue
+
+- Ajout d'un runner qui découvre automatiquement tous les fichiers `tools/test_*.js` et les exécute avec `node:test`.
+- `npm test` et `./github.sh check` exécutent désormais la suite complète.
+- Vérification GitHub Actions sous Linux et Windows.
+- Alignement de la CI sur Node.js 22.23.1, identique au runtime Node.js embarqué de LibraMail, afin d'éviter les incompatibilités ABI avec `better-sqlite3`.
+- Le runner local peut relancer automatiquement les tests avec le Node.js embarqué lorsqu'un Node.js système incompatible est détecté.
+- Ajout de tests dédiés au stockage fail-secure, aux abonnements calendrier SSRF, aux écritures JSON atomiques, au durcissement SQLite local, au socle OAuth2 et à la lisibilité des compteurs.
+
+## Interface
+
+- Clarification des compteurs dans les groupes de messages.
+- Le nombre total de messages est identifié séparément du nombre de non-lus.
+- Le compteur de non-lus n'est affiché que lorsqu'il est utile, sans modification de la logique de lecture ou de conversation.
+
 # LibraMail 0.5.0 - 2026-09-07
 
 LibraMail 0.5.0 améliore la fiabilité du courrier, enrichit fortement le planning, réorganise les paramètres et renforce la sécurité de l’API locale utilisée entre l’interface et le moteur.
