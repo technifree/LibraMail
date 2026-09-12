@@ -27,6 +27,10 @@ assert(verify.includes('ubuntu-24.04'), 'la CI doit tester Linux');
 assert(verify.includes('windows-2022'), 'la CI doit tester Windows');
 assert(verify.includes('dev-*'), 'la CI doit vérifier les branches de développement');
 assert(verify.includes('npm test'), 'la CI doit lancer npm test');
+assert(verify.includes('actions/checkout@v5'), 'la CI doit utiliser checkout@v5 ou ultérieur compatible Node 24');
+assert(verify.includes('actions/setup-node@v5'), 'la CI doit utiliser setup-node@v5 ou ultérieur compatible Node 24');
+assert(verify.includes('actions/setup-python@v6'), 'la CI doit utiliser setup-python@v6 ou ultérieur compatible Node 24');
+assert(verify.includes('node-version: "22.23.1"'), 'la CI doit tester avec le même Node 22.23.1 que le runtime LibraMail');
 assert(
   verify.includes('working-directory: engine\n        run: |\n          node -e "const Database=require(\'better-sqlite3\')'),
   'la commande SQLite du workflow doit utiliser un bloc YAML run: |'
