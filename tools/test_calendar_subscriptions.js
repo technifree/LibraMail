@@ -2,36 +2,21 @@
 'use strict';
 const assert = require('assert');
 const fs = require('fs');
-const http = require('http');
 const os = require('os');
 const path = require('path');
 const db = require('../engine/lib/db');
 const { parseCalendarImport } = require('../engine/lib/calendar_import');
 const subscriptions = require('../engine/lib/calendar_subscriptions');
 
-async function testFetch() {
-  const ics = `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:http@example.test\r\nDTSTART:20260814T100000Z\r\nDTEND:20260814T110000Z\r\nSUMMARY:HTTP\r\nEND:VEVENT\r\nEND:VCALENDAR`;
-  const server = http.createServer((req, res) => {
-    if (req.headers['if-none-match'] === '"v1"') {
-      res.writeHead(304, { ETag: '"v1"' });
-      res.end();
-      return;
-    }
-    res.writeHead(200, { 'Content-Type': 'text/calendar', ETag: '"v1"' });
-    res.end(ics);
-  });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  try {
-    const port = server.address().port;
-    const first = await subscriptions.fetchCalendar(`http://127.0.0.1:${port}/calendar.ics`);
-    assert.equal(first.notModified, false);
-    assert.ok(first.text.includes('BEGIN:VCALENDAR'));
-    assert.equal(first.etag, '"v1"');
-    const second = await subscriptions.fetchCalendar(`http://127.0.0.1:${port}/calendar.ics`, { etag: first.etag });
-    assert.equal(second.notModified, true);
-  } finally {
-    await new Promise(resolve => server.close(resolve));
-  }
+async function testFetchSecurityBoundary() {
+  await assert.rejects(
+    subscriptions.fetchCalendar('http://127.0.0.1/calendar.ics', { timeoutMs: 3000 }),
+    /HTTPS|sécurité/i
+  );
+  await assert.rejects(
+    subscriptions.fetchCalendar('https://127.0.0.1/calendar.ics', { timeoutMs: 3000 }),
+    /privée|locale|réservée/i
+  );
 }
 
 async function main() {
@@ -76,7 +61,7 @@ async function main() {
     try { db.close(); } catch {}
     fs.rmSync(tmp, { recursive: true, force: true });
   }
-  await testFetch();
+  await testFetchSecurityBoundary();
   console.log('[LibraMail] Tests abonnements calendrier : OK');
 }
 
