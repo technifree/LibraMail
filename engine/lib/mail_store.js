@@ -181,20 +181,17 @@ function putEncrypted(accountId, messageId, raw) {
   return { kind: 'encrypted', ref: String(messageId), sha256: encrypted.sha256, emlPath: '' };
 }
 
-function putLegacyEml(row, raw) {
-  const target = expectedEmlPath(dataDir, row);
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.writeFileSync(target, raw);
-  return {
-    kind: 'eml', ref: '',
-    sha256: crypto.createHash('sha256').update(Buffer.isBuffer(raw) ? raw : Buffer.from(raw || '')).digest('hex'),
-    emlPath: target,
-  };
-}
-
 function storeMessage(row, raw) {
-  if (ensureMasterKey()) return putEncrypted(row.account_id, row.id, raw);
-  return putLegacyEml(row, raw);
+  // Fail-secure : les anciens .eml restent lisibles et migrables, mais un
+  // nouveau message n'est jamais écrit en clair si le coffre système ou la
+  // clé maître du magasin chiffré n'est pas disponible.
+  if (!ensureMasterKey()) {
+    throw new Error(
+      `Stockage local chiffré indisponible : ${secureError || 'coffre-fort système indisponible'}. ` +
+      'Aucun message n’a été écrit en clair.'
+    );
+  }
+  return putEncrypted(row.account_id, row.id, raw);
 }
 
 function readLegacyMessage(row, baseDir = dataDir) {
