@@ -10,8 +10,10 @@ const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
 const mailStore = require('./mail_store');
+const sqliteSecurity = require('./sqlite_security');
 
 let db;
+let dbFile = '';
 
 function normalizeSubject(subject) {
   return String(subject || '(sans objet)')
@@ -282,12 +284,18 @@ function migrateEmlPaths(dataDir) {
 function close() {
   if (!db) return;
   try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch {}
-  try { db.close(); } finally { db = null; }
+  if (dbFile) sqliteSecurity.hardenDatabaseArtifacts(dbFile);
+  try { db.close(); } finally {
+    db = null;
+    if (dbFile) sqliteSecurity.hardenDatabaseArtifacts(dbFile);
+    dbFile = '';
+  }
 }
 
 function init(dataDir) {
   fs.mkdirSync(dataDir, { recursive: true });
-  db = new Database(path.join(dataDir, 'index.db'));
+  dbFile = sqliteSecurity.prepareDatabaseFile(path.join(dataDir, 'index.db'));
+  db = new Database(dbFile);
   db.pragma('journal_mode = WAL');
   db.pragma('synchronous = NORMAL');
   db.pragma('cache_size = -64000');
@@ -590,6 +598,7 @@ function init(dataDir) {
     DELETE FROM calendar_mail_imports
      WHERE message_id NOT IN (SELECT id FROM messages);
   `);
+  sqliteSecurity.hardenDatabaseArtifacts(dbFile);
   return db;
 }
 
@@ -697,6 +706,7 @@ function vacuum() {
   try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch {}
   db.exec('VACUUM');
   try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch {}
+  if (dbFile) sqliteSecurity.hardenDatabaseArtifacts(dbFile);
 }
 
 function normalizeSort(sortBy = 'date', sortDirection = 'desc') {

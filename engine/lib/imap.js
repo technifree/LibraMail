@@ -349,9 +349,7 @@ async function storeNewMessages(client, account, folder, dataDir, firstUid, last
       from_addr: from.address || '',
       to_addr: (envelope.to || []).map(address => address.address).join(', '),
       date: (envelope.date ? new Date(envelope.date) : new Date()).getTime(),
-      snippet: mailStore.status().available
-        ? mailStore.protectSnippet(account.id, text.slice(0, 160))
-        : text.slice(0, 160),
+      snippet: mailStore.protectSnippet(account.id, text.slice(0, 160)),
       seen: message.flags.has('\\Seen') ? 1 : 0,
       flagged: message.flags.has('\\Flagged') ? 1 : 0,
       answered: message.flags.has('\\Answered') ? 1 : 0,
@@ -393,7 +391,7 @@ async function storeNewMessages(client, account, folder, dataDir, firstUid, last
     const descriptor = mailStore.storeMessage({ ...row, id }, message.source);
     db.setMessageStorage(id, descriptor);
     db.indexBody(id, row, text, {
-      secureTokens: mailStore.status().available ? mailStore.searchTokens(text) : null,
+      secureTokens: mailStore.searchTokens(text),
     });
     added.push(id);
     maxUid = Math.max(maxUid, Number(message.uid) || 0);

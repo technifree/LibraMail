@@ -113,9 +113,7 @@ async function storeRawMessage(account, raw, {
     from_addr: fromItem.address || '',
     to_addr: addressList(parsed.to),
     date: (parsed.date ? new Date(parsed.date) : new Date()).getTime(),
-    snippet: mailStore.status().available
-        ? mailStore.protectSnippet(account.id, text.slice(0, 160))
-        : text.slice(0, 160),
+    snippet: mailStore.protectSnippet(account.id, text.slice(0, 160)),
     seen: seen ? 1 : 0,
     flagged: 0,
     answered: 0,
@@ -147,7 +145,7 @@ async function storeRawMessage(account, raw, {
   const descriptor = mailStore.storeMessage({ ...row, id: result.id }, source);
   db.setMessageStorage(result.id, descriptor);
   db.indexBody(result.id, row, text, {
-    secureTokens: mailStore.status().available ? mailStore.searchTokens(text) : null,
+    secureTokens: mailStore.searchTokens(text),
   });
   return { id: result.id, uid: localUid, parsed, size: source.length };
 }

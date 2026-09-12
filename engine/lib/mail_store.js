@@ -5,6 +5,7 @@ const path = require('path');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
 const credentialStore = require('./credential_store');
+const sqliteSecurity = require('./sqlite_security');
 
 const MASTER_SECRET = 'mailstore-master-key-v1';
 const STORE_VERSION = 1;
@@ -87,9 +88,14 @@ function searchTokens(value) {
 
 function protectSnippet(accountId, value) {
   const text = String(value || '').slice(0, 320);
-  if (!text) return '';
   const key = accountKey(accountId);
-  if (!key) return text;
+  if (!key) {
+    throw new Error(
+      `Stockage local chiffré indisponible : ${secureError || 'coffre-fort système indisponible'}. ` +
+      'Aucun extrait de message n’a été écrit en clair.'
+    );
+  }
+  if (!text) return '';
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
   const ciphertext = Buffer.concat([cipher.update(Buffer.from(text, 'utf8')), cipher.final()]);
@@ -118,8 +124,8 @@ function unprotectSnippet(accountId, value) {
 function openStore(accountId) {
   const id = String(accountId || '');
   if (stores.has(id)) return stores.get(id);
-  fs.mkdirSync(storeDir, { recursive: true });
-  const file = storeFileForAccount(dataDir, id);
+  sqliteSecurity.hardenDirectory(storeDir);
+  const file = sqliteSecurity.prepareDatabaseFile(storeFileForAccount(dataDir, id));
   const database = new Database(file);
   database.pragma('journal_mode = WAL');
   database.pragma('synchronous = NORMAL');
@@ -135,6 +141,7 @@ function openStore(accountId) {
       store_version INTEGER NOT NULL DEFAULT 1
     );
   `);
+  sqliteSecurity.hardenDatabaseArtifacts(file);
   stores.set(id, database);
   return database;
 }
@@ -381,6 +388,7 @@ function verifyIndexCoverage(indexDb, baseDataDir = dataDir) {
             entry = { missing: true, file };
           } else {
             try {
+              sqliteSecurity.hardenDatabaseArtifacts(file);
               const database = new Database(file, { readonly: true, fileMustExist: true });
               const integrity = database.pragma('integrity_check', { simple: true });
               if (String(integrity).toLowerCase() !== 'ok') throw new Error(`integrity_check=${integrity}`);
@@ -503,8 +511,9 @@ function removeStashedMasterKey(name) {
 }
 
 function checkpointAll() {
-  for (const database of stores.values()) {
+  for (const [accountId, database] of stores.entries()) {
     try { database.pragma('wal_checkpoint(TRUNCATE)'); } catch {}
+    sqliteSecurity.hardenDatabaseArtifacts(storeFileForAccount(dataDir, accountId));
   }
 }
 
@@ -516,7 +525,7 @@ function status() {
 function init(baseDataDir) {
   dataDir = path.resolve(baseDataDir);
   storeDir = path.join(dataDir, 'mailstore');
-  fs.mkdirSync(storeDir, { recursive: true });
+  sqliteSecurity.hardenDirectory(storeDir);
   ensureMasterKey();
   return status();
 }
@@ -535,9 +544,12 @@ function clearMasterKeys() {
 }
 
 function close() {
-  for (const database of stores.values()) {
+  for (const [accountId, database] of stores.entries()) {
+    const file = storeFileForAccount(dataDir, accountId);
     try { database.pragma('wal_checkpoint(TRUNCATE)'); } catch {}
+    sqliteSecurity.hardenDatabaseArtifacts(file);
     try { database.close(); } catch {}
+    sqliteSecurity.hardenDatabaseArtifacts(file);
   }
   stores.clear();
   clearMasterKeys();
