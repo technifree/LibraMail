@@ -2,7 +2,7 @@ name: Verify sources
 
 on:
   push:
-    branches: ["master", "main"]
+    branches: ["master", "main", "dev-*"]
   pull_request:
   workflow_dispatch:
 
@@ -11,8 +11,17 @@ permissions:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    name: Verify (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-24.04
+          - name: Windows
+            os: windows-2022
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -25,17 +34,24 @@ jobs:
           cache: npm
           cache-dependency-path: engine/package-lock.json
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Check repository safety
+        shell: bash
         run: |
           chmod +x security_check.sh
           ./security_check.sh
 
       - name: Check application version
-        run: python3 tools/check_version.py
+        run: python tools/check_version.py
 
       - name: Validate JSON
+        shell: bash
         run: |
-          python3 - <<'PY'
+          python - <<'PY'
           import json
           from pathlib import Path
           files = [Path("neutralino.config.json")]
@@ -46,22 +62,21 @@ jobs:
           PY
 
       - name: Validate JavaScript syntax
+        shell: bash
         run: |
-          find engine resources/js -type f -name '*.js' -print0 |
+          find engine resources/js tools -type f -name '*.js' -print0 |
           while IFS= read -r -d '' file; do
             node --check "$file"
           done
 
       - name: Install engine dependencies
         working-directory: engine
-        run: |
-          if [ -f package-lock.json ]; then
-            npm ci --omit=dev --no-audit --no-fund
-          else
-            npm install --omit=dev --no-audit --no-fund
-          fi
+        run: npm ci --omit=dev --no-audit --no-fund
 
       - name: Test embedded SQLite dependency
         working-directory: engine
-        run: |
-          node -e "const Database=require('better-sqlite3'); const db=new Database(':memory:'); const r=db.prepare('SELECT 1 AS ok').get(); if(r.ok!==1) process.exit(1); db.close(); console.log('better-sqlite3: OK');"
+        run: node -e "const Database=require('better-sqlite3'); const db=new Database(':memory:'); const r=db.prepare('SELECT 1 AS ok').get(); if(r.ok!==1) process.exit(1); db.close(); console.log('better-sqlite3: OK');"
+
+      - name: Run complete test suite
+        working-directory: engine
+        run: npm test

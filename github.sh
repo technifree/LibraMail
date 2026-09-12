@@ -41,8 +41,7 @@ case "$cmd" in
     if [ -n "$NODE_BIN" ] && [ -x "$NODE_BIN" ]; then
       for file in "${node_files[@]}"; do "$NODE_BIN" --check "$file" >/dev/null; done
       echo "[JAVASCRIPT] OK : ${#node_files[@]} fichier(s)"
-      "$NODE_BIN" tools/test_calendar_import.js
-      "$NODE_BIN" tools/test_calendar_subscriptions.js
+      "$NODE_BIN" tools/run_tests.js
     else
       echo "[JAVASCRIPT] Node absent localement : contrôle laissé à GitHub Actions."
     fi
