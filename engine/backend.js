@@ -592,7 +592,6 @@ function validateAccountInput(input, existingId = null) {
   if (protocol === 'pop3') {
     if (!String(input.pop3?.host || '').trim()) throw new Error('Serveur POP3 obligatoire');
     if (!String(input.pop3?.user || '').trim()) throw new Error('Identifiant POP3 obligatoire');
-    if (input.pop3?.secure === false) throw new Error('POP3 doit utiliser SSL/TLS dans LibraMail');
   } else {
     if (!String(input.imap?.host || '').trim()) throw new Error('Serveur IMAP obligatoire');
     if (!String(input.imap?.user || '').trim()) throw new Error('Identifiant IMAP obligatoire');

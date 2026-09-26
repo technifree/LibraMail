@@ -9,6 +9,7 @@ const { simpleParser } = require('mailparser');
 const db = require('./db');
 const spam = require('./spam');
 const mailStore = require('./mail_store');
+const StartTlsPop3Client = require('./pop3_starttls');
 
 class SyncCancelledError extends Error {
   constructor(message = 'Relève interrompue par l’utilisateur') {
@@ -72,22 +73,27 @@ async function loadPop3Command() {
 
 async function makeClient(account, clientFactory = null) {
   const options = account.pop3 || {};
-  if (options.secure === false) {
-    throw new Error('LibraMail 0.4.0 exige SSL/TLS pour POP3 (port 995 recommandé).');
-  }
   if (typeof clientFactory === 'function') return clientFactory(account);
-  const Pop3Command = await loadPop3Command();
-  return new Pop3Command({
+
+  const common = {
     user: options.user,
     password: options.pass,
     host: options.host,
-    port: Number(options.port) || 995,
-    tls: true,
+    port: Number(options.port) || (options.secure === false ? 110 : 995),
     timeout: 45000,
     streamReadTimeout: 180000,
     servername: options.host,
     tlsOptions: { servername: options.host },
-  });
+  };
+
+  if (options.secure === false) {
+    // STARTTLS POP3 = STLS puis négociation TLS AVANT USER/PASS.
+    // Aucun fallback en clair n'est autorisé si STLS ou TLS échoue.
+    return new StartTlsPop3Client(common);
+  }
+
+  const Pop3Command = await loadPop3Command();
+  return new Pop3Command({ ...common, tls: true });
 }
 
 function addressList(parsedAddress) {

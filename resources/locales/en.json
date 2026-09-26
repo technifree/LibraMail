@@ -906,7 +906,7 @@
   "account.popDeleteImmediate": "Delete from server immediately",
   "account.popDeleteAfter": "Delete from server after a delay",
   "account.popDeleteDays": "Delay before deletion (days)",
-  "account.popLocalHint": "POP3 uses SSL/TLS (port 995 recommended). Messages are committed to the encrypted local store before any remote deletion.",
+  "account.popLocalHint": "POP3 supports direct SSL/TLS (port 995 recommended) or STARTTLS (port 110). Messages are committed to the encrypted local store before any remote deletion.",
   "backup.recoveryPassword": "Recovery password",
   "backup.recoveryPasswordConfirm": "Confirmation",
   "backup.recoveryPasswordPlaceholder": "At least 8 characters",

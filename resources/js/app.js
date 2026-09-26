@@ -7618,6 +7618,7 @@ const App = (() => {
     accountField('acc-imap-pass').value = '';
     accountField('acc-pop3-host').value = '';
     accountField('acc-pop3-port').value = '995';
+    accountField('acc-pop3-secure').value = '1';
     accountField('acc-pop3-user').value = '';
     accountField('acc-pop3-pass').value = '';
     accountField('acc-pop3-delete-policy').value = 'keep';
@@ -7665,6 +7666,7 @@ const App = (() => {
       accountField('acc-imap-pass').value = '';
       accountField('acc-pop3-host').value = details.pop3?.host || '';
       accountField('acc-pop3-port').value = Number(details.pop3?.port) || 995;
+      accountField('acc-pop3-secure').value = details.pop3?.secure === false ? '0' : '1';
       accountField('acc-pop3-user').value = details.pop3?.user || details.email || '';
       accountField('acc-pop3-pass').value = '';
       accountField('acc-pop3-delete-policy').value = details.pop3?.deletePolicy || 'keep';
@@ -7705,7 +7707,7 @@ const App = (() => {
       pop3: {
         host: value('acc-pop3-host'),
         port: Number(value('acc-pop3-port')),
-        secure: true,
+        secure: accountField('acc-pop3-secure').value === '1',
         user: value('acc-pop3-user'),
         pass: accountField('acc-pop3-pass').value,
         deletePolicy: accountField('acc-pop3-delete-policy').value || 'keep',
