@@ -6160,3 +6160,130 @@ button.planner-attachment-open:hover strong {
 .startup-summary-event-pin i {
   pointer-events: none;
 }
+
+/* LibraMail 0.6.1 — Migration IMAP, phase A non destructive. */
+.imap-migration-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--border-soft, var(--border));
+  border-radius: 14px;
+  background: var(--panel, var(--surface));
+}
+.imap-migration-intro {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.imap-migration-intro strong { display: block; margin-bottom: 5px; }
+.imap-migration-intro p { margin: 0; color: var(--muted); line-height: 1.45; }
+.imap-migration-badge {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border-soft, var(--border));
+  background: var(--surface-2, rgba(127,127,127,.08));
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.imap-migration-safety {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent, #8b7dd8) 9%, transparent);
+  line-height: 1.4;
+}
+.imap-migration-safety i { margin-top: 2px; }
+.imap-migration-origin {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+.imap-migration-origin i { color: var(--muted); }
+.imap-migration-origin .link-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.imap-migration-origin .link-button:hover { text-decoration-thickness: 2px; }
+.imap-migration-engine-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: var(--surface-2, rgba(127,127,127,.07));
+  font-size: 13px;
+}
+.imap-migration-engine-status.success { color: var(--success, #3a9b62); }
+.imap-migration-engine-status.error { color: var(--danger, #c95858); }
+.imap-migration-accounts {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) 40px minmax(0,1fr);
+  gap: 10px;
+  align-items: end;
+}
+.imap-migration-accounts .field { margin: 0; min-width: 0; }
+.imap-migration-swap { align-self: end; margin-bottom: 1px; }
+.imap-migration-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.imap-migration-summary {
+  padding: 11px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-soft, var(--border));
+  background: var(--surface-2, rgba(127,127,127,.06));
+  line-height: 1.45;
+}
+.imap-migration-summary.success { border-color: color-mix(in srgb, var(--success, #3a9b62) 45%, var(--border)); }
+.imap-migration-summary.error { border-color: color-mix(in srgb, var(--danger, #c95858) 45%, var(--border)); }
+.imap-migration-log-wrap {
+  overflow: hidden;
+  border: 1px solid var(--border-soft, var(--border));
+  border-radius: 10px;
+}
+.imap-migration-log-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-soft, var(--border));
+  background: var(--surface-2, rgba(127,127,127,.06));
+  font-size: 12px;
+}
+.imap-migration-log-heading > span { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; }
+.imap-migration-log-heading small { color: var(--muted); text-align: right; }
+.imap-migration-log {
+  box-sizing: border-box;
+  width: 100%;
+  height: 170px;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  background: rgba(0,0,0,.06);
+  color: inherit;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 760px) {
+  .imap-migration-intro { flex-direction: column; }
+  .imap-migration-accounts { grid-template-columns: 1fr; }
+  .imap-migration-swap { justify-self: start; transform: rotate(90deg); }
+  .imap-migration-actions .btn { flex: 1 1 180px; }
+  .imap-migration-log-heading { flex-direction: column; }
+  .imap-migration-log-heading small { text-align: left; }
+}

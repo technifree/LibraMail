@@ -13,6 +13,7 @@ const { simpleParser } = require('mailparser');
 
 const db = require('./lib/db');
 const imap = require('./lib/imap');
+const imapMigration = require('./lib/imap_migration');
 const pop3 = require('./lib/pop3');
 const smtp = require('./lib/smtp');
 const spam = require('./lib/spam');
@@ -39,6 +40,10 @@ const atomicFile = require('./lib/atomic_file');
 const PORT = 47800;
 const APP_VERSION = '0.6.0';
 const ROOT = path.resolve(__dirname, '..');
+const imapMigrationManager = new imapMigration.ImapMigrationManager({
+  root: ROOT,
+  onEvent: (event, data) => broadcast(event, data),
+});
 
 // LibraMail 0.4.8 — séparation programme / données utilisateur.
 // Sans variable d'environnement, le mode portable conserve EXACTEMENT les
@@ -369,6 +374,8 @@ function initializeRuntimeState() {
 }
 
 function closeRuntimeStateForLock() {
+  imapMigrationManager.cancel();
+  imapMigrationManager.invalidatePreview();
   stopAccountRuntime();
   try { mailStore.close(); } catch {}
   try { db.close(); } catch {}
@@ -921,6 +928,30 @@ function accountDetails(account) {
       hasPassword: Boolean(account.smtp?.pass || incomingPassword),
     },
     localStorage: mailStore.status(),
+  };
+}
+
+function getImapMigrationAccount(id, label) {
+  const account = getAccount(String(id || ''));
+  if (!account) throw new Error(`${label} : compte introuvable.`);
+  if (String(account.receiveProtocol || 'imap').toLowerCase() !== 'imap') {
+    throw new Error(`${label} : seuls les comptes IMAP peuvent être utilisés pour une migration.`);
+  }
+  if (!account.imap?.pass) throw new Error(`${label} : mot de passe IMAP indisponible dans le coffre-fort.`);
+  return account;
+}
+
+function publicImapMigrationAccount(account) {
+  return {
+    id: account.id,
+    displayName: account.displayName,
+    email: account.email,
+    color: account.color,
+    providerKey: providerKeyForAccount(account),
+    host: account.imap?.host || '',
+    user: account.imap?.user || '',
+    port: Number(account.imap?.port) || 993,
+    secure: account.imap?.secure !== false,
   };
 }
 
@@ -3302,6 +3333,44 @@ const methods = {
     return imap.listFolders(account);
   },
 
+  // ---------- Migration IMAP (0.6.1, phase A non destructive) ----------
+  'migration.imap.status': async () => ({
+    ...imapMigrationManager.status(),
+    accounts: accounts
+      .filter(account => String(account.receiveProtocol || 'imap').toLowerCase() === 'imap')
+      .map(publicImapMigrationAccount),
+  }),
+
+  'migration.imap.test': async ({ sourceAccountId = '', destinationAccountId = '' } = {}) => {
+    const sourceAccount = getImapMigrationAccount(sourceAccountId, 'Source');
+    const destinationAccount = getImapMigrationAccount(destinationAccountId, 'Destination');
+    return imapMigrationManager.run({ mode: 'login', sourceAccount, destinationAccount });
+  },
+
+  'migration.imap.preview': async ({ sourceAccountId = '', destinationAccountId = '' } = {}) => {
+    const sourceAccount = getImapMigrationAccount(sourceAccountId, 'Source');
+    const destinationAccount = getImapMigrationAccount(destinationAccountId, 'Destination');
+    return imapMigrationManager.run({ mode: 'preview', sourceAccount, destinationAccount });
+  },
+
+  'migration.imap.copy': async ({ sourceAccountId = '', destinationAccountId = '', previewToken = '' } = {}) => {
+    const sourceAccount = getImapMigrationAccount(sourceAccountId, 'Source');
+    const destinationAccount = getImapMigrationAccount(destinationAccountId, 'Destination');
+    return imapMigrationManager.run({
+      mode: 'copy',
+      sourceAccount,
+      destinationAccount,
+      previewToken,
+    });
+  },
+
+  'migration.imap.cancel': async () => ({ cancelled: imapMigrationManager.cancel() }),
+
+  'migration.imap.invalidatePreview': async () => {
+    imapMigrationManager.invalidatePreview();
+    return true;
+  },
+
   // ---------- Synchronisation ----------
   // Les anciennes méthodes restent disponibles pour compatibilité/tests.
   'sync.folder': async ({ accountId }) => syncAccount(getAccount(accountId), 'manual'),
@@ -4301,6 +4370,8 @@ function shutdown() {
   shuttingDown = true;
   rpcSecurity.removeSessionFile(STATE_ROOT, RPC_SESSION_TOKEN);
   stopGoogleCalendarSensitiveRuntime('Arrêt de LibraMail');
+  imapMigrationManager.cancel();
+  imapMigrationManager.invalidatePreview();
   stopAccountRuntime();
   try { mailStore.close(); } catch {}
   try { db.close(); } catch {}

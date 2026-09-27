@@ -9,12 +9,12 @@ const app = fs.readFileSync('resources/js/app.js', 'utf8');
 const fr = JSON.parse(fs.readFileSync('resources/locales/fr.json', 'utf8'));
 const en = JSON.parse(fs.readFileSync('resources/locales/en.json', 'utf8'));
 
-for (const tab of ['general', 'mail', 'spam', 'planning', 'security', 'data']) {
+for (const tab of ['general', 'mail', 'spam', 'planning', 'migration', 'security', 'data']) {
   assert(html.includes(`data-settings-tab="${tab}"`), `onglet ${tab} absent`);
   assert(html.includes(`data-settings-panel="${tab}"`), `panneau ${tab} absent`);
 }
 
-assert.strictEqual((html.match(/data-settings-tab="/g) || []).length, 6);
+assert.strictEqual((html.match(/data-settings-tab="/g) || []).length, 7);
 const settingsHeaderPos = html.indexOf('<header><span data-i18n="settings"></span>');
 const settingsTabsPos = html.indexOf('<div class="settings-tabs"', settingsHeaderPos);
 const settingsBodyPos = html.indexOf('<div class="body settings-body">', settingsHeaderPos);
@@ -62,7 +62,7 @@ for (const id of legacyIds) {
 for (const locale of [fr, en]) {
   for (const key of [
     'settings.tab.general', 'settings.tab.mail', 'settings.tab.spam', 'settings.tab.planning',
-    'settings.tab.security', 'settings.tab.data', 'settings.planningIntro',
+    'settings.tab.migration', 'settings.tab.security', 'settings.tab.data', 'settings.planningIntro',
   ]) {
     assert(locale[key], `traduction absente: ${key}`);
   }

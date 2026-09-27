@@ -1091,7 +1091,23 @@ const App = (() => {
     window.PlannerUI?.onEngineEvent?.(event, data);
     updateStartupSummarySync(event, data);
     if (event === 'mail.new') scheduleStartupSummaryRefresh(180);
-    if (event === 'sync.started') {
+    if (event === 'migration.imap.started') {
+      imapMigrationBusy = true;
+      syncImapMigrationControls();
+    } else if (event === 'migration.imap.line') {
+      appendImapMigrationLog(data.line || '');
+    } else if (event === 'migration.imap.done') {
+      imapMigrationBusy = false;
+      syncImapMigrationControls();
+    } else if (event === 'migration.imap.cancelled') {
+      imapMigrationBusy = false;
+      imapMigrationPreviewToken = '';
+      syncImapMigrationControls();
+    } else if (event === 'migration.imap.error') {
+      imapMigrationBusy = false;
+      imapMigrationPreviewToken = '';
+      syncImapMigrationControls();
+    } else if (event === 'sync.started') {
       beginSyncActivity(data);
       status(t('status.syncStarting', { account: accountLabel(data.accountId) }), 'busy');
     } else if (event === 'sync.progress') {
@@ -9115,7 +9131,7 @@ const App = (() => {
   // ---------- Paramètres ----------
 
   function activateSettingsTab(name = 'general') {
-    const allowed = ['general', 'mail', 'spam', 'planning', 'security', 'data'];
+    const allowed = ['general', 'mail', 'spam', 'planning', 'migration', 'security', 'data'];
     const safeName = allowed.includes(String(name || '')) ? String(name) : 'general';
     activateSettingsTab.current = safeName;
 
@@ -9361,6 +9377,217 @@ const App = (() => {
     }
   }
 
+  let imapMigrationAccounts = [];
+  let imapMigrationPreviewToken = '';
+  let imapMigrationBusy = false;
+  let imapMigrationEngineAvailable = false;
+  const imapMigrationLogLines = [];
+
+  function setImapMigrationStatus(message = '', state = '') {
+    const element = document.getElementById('imap-migration-status');
+    if (!element) return;
+    element.textContent = message;
+    element.className = `field-hint ${state || ''}`.trim();
+  }
+
+  function setImapMigrationEngineStatus(data = {}) {
+    const element = document.getElementById('imap-migration-engine-status');
+    if (!element) return;
+    imapMigrationEngineAvailable = Boolean(data.available);
+    element.className = `imap-migration-engine-status ${data.available ? 'success' : 'error'}`;
+    if (data.available) {
+      element.innerHTML = `<i class="fa-solid fa-circle-check"></i><span>${esc(t('migrationImap.engineReady', { engine: data.engine || 'imapsync' }))}</span>`;
+    } else {
+      element.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i><span>${esc(data.error || t('migrationImap.engineMissing'))}</span>`;
+    }
+  }
+
+  function appendImapMigrationLog(line = '') {
+    const value = String(line || '').trimEnd();
+    if (!value) return;
+    imapMigrationLogLines.push(value);
+    if (imapMigrationLogLines.length > 250) imapMigrationLogLines.splice(0, imapMigrationLogLines.length - 250);
+    const log = document.getElementById('imap-migration-log');
+    if (!log) return;
+    log.textContent = imapMigrationLogLines.join('\n');
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function clearImapMigrationLog() {
+    imapMigrationLogLines.length = 0;
+    const log = document.getElementById('imap-migration-log');
+    if (log) log.textContent = '';
+  }
+
+  function imapMigrationSelection() {
+    return {
+      sourceAccountId: document.getElementById('imap-migration-source')?.value || '',
+      destinationAccountId: document.getElementById('imap-migration-destination')?.value || '',
+    };
+  }
+
+  function imapMigrationSelectionValid() {
+    const { sourceAccountId, destinationAccountId } = imapMigrationSelection();
+    return Boolean(sourceAccountId && destinationAccountId && sourceAccountId !== destinationAccountId);
+  }
+
+  function syncImapMigrationControls() {
+    const source = document.getElementById('imap-migration-source');
+    const destination = document.getElementById('imap-migration-destination');
+    const swap = document.getElementById('btn-imap-migration-swap');
+    const test = document.getElementById('btn-imap-migration-test');
+    const preview = document.getElementById('btn-imap-migration-preview');
+    const copy = document.getElementById('btn-imap-migration-copy');
+    const cancel = document.getElementById('btn-imap-migration-cancel');
+    const usable = imapMigrationEngineAvailable && imapMigrationSelectionValid() && imapMigrationAccounts.length >= 2;
+    if (source) source.disabled = imapMigrationBusy;
+    if (destination) destination.disabled = imapMigrationBusy;
+    if (swap) swap.disabled = imapMigrationBusy || imapMigrationAccounts.length < 2;
+    if (test) test.disabled = imapMigrationBusy || !usable;
+    if (preview) preview.disabled = imapMigrationBusy || !usable;
+    if (copy) copy.disabled = imapMigrationBusy || !usable || !imapMigrationPreviewToken;
+    if (cancel) cancel.classList.toggle('hidden', !imapMigrationBusy);
+  }
+
+  function renderImapMigrationSummary(result, state = 'success') {
+    const root = document.getElementById('imap-migration-summary');
+    if (!root) return;
+    if (!result) {
+      root.classList.add('hidden');
+      root.textContent = '';
+      return;
+    }
+    const summary = result.summary || {};
+    const count = value => value == null ? t('migrationImap.unknown') : numberFormat(value);
+    const size = value => value == null ? t('migrationImap.unknown') : fmtSize(value);
+    let text = result.message || '';
+    if (result.mode === 'preview') {
+      text = t('migrationImap.previewSummary', {
+        count: count(summary.plannable),
+        skipped: count(summary.skipped),
+        errors: count(summary.errors),
+        size: size(summary.estimatedBytes),
+      });
+    } else if (result.mode === 'copy') {
+      text = t('migrationImap.copySummary', {
+        count: count(summary.transferred),
+        skipped: count(summary.skipped),
+        errors: count(summary.errors),
+        size: size(summary.transferredBytes),
+      });
+      if (summary.destinationConfirmed) text += ` ${t('migrationImap.destinationConfirmed')}`;
+    }
+    root.textContent = text;
+    root.className = `imap-migration-summary ${state}`;
+  }
+
+  function populateImapMigrationAccounts(statusData = {}) {
+    const source = document.getElementById('imap-migration-source');
+    const destination = document.getElementById('imap-migration-destination');
+    if (!source || !destination) return;
+    const previousSource = source.value;
+    const previousDestination = destination.value;
+    imapMigrationAccounts = Array.isArray(statusData.accounts) ? statusData.accounts : [];
+    const options = imapMigrationAccounts.map(account => {
+      const label = account.displayName || account.email || account.user || account.host;
+      const detail = account.email && account.email !== label ? ` — ${account.email}` : '';
+      return `<option value="${esc(account.id)}">${esc(label + detail)}</option>`;
+    }).join('');
+    source.innerHTML = options;
+    destination.innerHTML = options;
+
+    const ids = new Set(imapMigrationAccounts.map(account => String(account.id)));
+    const wantedSource = ids.has(String(statusData.previewSourceId || ''))
+      ? String(statusData.previewSourceId)
+      : ids.has(previousSource) ? previousSource : String(imapMigrationAccounts[0]?.id || '');
+    let wantedDestination = ids.has(String(statusData.previewDestinationId || ''))
+      ? String(statusData.previewDestinationId)
+      : ids.has(previousDestination) ? previousDestination : String(imapMigrationAccounts[1]?.id || '');
+    if (wantedDestination === wantedSource) {
+      wantedDestination = String(imapMigrationAccounts.find(account => String(account.id) !== wantedSource)?.id || '');
+    }
+    source.value = wantedSource;
+    destination.value = wantedDestination;
+    const hint = document.getElementById('imap-migration-account-hint');
+    if (hint) hint.textContent = imapMigrationAccounts.length < 2
+      ? t('migrationImap.needTwoAccounts')
+      : t('migrationImap.accountHint');
+  }
+
+  async function invalidateImapMigrationPreview({ remote = true } = {}) {
+    const hadPreview = Boolean(imapMigrationPreviewToken);
+    imapMigrationPreviewToken = '';
+    renderImapMigrationSummary(null);
+    syncImapMigrationControls();
+    if (hadPreview) setImapMigrationStatus(t('migrationImap.previewInvalidated'), 'info');
+    if (remote) rpc('migration.imap.invalidatePreview').catch(() => {});
+  }
+
+  async function refreshImapMigrationSettings() {
+    try {
+      const data = await rpc('migration.imap.status');
+      setImapMigrationEngineStatus(data);
+      populateImapMigrationAccounts(data);
+      imapMigrationBusy = Boolean(data.running);
+      imapMigrationPreviewToken = data.previewValid ? String(data.previewToken || '') : '';
+      syncImapMigrationControls();
+      if (!data.available) setImapMigrationStatus(t('migrationImap.enginePhaseHint'), 'info');
+      else if (imapMigrationAccounts.length < 2) setImapMigrationStatus(t('migrationImap.needTwoAccounts'), 'info');
+      else if (!imapMigrationBusy) setImapMigrationStatus(t('migrationImap.ready'), 'success');
+    } catch (error) {
+      setImapMigrationStatus(`${t('error')} : ${error.message}`, 'error');
+    }
+  }
+
+  async function runImapMigration(mode) {
+    if (imapMigrationBusy) return;
+    const selection = imapMigrationSelection();
+    if (!imapMigrationSelectionValid()) {
+      setImapMigrationStatus(t('migrationImap.chooseDifferentAccounts'), 'error');
+      return;
+    }
+    if (!imapMigrationEngineAvailable) {
+      setImapMigrationStatus(t('migrationImap.engineMissing'), 'error');
+      return;
+    }
+    const method = mode === 'login' ? 'migration.imap.test'
+      : mode === 'preview' ? 'migration.imap.preview'
+        : 'migration.imap.copy';
+    clearImapMigrationLog();
+    renderImapMigrationSummary(null);
+    if (mode !== 'copy') imapMigrationPreviewToken = '';
+    imapMigrationBusy = true;
+    syncImapMigrationControls();
+    setImapMigrationStatus(t(`migrationImap.running.${mode}`), 'busy');
+    try {
+      const result = await rpc(method, {
+        ...selection,
+        previewToken: mode === 'copy' ? imapMigrationPreviewToken : '',
+      });
+      if (mode === 'preview') imapMigrationPreviewToken = String(result.previewToken || '');
+      else if (mode === 'copy') imapMigrationPreviewToken = '';
+      renderImapMigrationSummary(result, 'success');
+      setImapMigrationStatus(t(`migrationImap.done.${mode}`), 'success');
+    } catch (error) {
+      imapMigrationPreviewToken = '';
+      renderImapMigrationSummary({ message: error.message }, 'error');
+      setImapMigrationStatus(`${t('error')} : ${error.message}`, 'error');
+    } finally {
+      imapMigrationBusy = false;
+      syncImapMigrationControls();
+    }
+  }
+
+  async function cancelImapMigration() {
+    if (!imapMigrationBusy) return;
+    try {
+      await rpc('migration.imap.cancel');
+      setImapMigrationStatus(t('migrationImap.stopping'), 'busy');
+    } catch (error) {
+      setImapMigrationStatus(`${t('error')} : ${error.message}`, 'error');
+    }
+  }
+
   function openSettings() {
     document.getElementById('set-theme').value = config.theme || 'dark';
     document.getElementById('set-locale').value = config.locale || 'fr';
@@ -9380,6 +9607,7 @@ const App = (() => {
     populateEmlImportAccounts();
     refreshSecuritySettings().catch(() => {});
     refreshCalendarCategorySettings().catch(() => {});
+    refreshImapMigrationSettings().catch(() => {});
 
     const syncList = document.getElementById('sync-account-list');
     syncList.innerHTML = accounts.length ? accounts.map(account => `
@@ -10049,6 +10277,25 @@ const App = (() => {
     document.getElementById('contacts-group-filter').onchange = () => loadContacts().catch(() => {});
     document.getElementById('btn-settings').onclick = openSettings;
     wireSettingsTabs();
+    document.getElementById('imap-migration-source')?.addEventListener('change', () => invalidateImapMigrationPreview());
+    document.getElementById('imap-migration-destination')?.addEventListener('change', () => invalidateImapMigrationPreview());
+    document.getElementById('btn-imap-migration-swap')?.addEventListener('click', () => {
+      if (imapMigrationBusy) return;
+      const source = document.getElementById('imap-migration-source');
+      const destination = document.getElementById('imap-migration-destination');
+      if (!source || !destination) return;
+      const current = source.value;
+      source.value = destination.value;
+      destination.value = current;
+      invalidateImapMigrationPreview();
+    });
+    document.getElementById('btn-imap-migration-test')?.addEventListener('click', () => runImapMigration('login'));
+    document.getElementById('btn-imap-migration-preview')?.addEventListener('click', () => runImapMigration('preview'));
+    document.getElementById('btn-imap-migration-copy')?.addEventListener('click', () => runImapMigration('copy'));
+    document.getElementById('btn-imap-migration-cancel')?.addEventListener('click', cancelImapMigration);
+    document.getElementById('btn-imap-migration-origin')?.addEventListener('click', () => {
+      openExternal('https://github.com/Othman-Benbrahim/Mailbox-Synchroniseur', { displayText: 'Mailbox Synchroniseur' });
+    });
     document.getElementById('btn-close-startup-summary')?.addEventListener('click', closeStartupSummary);
     document.getElementById('btn-enter-libramail')?.addEventListener('click', closeStartupSummary);
     document.getElementById('startup-summary-dont-show')?.addEventListener('change', event => {

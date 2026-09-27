@@ -770,6 +770,7 @@
       <button class="settings-tab-button" id="settings-tab-mail" type="button" role="tab" aria-selected="false" data-settings-tab="mail"><i class="fa-regular fa-envelope"></i><span data-i18n="settings.tab.mail"></span></button>
       <button class="settings-tab-button" id="settings-tab-spam" type="button" role="tab" aria-selected="false" data-settings-tab="spam"><i class="fa-solid fa-shield-virus"></i><span data-i18n="settings.tab.spam"></span></button>
       <button class="settings-tab-button" id="settings-tab-planning" type="button" role="tab" aria-selected="false" data-settings-tab="planning"><i class="fa-solid fa-calendar-days"></i><span data-i18n="settings.tab.planning"></span></button>
+      <button class="settings-tab-button" id="settings-tab-migration" type="button" role="tab" aria-selected="false" data-settings-tab="migration"><i class="fa-solid fa-right-left"></i><span data-i18n="settings.tab.migration"></span></button>
       <button class="settings-tab-button" id="settings-tab-security" type="button" role="tab" aria-selected="false" data-settings-tab="security"><i class="fa-solid fa-shield-halved"></i><span data-i18n="settings.tab.security"></span></button>
       <button class="settings-tab-button" id="settings-tab-data" type="button" role="tab" aria-selected="false" data-settings-tab="data"><i class="fa-solid fa-box-archive"></i><span data-i18n="settings.tab.data"></span></button>
     </div>
@@ -918,6 +919,50 @@
           </div>
           <div id="calendar-category-settings-status" class="field-hint"></div>
           <div id="calendar-category-list" class="calendar-category-list"></div>
+        </div>
+      </section>
+
+      <section class="settings-tab-panel hidden" role="tabpanel" data-settings-panel="migration" aria-labelledby="settings-tab-migration">
+        <div class="settings-section-title">
+          <i class="fa-solid fa-right-left"></i>
+          <span data-i18n="migrationImap.sectionTitle"></span>
+        </div>
+        <div class="imap-migration-card">
+          <div class="imap-migration-intro">
+            <div>
+              <strong data-i18n="migrationImap.title"></strong>
+              <p data-i18n="migrationImap.intro"></p>
+            </div>
+            <span class="imap-migration-badge" data-i18n="migrationImap.phaseBadge"></span>
+          </div>
+          <div class="imap-migration-safety"><i class="fa-solid fa-shield-halved"></i><span data-i18n="migrationImap.safety"></span></div>
+          <div class="imap-migration-origin">
+            <i class="fa-brands fa-github" aria-hidden="true"></i>
+            <span data-i18n="migrationImap.origin"></span>
+            <button class="link-button" id="btn-imap-migration-origin" type="button" data-i18n="migrationImap.originLink"></button>
+          </div>
+          <div id="imap-migration-engine-status" class="imap-migration-engine-status" aria-live="polite"></div>
+
+          <div class="imap-migration-accounts">
+            <label class="field"><span data-i18n="migrationImap.source"></span><select id="imap-migration-source"></select></label>
+            <button class="iconbtn imap-migration-swap" id="btn-imap-migration-swap" type="button" data-i18n-title="migrationImap.swap"><i class="fa-solid fa-right-left"></i></button>
+            <label class="field"><span data-i18n="migrationImap.destination"></span><select id="imap-migration-destination"></select></label>
+          </div>
+          <div class="field-hint" id="imap-migration-account-hint" data-i18n="migrationImap.accountHint"></div>
+
+          <div class="imap-migration-actions">
+            <button class="btn" id="btn-imap-migration-test" type="button"><i class="fa-solid fa-plug-circle-check"></i><span data-i18n="migrationImap.test"></span></button>
+            <button class="btn" id="btn-imap-migration-preview" type="button"><i class="fa-solid fa-magnifying-glass"></i><span data-i18n="migrationImap.preview"></span></button>
+            <button class="btn primary" id="btn-imap-migration-copy" type="button" disabled><i class="fa-solid fa-copy"></i><span data-i18n="migrationImap.copy"></span></button>
+            <button class="btn danger hidden" id="btn-imap-migration-cancel" type="button"><i class="fa-solid fa-stop"></i><span data-i18n="migrationImap.stop"></span></button>
+          </div>
+
+          <div id="imap-migration-summary" class="imap-migration-summary hidden" aria-live="polite"></div>
+          <div class="imap-migration-log-wrap">
+            <div class="imap-migration-log-heading"><span><i class="fa-solid fa-terminal"></i><span data-i18n="migrationImap.log"></span></span><small data-i18n="migrationImap.logHint"></small></div>
+            <pre id="imap-migration-log" class="imap-migration-log" aria-live="polite"></pre>
+          </div>
+          <div id="imap-migration-status" class="field-hint" aria-live="polite"></div>
         </div>
       </section>
 
