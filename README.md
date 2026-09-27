@@ -15,13 +15,13 @@ accounts without requiring Node.js to be installed on the target computer.
 
 ## Highlights
 
-- Multiple IMAP and SMTP accounts with a unified inbox
-- Incremental synchronisation, automatic startup check and cancellable activity
+- Multiple IMAP, POP3 and SMTP accounts with a unified inbox
+- Incremental synchronisation, IMAP batching/recovery, POP3 STARTTLS, automatic startup check and cancellable activity
 - Conversations, full-text search, date groups and unread/total counters
 - Sent, spam and trash folders
 - Labels directly from the message list
 - Contacts, groups, avatars, trusted senders and address autocompletion
-- Calendar with month, week, work-week and year views, ICS/ICAL/VCS/CSV import, read-only Internet ICS subscriptions and a collapsible main-window agenda pane
+- Calendar with month, week, work-week and year views, ICS/ICAL/VCS/CSV import, read-only Internet ICS subscriptions, authenticated Google Calendar synchronisation and a collapsible main-window agenda pane
 - Provider logos or custom account icons
 - Compose, reply, reply all, forward, Cc, Bcc and attachments
 - Per-account signatures, read receipt and delivery status requests
@@ -59,8 +59,8 @@ distribution.
 
 ### Windows
 
-Extract the archive, run `check_portable.cmd`, then launch `LibraMail.vbs`.
-Microsoft Edge WebView2 is required by the Neutralino window.
+Extract the archive and double-click `LibraMail.exe`.
+The Node.js runtime is embedded; Microsoft Edge WebView2 is required by the Neutralino window.
 
 ## Build from source
 
@@ -120,14 +120,14 @@ sans exiger l'installation de Node.js sur l'ordinateur cible.
 
 ## Fonctions principales
 
-- Plusieurs comptes IMAP et SMTP avec boîte unifiée
-- Synchronisation incrémentale, relève au démarrage et activité interruptible
+- Plusieurs comptes IMAP, POP3 et SMTP avec boîte unifiée
+- Synchronisation incrémentale, traitement IMAP par lots avec reprise, POP3 STARTTLS, relève au démarrage et activité interruptible
 - Conversations, recherche plein texte et regroupement par période
 - Compteurs de messages non lus et totaux pour chaque compte
 - Dossiers Envoyés, Indésirables et Corbeille
 - Étiquettes directement depuis la liste des messages
 - Contacts, groupes, avatars, expéditeurs de confiance et autocomplétion
-- Planning avec vues mois, semaine, semaine de travail et année, import ICS/ICAL/VCS/CSV, abonnements ICS Internet en lecture seule et volet agenda rétractable dans la fenêtre principale
+- Planning avec vues mois, semaine, semaine de travail et année, import ICS/ICAL/VCS/CSV, abonnements ICS Internet en lecture seule, synchronisation Google Calendar authentifiée et volet agenda rétractable dans la fenêtre principale
 - Logos de fournisseurs ou icônes de compte personnalisées
 - Rédaction, réponse, réponse à tous, transfert, Cc, Cci et pièces jointes
 - Signatures par compte, demandes d'accusé de lecture et de réception
@@ -167,8 +167,8 @@ distribution Linux.
 
 ### Windows
 
-Décompressez l'archive, lancez `check_portable.cmd`, puis `LibraMail.vbs`.
-La fenêtre Neutralino nécessite Microsoft Edge WebView2.
+Décompressez l'archive puis double-cliquez sur `LibraMail.exe`.
+Le runtime Node.js est embarqué ; la fenêtre Neutralino nécessite Microsoft Edge WebView2.
 
 ## Compilation depuis les sources
 

@@ -1,3 +1,51 @@
+# LibraMail 0.6.0 - 2026-09-27
+
+LibraMail 0.6.0 améliore la robustesse des synchronisations de courrier, ajoute une synchronisation Google Calendar authentifiée et bidirectionnelle, enrichit les diagnostics et renforce la chaîne de construction avant publication.
+
+## Courrier et synchronisation
+
+- Ajout de STARTTLS pour les comptes POP3 lorsqu'il est requis par le serveur.
+- Amélioration de la relève IMAP des grosses boîtes avec traitement par lots, checkpoints, reprise et reconnexion plus robuste.
+- Le rafraîchissement de la boîte unifiée ne bloque plus inutilement l'affichage de la liste pendant une relève.
+- Les diagnostics de synchronisation indiquent désormais les principales phases, les durées et les catégories d'erreurs utiles pour IMAP, POP3 et Google Calendar.
+- Les diagnostics structurés masquent les mots de passe, jetons OAuth et secrets et n'ajoutent ni sujet, ni corps de mail, ni contenu d'événement.
+
+## Google Calendar
+
+- Ajout d'une connexion Google Calendar authentifiée par OAuth2 avec PKCE et retour local sur `127.0.0.1`.
+- Découverte des agendas principaux, secondaires et partagés avec prise en compte des rôles et des calendriers en lecture seule.
+- Synchronisation incrémentale des événements avec prise en charge des `syncToken` et resynchronisation complète lorsqu'un jeton Google a expiré.
+- Création, modification et suppression bidirectionnelles pour les agendas autorisant l'écriture.
+- Protection contre l'écrasement silencieux des modifications concurrentes grâce aux ETag : en cas de conflit HTTP 412, la version distante est rechargée avant une nouvelle validation explicite.
+- Les jetons d'accès restent en mémoire ; le jeton de rafraîchissement et le Client secret OAuth sont conservés dans le stockage protégé des identifiants.
+- Le verrouillage de LibraMail annule une autorisation OAuth en cours et nettoie l'état OAuth temporaire en mémoire.
+- La connexion et les métadonnées de synchronisation persistent après redémarrage sans rouvrir le navigateur.
+- Le simulateur Google Calendar reste strictement désactivé sauf activation explicite par variable d'environnement.
+- Les pièces jointes des rendez-vous LibraMail restent locales et ne sont pas synchronisées vers Google Calendar.
+
+## Planning et interface
+
+- Ajout d'une légende dynamique des catégories et couleurs du Planning.
+- Les calendriers Google en lecture seule sont clairement identifiés et leurs champs d'édition sont désactivés.
+- Les confirmations du Planning utilisent les dialogues LibraMail au lieu des boîtes JavaScript natives.
+- Ajout d'un révélateur de mot de passe pour les identifiants IMAP, POP3 et SMTP, les mots de passe de sauvegarde et le Client secret Google OAuth.
+
+## Construction, sécurité et publication
+
+- Alignement des runtimes Linux et Windows sur Node.js 22.23.1 afin de conserver l'ABI 127 utilisée par `better-sqlite3`.
+- Les builds GitHub Linux et Windows sont désormais précédés d'un job de vérification complet.
+- Le workflow de publication rejoue la suite de tests avant de compiler et publier un tag.
+- `release.sh` exécute le préflight complet avant de créer le commit et le tag de release.
+- Le contrôle de sécurité du dépôt détecte plusieurs signatures fortes de secrets accidentellement suivis sans utiliser de règles génériques trop sujettes aux faux positifs.
+- Les paquets publics Linux et Windows ont été construits puis contrôlés sans données utilisateur embarquées.
+
+## Qualification
+
+- Validation de la synchronisation Google Calendar sur un compte Google réel : connexion, persistance, synchronisation dans les deux sens, suppression, conflits ETag et calendriers en lecture seule.
+- Validation des artefacts GitHub Linux x86_64 et Windows x86_64.
+- Sous Linux, le runtime embarqué Node.js 22.23.1 et `better-sqlite3` ABI 127 ont été chargés et testés directement depuis le paquet produit.
+- Le paquet Windows a été lancé et contrôlé sur Windows avec le runtime et le module natif embarqués.
+
 # LibraMail 0.5.1 - 2026-09-12
 
 LibraMail 0.5.1 est une version de durcissement qui renforce le stockage local, sécurise davantage les abonnements Planning, fiabilise la validation Linux/Windows et clarifie les compteurs de messages.
