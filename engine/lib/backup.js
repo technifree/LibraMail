@@ -31,6 +31,7 @@ const RUNTIME_DATA_FILES = new Set([
   'engine.stdout.log',
   'engine.stderr.log',
   'engine-startup.log',
+  'imap-migration-history.json',
   'index.db-wal',
   'index.db-shm',
 ]);

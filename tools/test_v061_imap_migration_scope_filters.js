@@ -188,7 +188,7 @@ function fakeSpawn(program, args) {
   assert(imap.includes('delimiter: folder.delimiter || null'));
   assert(imap.includes("folder.flags.has('\\\\Noselect')"));
   assert(imap.includes('doSTARTTLS: true'));
-  assert(fr['migrationImap.phaseBadge'].includes('Phase B'));
+  assert(fr['migrationImap.filtersTitle'].includes('Filtres'));
   assert(fr['migrationImap.filterSemantics'].includes('simulation'));
 
   console.log('[LibraMail] Test périmètre/filtres Migration IMAP 0.6.1 : OK');

@@ -1000,6 +1000,21 @@
           </div>
 
           <div id="imap-migration-summary" class="imap-migration-summary hidden" aria-live="polite"></div>
+
+          <div class="imap-migration-history-card">
+            <div class="imap-migration-subheading">
+              <div>
+                <strong data-i18n="migrationImap.historyTitle"></strong>
+                <small data-i18n="migrationImap.historyHint"></small>
+              </div>
+              <button class="btn" id="btn-imap-migration-history-clear" type="button">
+                <i class="fa-solid fa-trash-can"></i><span data-i18n="migrationImap.historyClear"></span>
+              </button>
+            </div>
+            <div id="imap-migration-history-empty" class="field-hint" data-i18n="migrationImap.historyEmpty"></div>
+            <div id="imap-migration-history-list" class="imap-migration-history-list"></div>
+          </div>
+
           <div class="imap-migration-log-wrap">
             <div class="imap-migration-log-heading"><span><i class="fa-solid fa-terminal"></i><span data-i18n="migrationImap.log"></span></span><small data-i18n="migrationImap.logHint"></small></div>
             <pre id="imap-migration-log" class="imap-migration-log" aria-live="polite"></pre>

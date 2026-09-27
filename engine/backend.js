@@ -14,6 +14,7 @@ const { simpleParser } = require('mailparser');
 const db = require('./lib/db');
 const imap = require('./lib/imap');
 const imapMigration = require('./lib/imap_migration');
+const imapMigrationHistory = require('./lib/imap_migration_history');
 const pop3 = require('./lib/pop3');
 const smtp = require('./lib/smtp');
 const spam = require('./lib/spam');
@@ -40,10 +41,6 @@ const atomicFile = require('./lib/atomic_file');
 const PORT = 47800;
 const APP_VERSION = '0.6.0';
 const ROOT = path.resolve(__dirname, '..');
-const imapMigrationManager = new imapMigration.ImapMigrationManager({
-  root: ROOT,
-  onEvent: (event, data) => broadcast(event, data),
-});
 
 // LibraMail 0.4.8 — séparation programme / données utilisateur.
 // Sans variable d'environnement, le mode portable conserve EXACTEMENT les
@@ -57,6 +54,19 @@ const {
 } = appPaths.createAppPaths(ROOT);
 const ACCOUNTS_FILE = path.join(DATA, 'accounts.json');
 const CONFIG_FILE = path.join(DATA, 'config.json');
+const imapMigrationHistoryStore = new imapMigrationHistory.ImapMigrationHistoryStore({ dataDir: DATA });
+const imapMigrationManager = new imapMigration.ImapMigrationManager({
+  root: ROOT,
+  onEvent: (event, data) => broadcast(event, data),
+  onRecord: record => {
+    try {
+      imapMigrationHistoryStore.add(record);
+      broadcast('migration.imap.history.changed', {});
+    } catch (error) {
+      console.warn('[LibraMail] Historique Migration IMAP :', error.message);
+    }
+  },
+});
 
 // LibraMail 0.5.0 - protection RPC WebSocket local.
 const RPC_SESSION_TOKEN = rpcSecurity.createSessionToken();
@@ -3387,6 +3397,14 @@ const methods = {
 
   'migration.imap.invalidatePreview': async () => {
     imapMigrationManager.invalidatePreview();
+    return true;
+  },
+
+  'migration.imap.history.list': async () => ({ items: imapMigrationHistoryStore.list() }),
+
+  'migration.imap.history.clear': async () => {
+    imapMigrationHistoryStore.clear();
+    broadcast('migration.imap.history.changed', {});
     return true;
   },
 

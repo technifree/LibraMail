@@ -6161,7 +6161,7 @@ button.planner-attachment-open:hover strong {
   pointer-events: none;
 }
 
-/* LibraMail 0.6.1 — Migration IMAP, phase A non destructive. */
+/* LibraMail 0.6.1 — Migration IMAP, phases A à C. */
 .imap-migration-card {
   display: flex;
   flex-direction: column;
@@ -6332,6 +6332,64 @@ button.planner-attachment-open:hover strong {
 }
 .imap-migration-summary.success { border-color: color-mix(in srgb, var(--success, #3a9b62) 45%, var(--border)); }
 .imap-migration-summary.error { border-color: color-mix(in srgb, var(--danger, #c95858) 45%, var(--border)); }
+.imap-migration-history-card {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid var(--border-soft, var(--border));
+  border-radius: 11px;
+  background: var(--surface-2, rgba(127,127,127,.045));
+}
+.imap-migration-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.imap-migration-history-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 10px;
+  border: 1px solid var(--border-soft, var(--border));
+  border-radius: 9px;
+  background: var(--panel, var(--surface));
+}
+.imap-migration-history-main { min-width: 0; }
+.imap-migration-history-route {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.imap-migration-history-route i { color: var(--muted); font-size: 11px; }
+.imap-migration-history-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+.imap-migration-history-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--surface-2, rgba(127,127,127,.08));
+  font-size: 11px;
+  font-weight: 700;
+}
+.imap-migration-history-status.completed { color: var(--success, #3a9b62); }
+.imap-migration-history-status.failed { color: var(--danger, #c95858); }
+.imap-migration-history-status.cancelled { color: var(--warning, #ad7b20); }
+.imap-migration-history-actions { display: flex; gap: 7px; }
+.imap-migration-history-actions .btn { white-space: nowrap; }
 .imap-migration-log-wrap {
   overflow: hidden;
   border: 1px solid var(--border-soft, var(--border));
@@ -6371,4 +6429,9 @@ button.planner-attachment-open:hover strong {
   .imap-migration-subheading { align-items: stretch; flex-direction: column; }
   .imap-migration-filter-grid { grid-template-columns: 1fr 1fr; }
   .imap-migration-folder-table { min-width: 680px; }
+  .imap-migration-history-row { grid-template-columns: 1fr; }
+  .imap-migration-history-actions { justify-content: flex-start; }
+}
+@media (max-width: 520px) {
+  .imap-migration-filter-grid { grid-template-columns: 1fr; }
 }

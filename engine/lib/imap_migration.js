@@ -562,6 +562,7 @@ class ImapMigrationManager {
     spawnImpl = spawn,
     engineResolver = null,
     onEvent = () => {},
+    onRecord = () => {},
     now = () => Date.now(),
   } = {}) {
     if (!root) throw new Error('Racine LibraMail manquante pour la migration IMAP.');
@@ -571,6 +572,7 @@ class ImapMigrationManager {
     this.spawnImpl = spawnImpl;
     this.engineResolver = engineResolver || (() => resolveEngine(this.root, this.env, this.platform));
     this.onEvent = onEvent;
+    this.onRecord = onRecord;
     this.now = now;
     this.fingerprintKey = crypto.randomBytes(32);
     this.active = null;
@@ -579,6 +581,24 @@ class ImapMigrationManager {
 
   invalidatePreview() {
     this.preview = null;
+  }
+
+  _recordCopy({ runId, source, destination, plan, startedAt, finishedAt, status, summary, elapsedMs, exitCode }) {
+    if (!['completed', 'failed', 'cancelled'].includes(status)) return;
+    try {
+      this.onRecord({
+        id: runId,
+        startedAt: Number(startedAt) || 0,
+        finishedAt: Number(finishedAt) || Number(startedAt) || 0,
+        status,
+        sourceAccountId: source.id,
+        destinationAccountId: destination.id,
+        plan: normalizeMigrationPlan(plan),
+        summary: { ...summary },
+        elapsedMs: Math.max(0, Number(elapsedMs) || 0),
+        exitCode: Number.isInteger(exitCode) ? exitCode : -1,
+      });
+    } catch {}
   }
 
   _fingerprint(source, destination, plan = {}) {
@@ -733,11 +753,19 @@ class ImapMigrationManager {
       child.stderr?.on?.('data', chunk => consume('stderr', chunk));
 
       child.once?.('error', error => {
+        const elapsedMs = Math.max(0, this.now() - startedAt);
+        if (mode === 'copy') {
+          this._recordCopy({
+            runId, source, destination, plan: normalizedPlan, startedAt, finishedAt: this.now(),
+            status: 'failed', summary, elapsedMs, exitCode: -1,
+          });
+        }
         emit('migration.imap.error', { error: `Impossible de lancer imapsync : ${error.message}` });
         finish(false, new Error(`Impossible de lancer imapsync : ${error.message}`));
       });
 
       child.once?.('close', code => {
+        if (settled) return;
         consume('stdout', '', true);
         consume('stderr', '', true);
         const elapsedMs = Math.max(0, this.now() - startedAt);
@@ -754,6 +782,12 @@ class ImapMigrationManager {
         if (cancelled) {
           const message = 'Opération arrêtée. Une copie peut être partielle ; refaites une simulation avant de reprendre.';
           this.preview = null;
+          if (mode === 'copy') {
+            this._recordCopy({
+              runId, source, destination, plan: normalizedPlan, startedAt, finishedAt: this.now(),
+              status: 'cancelled', summary: resultSummary, elapsedMs, exitCode,
+            });
+          }
           emit('migration.imap.cancelled', { elapsedMs, summary: resultSummary, error: message });
           finish(false, new Error(message));
           return;
@@ -766,6 +800,12 @@ class ImapMigrationManager {
             ? exitMessage(exitCode)
             : 'Le bilan signale des erreurs ou des messages non transférés. Consultez le journal.';
           this.preview = null;
+          if (mode === 'copy') {
+            this._recordCopy({
+              runId, source, destination, plan: normalizedPlan, startedAt, finishedAt: this.now(),
+              status: 'failed', summary: resultSummary, elapsedMs, exitCode,
+            });
+          }
           emit('migration.imap.error', { elapsedMs, exitCode, summary: resultSummary, error: message });
           finish(false, new Error(message));
           return;
@@ -781,6 +821,12 @@ class ImapMigrationManager {
             sourceId: source.id,
             destinationId: destination.id,
           };
+        }
+        if (mode === 'copy') {
+          this._recordCopy({
+            runId, source, destination, plan: normalizedPlan, startedAt, finishedAt: this.now(),
+            status: 'completed', summary: resultSummary, elapsedMs, exitCode,
+          });
         }
         const result = {
           ok: true,
