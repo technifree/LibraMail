@@ -1483,6 +1483,7 @@
           </div>
           <div class="field"><label for="planner-location" data-i18n="planner.location"></label><input id="planner-location" type="text" maxlength="500" data-i18n-ph="planner.locationPlaceholder"></div>
           <div class="field"><label for="planner-notes" data-i18n="planner.notes"></label><textarea id="planner-notes" rows="5" data-i18n-ph="planner.notesPlaceholder"></textarea></div>
+          <div id="planner-remote-readonly" class="planner-remote-readonly hidden"><i class="fa-brands fa-google"></i><span data-i18n="planner.googleReadOnlyEvent"></span></div>
           <div class="planner-attachments-section">
             <div class="planner-attachments-heading">
               <span><i class="fa-solid fa-paperclip"></i><strong data-i18n="planner.attachments"></strong></span>
@@ -1512,6 +1513,28 @@
       <button class="iconbtn" id="btn-close-planner-subscriptions" type="button"><i class="fa-solid fa-xmark"></i></button>
     </header>
     <div class="body planner-subscriptions-body">
+      <section class="planner-google-section">
+        <div class="planner-google-head">
+          <div class="planner-google-heading">
+            <span class="planner-google-mark"><i class="fa-brands fa-google"></i></span>
+            <div><strong data-i18n="planner.googleCalendar"></strong><small data-i18n="planner.googleReadOnlyHint"></small></div>
+          </div>
+          <button class="btn compact" id="btn-planner-google-sync-all" type="button"><i class="fa-solid fa-rotate"></i><span data-i18n="planner.googleSyncAll"></span></button>
+        </div>
+        <div class="planner-google-connect">
+          <div class="field planner-google-client-id"><label for="planner-google-client-id" data-i18n="planner.googleClientId"></label><input id="planner-google-client-id" type="text" maxlength="1000" autocomplete="off" spellcheck="false" data-i18n-ph="planner.googleClientIdPlaceholder"></div>
+          <div class="field planner-google-login-hint"><label for="planner-google-login-hint" data-i18n="planner.googleAccountHint"></label><input id="planner-google-login-hint" type="email" maxlength="320" autocomplete="email" data-i18n-ph="planner.googleAccountHintPlaceholder"></div>
+          <div class="planner-google-connect-actions">
+            <button class="btn hidden" id="btn-planner-google-cancel" type="button"><i class="fa-solid fa-xmark"></i><span data-i18n="planner.googleCancelConnection"></span></button>
+            <button class="btn primary" id="btn-planner-google-connect" type="button"><i class="fa-brands fa-google"></i><span data-i18n="planner.googleConnect"></span></button>
+          </div>
+          <div class="planner-google-help"><i class="fa-solid fa-circle-info"></i><span data-i18n="planner.googleClientIdHelp"></span></div>
+        </div>
+        <div id="planner-google-connections" class="planner-google-connections"></div>
+        <div id="planner-google-empty" class="planner-google-empty hidden"><i class="fa-brands fa-google"></i><span data-i18n="planner.googleNoConnections"></span></div>
+        <div id="planner-google-status" class="planner-subscription-status" role="status" aria-live="polite"></div>
+      </section>
+      <div class="planner-external-separator"><span data-i18n="planner.internetCalendars"></span></div>
       <div class="planner-subscription-form">
         <div class="field planner-subscription-url"><label for="planner-subscription-url" data-i18n="planner.subscriptionUrl"></label><input id="planner-subscription-url" type="url" autocomplete="off" placeholder="webcal://… / https://…"></div>
         <div class="field"><label for="planner-subscription-name" data-i18n="planner.subscriptionName"></label><input id="planner-subscription-name" type="text" maxlength="240" autocomplete="off" data-i18n-ph="planner.subscriptionNamePlaceholder"></div>

@@ -3506,12 +3506,23 @@ const methods = {
   'calendar.list': async params => db.listCalendarEvents(params || {}),
   'calendar.get': async ({ id }) => db.getCalendarEvent(id),
   'calendar.save': async ({ id = null, event } = {}) => {
-    const saved = db.saveCalendarEvent(event || {}, id);
-    broadcast('calendar.changed', { action: id ? 'updated' : 'created', id: saved.id });
+    const numericId = Number(id) || null;
+    if (numericId) {
+      const existing = db.getCalendarEvent(numericId);
+      if (existing?.remoteCalendarId) {
+        throw new Error('Ce rendez-vous Google est en lecture seule dans cette version de LibraMail');
+      }
+    }
+    const saved = db.saveCalendarEvent(event || {}, numericId);
+    broadcast('calendar.changed', { action: numericId ? 'updated' : 'created', id: saved.id });
     return saved;
   },
   'calendar.remove': async ({ id } = {}) => {
     const numericId = Number(id);
+    const existing = db.getCalendarEvent(numericId);
+    if (existing?.remoteCalendarId) {
+      throw new Error('Ce rendez-vous Google est en lecture seule dans cette version de LibraMail');
+    }
     const removed = db.removeCalendarEvent(numericId);
     if (removed) {
       cleanupCalendarEventAttachmentDirectory(numericId);
@@ -3523,6 +3534,23 @@ const methods = {
   'calendar.connections.list': async () => db.listCalendarConnections(),
   'calendar.remoteCalendars.list': async ({ connectionId = null, selectedOnly = false } = {}) =>
     db.listCalendarRemoteCalendars({ connectionId, selectedOnly }),
+  'calendar.remoteCalendars.select': async ({ id, selected = true } = {}) => {
+    const result = db.setCalendarRemoteCalendarSelected(id, Boolean(selected));
+    if (result.removedEvents) cleanupOrphanCalendarAttachmentFiles();
+    broadcast('calendar.changed', {
+      action: 'google-calendar-selection',
+      remoteCalendarId: Number(id),
+      selected: Boolean(selected),
+      removed: result.removedEvents,
+    });
+    broadcast('calendar.google.changed', {
+      action: 'calendar-selection',
+      connectionId: result.calendar?.connectionId || null,
+      remoteCalendarId: Number(id),
+      selected: Boolean(selected),
+    });
+    return result;
+  },
 
   'calendar.google.oauth.begin': async ({ clientId = '', loginHint = '' } = {}) => {
     const flow = await googleCalendarOAuthManager.begin({ clientId, loginHint });

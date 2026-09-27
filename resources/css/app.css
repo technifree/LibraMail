@@ -3835,6 +3835,94 @@ html[data-theme="light"] #reader-empty.reader-empty-brand .reader-empty-logo-lig
 }
 
 
+/* Google Calendar authentifié 0.6.0 */
+.planner-google-section {
+  padding:1px 0 14px;
+  border-bottom:1px solid var(--border);
+}
+.planner-google-head {
+  display:flex; align-items:center; gap:10px; margin-bottom:10px;
+}
+.planner-google-heading {
+  min-width:0; flex:1; display:flex; align-items:center; gap:9px;
+}
+.planner-google-heading > div { min-width:0; }
+.planner-google-heading strong,.planner-google-heading small { display:block; }
+.planner-google-heading strong { color:var(--fg-strong); font-size:12px; }
+.planner-google-heading small { margin-top:2px; color:var(--fg-faint); font-size:9.5px; line-height:1.35; }
+.planner-google-mark {
+  width:30px; height:30px; flex:none; display:grid; place-items:center;
+  border:1px solid var(--border); border-radius:9px; background:var(--bg-panel-2);
+  color:var(--fg-strong); font-size:15px;
+}
+.planner-google-connect {
+  display:grid; grid-template-columns:minmax(0,1.6fr) minmax(180px,.9fr) auto;
+  gap:8px; align-items:end; padding:10px;
+  border:1px solid var(--border); border-radius:10px; background:var(--bg-panel-2);
+}
+.planner-google-connect-actions { display:flex; align-items:center; justify-content:flex-end; gap:6px; min-height:34px; }
+.planner-google-help {
+  grid-column:1 / -1; display:flex; align-items:flex-start; gap:7px;
+  color:var(--fg-faint); font-size:9.5px; line-height:1.4;
+}
+.planner-google-help i { color:var(--accent); margin-top:2px; }
+.planner-google-connections { display:flex; flex-direction:column; gap:8px; margin-top:10px; }
+.planner-google-connection {
+  border:1px solid var(--border); border-radius:10px; background:var(--bg-panel-2); overflow:hidden;
+}
+.planner-google-connection-head {
+  display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:10px; padding:9px 10px;
+}
+.planner-google-connection-main { min-width:0; }
+.planner-google-connection-title { display:flex; align-items:center; gap:7px; min-width:0; }
+.planner-google-connection-title strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--fg-strong); font-size:11px; }
+.planner-google-connection-title i { color:var(--accent); flex:none; }
+.planner-google-connection-main small { display:block; margin-top:3px; color:var(--fg-faint); font-size:9px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.planner-google-connection-meta { display:flex; align-items:center; gap:5px; margin-top:5px; color:var(--fg-muted); font-size:9px; }
+.planner-google-connection-meta .ok { color:var(--ok); }
+.planner-google-connection-meta .error { color:var(--danger); }
+.planner-google-connection-meta .partial { color:var(--warning,#c28b20); }
+.planner-google-connection-actions { display:flex; align-items:center; gap:4px; }
+.planner-google-calendars {
+  border-top:1px solid var(--border); padding:4px 10px 7px;
+}
+.planner-google-calendar-row {
+  display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:8px; align-items:center;
+  min-height:31px; padding:4px 0; border-bottom:1px solid color-mix(in srgb,var(--border) 62%,transparent);
+}
+.planner-google-calendar-row:last-child { border-bottom:0; }
+.planner-google-calendar-row input { margin:0; }
+.planner-google-calendar-name { min-width:0; display:flex; align-items:center; gap:7px; }
+.planner-google-calendar-name span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10px; color:var(--fg); }
+.planner-google-calendar-swatch { width:9px; height:9px; flex:none; border-radius:3px; background:var(--calendar-color,var(--accent)); border:1px solid color-mix(in srgb,var(--fg) 16%,transparent); }
+.planner-google-calendar-badges { display:flex; align-items:center; gap:4px; }
+.planner-google-badge {
+  padding:2px 5px; border:1px solid var(--border); border-radius:999px;
+  color:var(--fg-faint); background:var(--bg-panel); font-size:8px; white-space:nowrap;
+}
+.planner-google-empty { display:flex; align-items:center; justify-content:center; gap:7px; min-height:48px; color:var(--fg-faint); font-size:10px; }
+.planner-external-separator {
+  display:flex; align-items:center; gap:8px; margin:13px 0 9px; color:var(--fg-muted); font-size:10px; font-weight:700;
+}
+.planner-external-separator::after { content:""; height:1px; flex:1; background:var(--border); }
+.planner-remote-readonly {
+  display:flex; align-items:flex-start; gap:7px; padding:8px 9px; margin-bottom:7px;
+  border:1px solid color-mix(in srgb,var(--accent) 30%,var(--border)); border-radius:8px;
+  background:color-mix(in srgb,var(--accent) 7%,var(--bg-panel-2)); color:var(--fg-muted);
+  font-size:9.5px; line-height:1.4;
+}
+.planner-remote-readonly i { color:var(--accent); margin-top:1px; }
+.planner-editor.remote-readonly .field,
+.planner-editor.remote-readonly .planner-all-day,
+.planner-editor.remote-readonly .planner-date-grid { opacity:.78; }
+@media (max-width:900px) {
+  .planner-google-connect { grid-template-columns:1fr; }
+  .planner-google-connect-actions,.planner-google-help { grid-column:1; }
+  .planner-google-connect-actions { justify-content:flex-start; }
+  .planner-google-connection-head { grid-template-columns:1fr; }
+  .planner-google-connection-actions { justify-content:flex-start; }
+}
+
 /* Abonnements de calendriers Internet */
 .planner-subscriptions-modal-box { width:min(860px,94vw); max-height:min(780px,92vh); overflow:hidden; }
 .planner-subscriptions-body { min-height:0; overflow:auto; }

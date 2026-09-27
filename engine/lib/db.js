@@ -2895,6 +2895,24 @@ function removeCalendarRemoteCalendar(id) {
   return db.prepare('DELETE FROM calendar_remote_calendars WHERE id=?').run(Number(id)).changes > 0;
 }
 
+function setCalendarRemoteCalendarSelected(id, selected) {
+  const numericId = Number(id);
+  const current = getCalendarRemoteCalendar(numericId);
+  if (!current) throw new Error('Agenda distant introuvable');
+  const enabled = Boolean(selected);
+  let removedEvents = 0;
+  db.transaction(() => {
+    db.prepare(`UPDATE calendar_remote_calendars
+      SET selected=?,sync_token='',last_status='',last_error='',updated_at=? WHERE id=?`).run(
+      enabled ? 1 : 0, Date.now(), numericId,
+    );
+    if (!enabled) {
+      removedEvents = db.prepare('DELETE FROM calendar_events WHERE remote_calendar_id=?').run(numericId).changes;
+    }
+  })();
+  return { calendar: getCalendarRemoteCalendar(numericId), removedEvents };
+}
+
 function setCalendarEventRemoteState(id, patch = {}) {
   const numericId = Number(id);
   if (!(numericId > 0) || !getCalendarEvent(numericId)) throw new Error('Rendez-vous introuvable');
@@ -3448,6 +3466,7 @@ module.exports = {
   syncCalendarRemoteCalendars,
   updateCalendarRemoteCalendarSync,
   removeCalendarRemoteCalendar,
+  setCalendarRemoteCalendarSelected,
   getCalendarEventByRemote,
   syncCalendarRemoteEvents,
   setCalendarEventRemoteState,

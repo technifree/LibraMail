@@ -16,6 +16,11 @@
     filterAccountId: '',
     subscriptions: [],
     editingSubscriptionId: null,
+    googleConnections: [],
+    googleCalendars: {},
+    googleOAuthFlowId: '',
+    googleOAuthPollTimer: null,
+    editingRemoteEvent: false,
     summaryTimer: null,
     refreshNoticeTimer: null,
   };
@@ -626,6 +631,27 @@
     document.getElementById('planner-end-time').value = timeValue(end);
   }
 
+  function setRemoteEditorReadonly(readonly) {
+    state.editingRemoteEvent = Boolean(readonly);
+    const editor = document.getElementById('planner-editor');
+    editor?.classList.toggle('remote-readonly', state.editingRemoteEvent);
+    document.getElementById('planner-remote-readonly')?.classList.toggle('hidden', !state.editingRemoteEvent);
+    [
+      'planner-title', 'planner-account', 'planner-category', 'planner-all-day',
+      'planner-start-date', 'planner-start-time', 'planner-end-date', 'planner-end-time',
+      'planner-location', 'planner-notes',
+    ].forEach(id => {
+      const element = document.getElementById(id);
+      if (element) element.disabled = state.editingRemoteEvent;
+    });
+    const save = document.getElementById('btn-planner-save');
+    const remove = document.getElementById('btn-planner-delete');
+    const attach = document.getElementById('btn-planner-attachment-add');
+    save?.classList.toggle('hidden', state.editingRemoteEvent);
+    remove?.classList.toggle('hidden', state.editingRemoteEvent || !document.getElementById('planner-event-id')?.value);
+    attach?.classList.toggle('hidden', state.editingRemoteEvent);
+  }
+
   function openNewEvent(date = state.selected, startMinutes = null) {
     const day = startOfDay(date || new Date());
     document.getElementById('planner-event-id').value = '';
@@ -645,6 +671,7 @@
     document.getElementById('planner-notes').value = '';
     resetPlannerAttachments();
     document.getElementById('planner-form-error').textContent = '';
+    setRemoteEditorReadonly(false);
     document.getElementById('btn-planner-delete').classList.add('hidden');
     setEditorAllDay(false);
     syncEndConstraints(false);
@@ -673,7 +700,8 @@
     renderPlannerAttachments();
     loadPlannerAttachments(event.id);
     document.getElementById('planner-form-error').textContent = '';
-    document.getElementById('btn-planner-delete').classList.remove('hidden');
+    setRemoteEditorReadonly(Boolean(event.remoteCalendarId));
+    if (!event.remoteCalendarId) document.getElementById('btn-planner-delete').classList.remove('hidden');
     setEditorAllDay(Boolean(event.allDay));
     syncEndConstraints(false);
     document.getElementById('planner-editor').classList.remove('hidden');
@@ -731,6 +759,10 @@
   async function saveEvent() {
     const errorElement = document.getElementById('planner-form-error');
     errorElement.textContent = '';
+    if (state.editingRemoteEvent) {
+      errorElement.textContent = t('planner.googleReadOnlyEvent');
+      return;
+    }
     const button = document.getElementById('btn-planner-save');
     button.disabled = true;
     try {
@@ -762,6 +794,10 @@
   }
 
   async function deleteEvent() {
+    if (state.editingRemoteEvent) {
+      App.status(t('planner.googleReadOnlyEvent'), 'info');
+      return;
+    }
     const id = Number(document.getElementById('planner-event-id').value || 0);
     if (!id || !window.confirm(t('planner.deleteConfirm'))) return;
     try {
@@ -796,7 +832,7 @@
   }
 
   function paneEventHtml(event) {
-    const calendarSource = event.subscriptionName || accountLabel(event.accountId);
+    const calendarSource = event.remoteCalendarName || event.subscriptionName || accountLabel(event.accountId);
     const source = event.location ? `${calendarSource} · ${event.location}` : calendarSource;
     return `<button class="planner-main-event" type="button" data-planner-summary-event="${Number(event.id)}" style="--event-color:${esc(eventColor(event))}" title="${esc(event.title)}">
       <span class="planner-main-event-time">${esc(event.allDay ? t('planner.allDayShort') : formatTime(event.startAt))}</span>
@@ -974,6 +1010,280 @@
     return t('planner.refreshEveryMinutes', { count: value });
   }
 
+  function googleStatus(message = '', type = '') {
+    const element = document.getElementById('planner-google-status');
+    if (!element) return;
+    element.textContent = message;
+    element.className = `planner-subscription-status ${type || ''}`.trim();
+  }
+
+  function googleRoleLabel(role = '') {
+    if (role === 'owner') return t('planner.googleRoleOwner');
+    if (role === 'writer') return t('planner.googleRoleWriter');
+    if (role === 'writerWithoutPrivateAccess') return t('planner.googleRoleWriterPrivate');
+    return t('planner.googleRoleReader');
+  }
+
+  function googleConnectionLabel(connection = {}) {
+    return connection.displayName || connection.email || t('planner.googleCalendar');
+  }
+
+  function setGoogleOAuthBusy(busy) {
+    const connect = document.getElementById('btn-planner-google-connect');
+    const cancel = document.getElementById('btn-planner-google-cancel');
+    const clientId = document.getElementById('planner-google-client-id');
+    const hint = document.getElementById('planner-google-login-hint');
+    if (connect) connect.disabled = Boolean(busy);
+    if (clientId) clientId.disabled = Boolean(busy);
+    if (hint) hint.disabled = Boolean(busy);
+    cancel?.classList.toggle('hidden', !busy);
+  }
+
+  function stopGoogleOAuthPolling() {
+    if (state.googleOAuthPollTimer) clearInterval(state.googleOAuthPollTimer);
+    state.googleOAuthPollTimer = null;
+  }
+
+  async function loadGoogleConnections() {
+    try {
+      state.googleConnections = (await App.rpc('calendar.connections.list') || [])
+        .filter(connection => connection.provider === 'google');
+      const calendars = {};
+      for (const connection of state.googleConnections) {
+        calendars[connection.id] = await App.rpc('calendar.remoteCalendars.list', {
+          connectionId: connection.id,
+        }) || [];
+      }
+      state.googleCalendars = calendars;
+      const clientId = document.getElementById('planner-google-client-id');
+      if (clientId && !clientId.value && state.googleConnections[0]?.oauthClientId) {
+        clientId.value = state.googleConnections[0].oauthClientId;
+      }
+      renderGoogleConnections();
+    } catch (error) {
+      googleStatus(`${t('error')} : ${error.message}`, 'error');
+    }
+  }
+
+  function renderGoogleConnections() {
+    const root = document.getElementById('planner-google-connections');
+    const empty = document.getElementById('planner-google-empty');
+    if (!root || !empty) return;
+    empty.classList.toggle('hidden', state.googleConnections.length > 0);
+    root.classList.toggle('hidden', state.googleConnections.length === 0);
+    root.innerHTML = state.googleConnections.map(connection => {
+      const calendars = state.googleCalendars[connection.id] || [];
+      const status = String(connection.lastStatus || '');
+      const error = status === 'error';
+      const partial = status === 'partial';
+      const meta = error || partial
+        ? (connection.lastError || t('planner.lastSync', { date: formatLastSync(connection.lastSyncAt) }))
+        : t('planner.lastSync', { date: formatLastSync(connection.lastSyncAt) });
+      const calendarRows = calendars.length ? calendars.map(calendar => {
+        const color = /^#[0-9a-fA-F]{6}$/.test(String(calendar.color || '')) ? calendar.color : '#4F8BD6';
+        const badges = [
+          calendar.primary ? `<span class="planner-google-badge">${esc(t('planner.googlePrimary'))}</span>` : '',
+          `<span class="planner-google-badge">${esc(googleRoleLabel(calendar.accessRole))}</span>`,
+        ].filter(Boolean).join('');
+        const name = calendar.name || calendar.remoteId;
+        return `<label class="planner-google-calendar-row">
+          <input type="checkbox" data-google-calendar-select="${Number(calendar.id)}" ${calendar.selected ? 'checked' : ''} aria-label="${esc(t('planner.googleCalendarEnable', { name }))}">
+          <span class="planner-google-calendar-name"><i class="planner-google-calendar-swatch" style="--calendar-color:${esc(color)}"></i><span title="${esc(name)}">${esc(name)}</span></span>
+          <span class="planner-google-calendar-badges">${badges}</span>
+        </label>`;
+      }).join('') : `<div class="planner-google-empty"><i class="fa-regular fa-calendar-xmark"></i><span>${esc(t('planner.googleNoCalendars'))}</span></div>`;
+      return `<div class="planner-google-connection" data-google-connection-id="${Number(connection.id)}">
+        <div class="planner-google-connection-head">
+          <div class="planner-google-connection-main">
+            <div class="planner-google-connection-title"><i class="fa-brands fa-google"></i><strong>${esc(googleConnectionLabel(connection))}</strong></div>
+            ${connection.email && connection.email !== connection.displayName ? `<small>${esc(connection.email)}</small>` : ''}
+            <span class="planner-google-connection-meta"><i class="fa-solid ${error ? 'fa-circle-exclamation error' : partial ? 'fa-triangle-exclamation partial' : 'fa-circle-check ok'}"></i><span title="${esc(meta)}">${esc(meta)}</span></span>
+          </div>
+          <div class="planner-google-connection-actions">
+            <button class="iconbtn" type="button" data-google-sync="${Number(connection.id)}" title="${esc(t('planner.googleSync'))}"><i class="fa-solid fa-rotate"></i></button>
+            <button class="iconbtn danger-hover" type="button" data-google-remove="${Number(connection.id)}" title="${esc(t('planner.googleDisconnect'))}"><i class="fa-solid fa-link-slash"></i></button>
+          </div>
+        </div>
+        <div class="planner-google-calendars">${calendarRows}</div>
+      </div>`;
+    }).join('');
+
+    root.querySelectorAll('[data-google-sync]').forEach(button => button.addEventListener('click', () => syncGoogleConnection(Number(button.dataset.googleSync), button)));
+    root.querySelectorAll('[data-google-remove]').forEach(button => button.addEventListener('click', () => disconnectGoogleConnection(Number(button.dataset.googleRemove))));
+    root.querySelectorAll('[data-google-calendar-select]').forEach(input => input.addEventListener('change', () => setGoogleCalendarSelected(Number(input.dataset.googleCalendarSelect), input.checked, input)));
+  }
+
+  async function handleGoogleOAuthFlow(flow) {
+    if (!flow || String(flow.id || '') !== String(state.googleOAuthFlowId || '')) return;
+    if (flow.status === 'pending') {
+      googleStatus(t('planner.googleWaiting'), 'info');
+      return;
+    }
+    if (flow.status === 'completing') {
+      googleStatus(t('planner.googleCompleting'), 'info');
+      return;
+    }
+    stopGoogleOAuthPolling();
+    state.googleOAuthFlowId = '';
+    setGoogleOAuthBusy(false);
+    if (flow.status === 'complete') {
+      await loadGoogleConnections();
+      await refreshSummary();
+      if (document.getElementById('planner-modal')?.classList.contains('open')) await loadEvents();
+      const syncError = flow.result?.syncError || '';
+      googleStatus(syncError ? t('planner.googleConnectedWithError', { error: syncError }) : t('planner.googleConnected'), syncError ? 'error' : 'success');
+    } else if (flow.status === 'cancelled') {
+      googleStatus(t('planner.googleConnectionCancelled'), 'info');
+    } else if (flow.status === 'timeout') {
+      googleStatus(t('planner.googleConnectionTimeout'), 'error');
+    } else {
+      googleStatus(t('planner.googleConnectionError', { error: flow.error || t('error') }), 'error');
+    }
+  }
+
+  function startGoogleOAuthPolling(flowId) {
+    stopGoogleOAuthPolling();
+    state.googleOAuthFlowId = String(flowId || '');
+    state.googleOAuthPollTimer = setInterval(async () => {
+      if (!state.googleOAuthFlowId) return stopGoogleOAuthPolling();
+      try {
+        const flow = await App.rpc('calendar.google.oauth.status', { flowId: state.googleOAuthFlowId });
+        await handleGoogleOAuthFlow(flow);
+      } catch (error) {
+        stopGoogleOAuthPolling();
+        state.googleOAuthFlowId = '';
+        setGoogleOAuthBusy(false);
+        googleStatus(t('planner.googleConnectionError', { error: error.message }), 'error');
+      }
+    }, 800);
+  }
+
+  async function connectGoogle() {
+    const clientId = document.getElementById('planner-google-client-id')?.value.trim() || '';
+    const loginHint = document.getElementById('planner-google-login-hint')?.value.trim() || '';
+    if (!clientId) {
+      googleStatus(t('planner.googleClientIdRequired'), 'error');
+      document.getElementById('planner-google-client-id')?.focus();
+      return;
+    }
+    setGoogleOAuthBusy(true);
+    googleStatus(t('planner.googleConnecting'), 'info');
+    try {
+      const flow = await App.rpc('calendar.google.oauth.begin', { clientId, loginHint });
+      state.googleOAuthFlowId = String(flow?.id || '');
+      googleStatus(t('planner.googleWaiting'), 'info');
+      startGoogleOAuthPolling(state.googleOAuthFlowId);
+    } catch (error) {
+      setGoogleOAuthBusy(false);
+      googleStatus(t('planner.googleConnectionError', { error: error.message }), 'error');
+    }
+  }
+
+  async function cancelGoogleConnection() {
+    const flowId = state.googleOAuthFlowId;
+    if (!flowId) return;
+    try { await App.rpc('calendar.google.oauth.cancel', { flowId }); } catch {}
+    stopGoogleOAuthPolling();
+    state.googleOAuthFlowId = '';
+    setGoogleOAuthBusy(false);
+    googleStatus(t('planner.googleConnectionCancelled'), 'info');
+  }
+
+  function googleSyncMessage(result = {}) {
+    if (Number(result.failedCalendars) > 0) {
+      return t('planner.googleSyncPartial', { count: Number(result.failedCalendars) });
+    }
+    return t('planner.googleSynced', {
+      created: Number(result.created) || 0,
+      updated: Number(result.updated) || 0,
+      removed: Number(result.removed) || 0,
+    });
+  }
+
+  async function syncGoogleConnection(id, button = null) {
+    if (button) button.disabled = true;
+    googleStatus(t('planner.googleSyncing'), 'info');
+    plannerRefreshStatus(t('planner.googleSyncing'), 'busy', { sticky: true });
+    try {
+      const result = await App.rpc('calendar.google.sync', { id });
+      await loadGoogleConnections();
+      await refreshSummary();
+      if (document.getElementById('planner-modal')?.classList.contains('open')) await loadEvents();
+      const message = googleSyncMessage(result);
+      const type = Number(result.failedCalendars) > 0 ? 'info' : 'success';
+      googleStatus(message, type);
+      plannerRefreshStatus(message, type);
+      App.status(message, type);
+    } catch (error) {
+      await loadGoogleConnections();
+      googleStatus(`${t('error')} : ${error.message}`, 'error');
+      plannerRefreshStatus(`${t('error')} : ${error.message}`, 'error');
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  async function syncAllGoogleConnections() {
+    const button = document.getElementById('btn-planner-google-sync-all');
+    if (button) button.disabled = true;
+    googleStatus(t('planner.googleSyncing'), 'info');
+    try {
+      const results = await App.rpc('calendar.google.syncAll') || [];
+      await loadGoogleConnections();
+      await refreshSummary();
+      if (document.getElementById('planner-modal')?.classList.contains('open')) await loadEvents();
+      const failed = results.filter(item => !item.ok || Number(item.result?.failedCalendars) > 0).length;
+      const totals = results.reduce((sum, item) => {
+        const value = item.result || {};
+        sum.created += Number(value.created) || 0;
+        sum.updated += Number(value.updated) || 0;
+        sum.removed += Number(value.removed) || 0;
+        return sum;
+      }, { created: 0, updated: 0, removed: 0 });
+      const message = failed
+        ? t('planner.googleSyncPartial', { count: failed })
+        : t('planner.googleSynced', totals);
+      googleStatus(message, failed ? 'info' : 'success');
+    } catch (error) {
+      googleStatus(`${t('error')} : ${error.message}`, 'error');
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  async function setGoogleCalendarSelected(id, selected, input = null) {
+    if (input) input.disabled = true;
+    try {
+      const result = await App.rpc('calendar.remoteCalendars.select', { id, selected });
+      await loadGoogleConnections();
+      await refreshSummary();
+      if (document.getElementById('planner-modal')?.classList.contains('open')) await loadEvents();
+      googleStatus(t(selected ? 'planner.googleCalendarEnabled' : 'planner.googleCalendarDisabled'), selected ? 'info' : 'success');
+      return result;
+    } catch (error) {
+      if (input) input.checked = !selected;
+      googleStatus(`${t('error')} : ${error.message}`, 'error');
+    } finally {
+      if (input) input.disabled = false;
+    }
+  }
+
+  async function disconnectGoogleConnection(id) {
+    const connection = state.googleConnections.find(item => Number(item.id) === Number(id));
+    if (!connection) return;
+    const name = googleConnectionLabel(connection);
+    if (!window.confirm(t('planner.googleDisconnectConfirm', { name }))) return;
+    try {
+      await App.rpc('calendar.connections.remove', { id });
+      await loadGoogleConnections();
+      await refreshSummary();
+      if (document.getElementById('planner-modal')?.classList.contains('open')) await loadEvents();
+      googleStatus(t('planner.googleDisconnected'), 'success');
+    } catch (error) {
+      googleStatus(`${t('error')} : ${error.message}`, 'error');
+    }
+  }
+
   function renderSubscriptions() {
     const root = document.getElementById('planner-subscriptions-list');
     const empty = document.getElementById('planner-subscriptions-empty');
@@ -1063,7 +1373,8 @@
     resetSubscriptionEditor();
     document.getElementById('planner-subscriptions-modal')?.classList.add('open');
     subscriptionStatus('');
-    await loadSubscriptions();
+    googleStatus('');
+    await Promise.all([loadSubscriptions(), loadGoogleConnections()]);
   }
 
   async function saveSubscription() {
@@ -1138,6 +1449,36 @@
       plannerRefreshStatus(`${t('planner.subscriptionError')} : ${error.message}`, 'error');
       App.status(`${t('planner.subscriptionError')} : ${error.message}`, 'error');
     } finally { buttons.forEach(button => { button.disabled = false; }); }
+  }
+
+  async function syncAllExternalCalendars() {
+    const button = document.getElementById('btn-planner-refresh');
+    if (button) button.disabled = true;
+    plannerRefreshStatus(t('planner.externalSyncing'), 'busy', { sticky: true });
+    try {
+      const [subscriptionsResult, googleResult] = await Promise.allSettled([
+        App.rpc('calendar.subscriptions.syncAll'),
+        App.rpc('calendar.google.syncAll'),
+      ]);
+      await Promise.all([loadSubscriptions(), loadGoogleConnections(), refreshSummary()]);
+      if (document.getElementById('planner-modal')?.classList.contains('open')) await loadEvents();
+      let failed = [subscriptionsResult, googleResult].filter(result => result.status === 'rejected').length;
+      if (subscriptionsResult.status === 'fulfilled') {
+        failed += (subscriptionsResult.value || []).filter(item => item?.error).length;
+      }
+      if (googleResult.status === 'fulfilled') {
+        failed += (googleResult.value || []).filter(item => !item?.ok || Number(item?.result?.failedCalendars) > 0).length;
+      }
+      const message = failed
+        ? `${t('planner.externalSyncDone')} ${t(failed === 1 ? 'planner.syncSummaryErrorsOne' : 'planner.syncSummaryErrorsMany', { count: failed })}`
+        : t('planner.externalSyncDone');
+      plannerRefreshStatus(message, failed ? 'info' : 'success');
+      App.status(message, failed ? 'info' : 'success');
+    } catch (error) {
+      plannerRefreshStatus(`${t('error')} : ${error.message}`, 'error');
+    } finally {
+      if (button) button.disabled = false;
+    }
   }
 
   async function removeSubscription(id) {
@@ -1269,7 +1610,10 @@
     document.getElementById('btn-planner-pane-new')?.addEventListener('click', async () => { await openPlanner(); openNewEvent(new Date()); });
     document.getElementById('btn-planner-import')?.addEventListener('click', () => document.getElementById('planner-import-file')?.click());
     document.getElementById('btn-planner-subscriptions')?.addEventListener('click', openSubscriptions);
-    document.getElementById('btn-planner-refresh')?.addEventListener('click', syncAllSubscriptions);
+    document.getElementById('btn-planner-refresh')?.addEventListener('click', syncAllExternalCalendars);
+    document.getElementById('btn-planner-google-connect')?.addEventListener('click', connectGoogle);
+    document.getElementById('btn-planner-google-cancel')?.addEventListener('click', cancelGoogleConnection);
+    document.getElementById('btn-planner-google-sync-all')?.addEventListener('click', syncAllGoogleConnections);
     document.getElementById('btn-close-planner-subscriptions')?.addEventListener('click', closeSubscriptions);
     document.getElementById('btn-close-planner-subscriptions-footer')?.addEventListener('click', closeSubscriptions);
     document.getElementById('planner-import-file')?.addEventListener('change', event => importFiles(event.target.files));
@@ -1318,7 +1662,7 @@
     setTimeout(() => refreshSummary(), 1000);
   }
 
-  function onEngineEvent(event) {
+  function onEngineEvent(event, data = {}) {
     if (event === 'calendar.changed') {
       refreshSummary();
       if (document.getElementById('planner-modal')?.classList.contains('open')) loadEvents();
@@ -1328,6 +1672,12 @@
       if (document.getElementById('planner-modal')?.classList.contains('open')) loadEvents();
     } else if (event === 'calendar.subscriptions.changed') {
       if (document.getElementById('planner-subscriptions-modal')?.classList.contains('open')) loadSubscriptions();
+    } else if (event === 'calendar.google.changed') {
+      refreshSummary();
+      if (document.getElementById('planner-modal')?.classList.contains('open')) loadEvents();
+      if (document.getElementById('planner-subscriptions-modal')?.classList.contains('open')) loadGoogleConnections();
+    } else if (event === 'calendar.google.oauth.changed') {
+      handleGoogleOAuthFlow(data);
     }
   }
 
