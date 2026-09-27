@@ -22,6 +22,10 @@ const iconCache = require('./lib/icon_cache');
 const nativeDialog = require('./lib/native_dialog');
 const calendarImport = require('./lib/calendar_import');
 const calendarSubscriptions = require('./lib/calendar_subscriptions');
+const calendarAuth = require('./lib/calendar_auth');
+const calendarGoogle = require('./lib/calendar_google');
+const calendarGoogleSync = require('./lib/calendar_google_sync');
+const calendarGoogleOAuth = require('./lib/calendar_google_oauth');
 const credentialStore = require('./lib/credential_store');
 const mailStore = require('./lib/mail_store');
 const masterPassword = require('./lib/master_password');
@@ -510,6 +514,204 @@ function broadcast(event, data) {
   for (const socket of sockets) {
     if (socket.readyState === 1) socket.send(message);
   }
+}
+
+
+// LibraMail 0.6.0 — runtime Google Calendar authentifié.
+// Les access tokens ne quittent jamais la mémoire du processus. Le refresh
+// token est relu depuis le coffre-fort système à chaque renouvellement.
+const googleCalendarTokenCache = new Map();
+
+function clearGoogleCalendarTokenCache(connectionId = null) {
+  if (connectionId == null) {
+    googleCalendarTokenCache.clear();
+    return;
+  }
+  googleCalendarTokenCache.delete(Number(connectionId));
+}
+
+function cacheGoogleCalendarAccessToken(connectionId, accessToken, expiresIn = 0) {
+  const token = String(accessToken || '').trim();
+  if (!token || /[\r\n]/.test(token)) throw new Error('Access token Google Calendar invalide');
+  const lifetime = Math.max(0, Number(expiresIn) || 0) * 1000;
+  googleCalendarTokenCache.set(Number(connectionId), {
+    accessToken: token,
+    expiresAt: lifetime ? Date.now() + lifetime : Date.now() + 5 * 60 * 1000,
+    refreshPromise: null,
+  });
+}
+
+async function googleCalendarAccessToken(connection, { forceRefresh = false } = {}) {
+  if (!connection || connection.provider !== 'google') {
+    throw new Error('Connexion Google Calendar invalide');
+  }
+  const clientId = String(connection.oauthClientId || '').trim();
+  if (!clientId) throw new Error('Client ID Google OAuth2 absent. Reconnectez ce calendrier.');
+  const credentialKey = String(connection.credentialKey || '').trim();
+  if (!credentialKey) throw new Error('Clé de coffre Google Calendar absente');
+
+  let state = googleCalendarTokenCache.get(Number(connection.id)) || {
+    accessToken: '',
+    expiresAt: 0,
+    refreshPromise: null,
+  };
+  googleCalendarTokenCache.set(Number(connection.id), state);
+
+  if (!forceRefresh && state.accessToken && state.expiresAt > Date.now() + 60 * 1000) {
+    return state.accessToken;
+  }
+  if (state.refreshPromise) return state.refreshPromise;
+
+  state.refreshPromise = (async () => {
+    if (masterPassword.isLocked()) throw new Error('LibraMail est verrouillé');
+    const refreshToken = credentialStore.readCalendarOAuthRefreshToken(credentialKey);
+    if (!refreshToken) throw new Error('Refresh token Google Calendar introuvable');
+    const refreshed = await calendarAuth.refreshAccessToken({
+      provider: 'google',
+      clientId,
+      refreshToken,
+    });
+    if (refreshed.refreshToken && refreshed.refreshToken !== refreshToken) {
+      credentialStore.writeCalendarOAuthRefreshToken(credentialKey, refreshed.refreshToken);
+    }
+    cacheGoogleCalendarAccessToken(connection.id, refreshed.accessToken, refreshed.expiresIn);
+    return refreshed.accessToken;
+  })();
+
+  try {
+    return await state.refreshPromise;
+  } finally {
+    const current = googleCalendarTokenCache.get(Number(connection.id));
+    if (current) current.refreshPromise = null;
+  }
+}
+
+function googleCalendarClientForConnection(connection) {
+  return calendarGoogle.createGoogleCalendarClient({
+    getAccessToken: options => googleCalendarAccessToken(connection, options || {}),
+  });
+}
+
+async function syncGoogleCalendarConnection(connectionId) {
+  const connection = db.getCalendarConnection(connectionId);
+  if (!connection) throw new Error('Connexion calendrier introuvable');
+  if (connection.provider !== 'google') throw new Error('Cette connexion calendrier n’est pas Google');
+  const client = googleCalendarClientForConnection(connection);
+  const engine = calendarGoogleSync.createGoogleCalendarSyncEngine({ db, client });
+  const result = await engine.syncConnection(connection.id);
+  if (result.removed) cleanupOrphanCalendarAttachmentFiles();
+  broadcast('calendar.changed', {
+    action: 'google-synced',
+    connectionId: connection.id,
+    created: result.created,
+    updated: result.updated,
+    removed: result.removed,
+  });
+  broadcast('calendar.google.changed', {
+    action: 'synced',
+    connectionId: connection.id,
+    status: result.connection?.lastStatus || '',
+    created: result.created,
+    updated: result.updated,
+    removed: result.removed,
+    failedCalendars: result.failedCalendars,
+  });
+  return result;
+}
+
+async function completeGoogleCalendarOAuth({
+  clientId,
+  loginHint = '',
+  code,
+  codeVerifier,
+  redirectUri,
+  isActive = null,
+} = {}) {
+  if (typeof isActive === 'function' && !isActive()) {
+    throw new Error('Connexion Google interrompue');
+  }
+  const tokens = await calendarAuth.exchangeAuthorizationCode({
+    provider: 'google',
+    clientId,
+    code,
+    codeVerifier,
+    redirectUri,
+  });
+  if (typeof isActive === 'function' && !isActive()) {
+    throw new Error('Connexion Google interrompue');
+  }
+  if (masterPassword.isLocked()) throw new Error('LibraMail a été verrouillé pendant la connexion Google');
+  if (!tokens.refreshToken) {
+    throw new Error('Google n’a pas fourni de refresh token. Relancez la connexion et accordez l’accès demandé.');
+  }
+
+  const credentialKey = `google:${crypto.randomUUID()}`;
+  let connection = null;
+  credentialStore.writeCalendarOAuthRefreshToken(credentialKey, tokens.refreshToken);
+  try {
+    connection = db.saveCalendarConnection({
+      provider: 'google',
+      credentialKey,
+      oauthClientId: String(clientId || '').trim(),
+      email: String(loginHint || '').trim(),
+      displayName: String(loginHint || '').trim() || 'Google Calendar',
+      enabled: true,
+    });
+  } catch (error) {
+    credentialStore.removeCalendarOAuthRefreshToken(credentialKey);
+    throw error;
+  }
+
+  cacheGoogleCalendarAccessToken(connection.id, tokens.accessToken, tokens.expiresIn);
+
+  let sync = null;
+  let syncError = '';
+  try {
+    sync = await syncGoogleCalendarConnection(connection.id);
+  } catch (error) {
+    syncError = String(error?.message || error || 'Synchronisation Google Calendar impossible')
+      .replace(/[\r\n\t]+/g, ' ').trim().slice(0, 2000);
+  }
+
+  const calendars = db.listCalendarRemoteCalendars({ connectionId: connection.id });
+  const primary = calendars.find(item => item.primary) || null;
+  if (primary) {
+    connection = db.saveCalendarConnection({
+      ...db.getCalendarConnection(connection.id),
+      email: String(primary.remoteId || '').includes('@')
+        ? String(primary.remoteId)
+        : String(loginHint || '').trim(),
+      displayName: String(primary.name || '').trim()
+        || String(loginHint || '').trim()
+        || 'Google Calendar',
+    }, connection.id);
+  } else {
+    connection = db.getCalendarConnection(connection.id);
+  }
+
+  const result = {
+    connection,
+    calendars: db.listCalendarRemoteCalendars({ connectionId: connection.id }),
+    sync,
+    syncError,
+  };
+  broadcast('calendar.google.changed', {
+    action: 'connected',
+    connectionId: connection.id,
+    status: connection.lastStatus || (syncError ? 'error' : 'ok'),
+    error: syncError,
+  });
+  return result;
+}
+
+const googleCalendarOAuthManager = calendarGoogleOAuth.createGoogleOAuthFlowManager({
+  onCode: completeGoogleCalendarOAuth,
+  onChange: flow => broadcast('calendar.google.oauth.changed', flow),
+});
+
+function stopGoogleCalendarSensitiveRuntime(reason = 'Opération de sécurité en cours') {
+  googleCalendarOAuthManager.cancelAll(reason);
+  clearGoogleCalendarTokenCache();
 }
 
 function accountFoldersChanged(account, map) {
@@ -2480,6 +2682,7 @@ const methods = {
     if (!masterPassword.isEnabled()) {
       return { ...masterPassword.status(), runtimeReady: runtimeInitialized };
     }
+    stopGoogleCalendarSensitiveRuntime('LibraMail a été verrouillé');
     closeRuntimeStateForLock();
     masterPassword.lock();
     const state = { ...masterPassword.status(), runtimeReady: false };
@@ -2490,6 +2693,7 @@ const methods = {
   'security.enable': async ({ password = '' } = {}) => {
     if (masterPassword.isEnabled()) throw new Error('Le mot de passe principal est déjà activé');
     assertSecurityMigrationReady();
+    stopGoogleCalendarSensitiveRuntime('Activation du mot de passe principal');
 
     const accountIds = securityAccountIds();
     const snapshot = credentialStore.snapshotSecrets(accountIds, SECURITY_SERVICE_SECRETS);
@@ -2537,6 +2741,7 @@ const methods = {
   'security.changePassword': async ({ currentPassword = '', newPassword = '' } = {}) => {
     if (!masterPassword.isEnabled()) throw new Error('Le mot de passe principal n’est pas activé');
     if (masterPassword.isLocked()) throw new Error('LibraMail est verrouillé');
+    stopGoogleCalendarSensitiveRuntime('Modification du mot de passe principal');
     masterPassword.changePassword(currentPassword, newPassword);
     const state = { ...masterPassword.status(), runtimeReady: runtimeInitialized };
     broadcast('security.passwordChanged', state);
@@ -2550,6 +2755,7 @@ const methods = {
     if (masterPassword.isLocked()) throw new Error('LibraMail est verrouillé');
     assertSecurityMigrationReady();
     masterPassword.verify(password);
+    stopGoogleCalendarSensitiveRuntime('Désactivation du mot de passe principal');
 
     const accountIds = securityAccountIds();
     const snapshot = credentialStore.snapshotSecrets(accountIds, SECURITY_SERVICE_SECRETS);
@@ -3313,6 +3519,76 @@ const methods = {
     }
     return { removed };
   },
+  // ---------- Google Calendar authentifié 0.6.0 ----------
+  'calendar.connections.list': async () => db.listCalendarConnections(),
+  'calendar.remoteCalendars.list': async ({ connectionId = null, selectedOnly = false } = {}) =>
+    db.listCalendarRemoteCalendars({ connectionId, selectedOnly }),
+
+  'calendar.google.oauth.begin': async ({ clientId = '', loginHint = '' } = {}) => {
+    const flow = await googleCalendarOAuthManager.begin({ clientId, loginHint });
+    try {
+      await openExternalWithSystem(flow.authUrl);
+    } catch (error) {
+      googleCalendarOAuthManager.cancel(flow.id, 'Impossible d’ouvrir le navigateur');
+      throw error;
+    }
+    return flow;
+  },
+  'calendar.google.oauth.status': async ({ flowId = '' } = {}) => {
+    const flow = googleCalendarOAuthManager.status(flowId);
+    if (!flow) throw new Error('Connexion Google OAuth2 introuvable');
+    return flow;
+  },
+  'calendar.google.oauth.cancel': async ({ flowId = '' } = {}) =>
+    googleCalendarOAuthManager.cancel(flowId),
+
+  'calendar.google.sync': async ({ id } = {}) =>
+    syncGoogleCalendarConnection(Number(id)),
+
+  'calendar.google.syncAll': async () => {
+    const rows = db.listCalendarConnections({ enabledOnly: true })
+      .filter(connection => connection.provider === 'google');
+    const results = [];
+    for (const connection of rows) {
+      try {
+        results.push({
+          id: connection.id,
+          ok: true,
+          result: await syncGoogleCalendarConnection(connection.id),
+        });
+      } catch (error) {
+        results.push({
+          id: connection.id,
+          ok: false,
+          error: String(error?.message || error || 'Synchronisation Google Calendar impossible')
+            .replace(/[\r\n\t]+/g, ' ').trim().slice(0, 2000),
+        });
+      }
+    }
+    return results;
+  },
+
+  'calendar.connections.remove': async ({ id } = {}) => {
+    const connection = db.getCalendarConnection(id);
+    if (!connection) return { removed: false, credentialRemoved: true };
+    clearGoogleCalendarTokenCache(connection.id);
+    const result = db.removeCalendarConnection(connection.id);
+    let credentialRemoved = true;
+    if (result.removed && connection.credentialKey) {
+      try {
+        credentialRemoved = credentialStore.removeCalendarOAuthRefreshToken(connection.credentialKey);
+      } catch {
+        credentialRemoved = false;
+      }
+    }
+    if (result.removed) {
+      cleanupOrphanCalendarAttachmentFiles();
+      broadcast('calendar.changed', { action: 'google-connection-removed', connectionId: connection.id });
+      broadcast('calendar.google.changed', { action: 'removed', connectionId: connection.id });
+    }
+    return { ...result, credentialRemoved };
+  },
+
   'calendar.attachments.selectPaths': async ({ title = '' } = {}) => {
     const paths = await nativeDialog.showFilesDialog({
       title: String(title || 'Choisir des fichiers à joindre au rendez-vous'),
@@ -3681,6 +3957,7 @@ function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
   rpcSecurity.removeSessionFile(STATE_ROOT, RPC_SESSION_TOKEN);
+  stopGoogleCalendarSensitiveRuntime('Arrêt de LibraMail');
   stopAccountRuntime();
   try { mailStore.close(); } catch {}
   try { db.close(); } catch {}

@@ -514,6 +514,7 @@ function init(dataDir) {
     id INTEGER PRIMARY KEY,
     provider TEXT NOT NULL,
     credential_key TEXT NOT NULL UNIQUE,
+    oauth_client_id TEXT NOT NULL DEFAULT '',
     email TEXT NOT NULL DEFAULT '',
     display_name TEXT NOT NULL DEFAULT '',
     enabled INTEGER NOT NULL DEFAULT 1,
@@ -607,6 +608,7 @@ function init(dataDir) {
   ensureColumn('sync_state', 'last_reconcile', 'INTEGER DEFAULT 0');
   ensureColumn('calendar_events', 'import_key', 'TEXT');
   ensureColumn('calendar_subscriptions', 'refresh_minutes', 'INTEGER NOT NULL DEFAULT 30');
+  ensureColumn('calendar_connections', 'oauth_client_id', "TEXT NOT NULL DEFAULT ''");
   ensureColumn('calendar_events', 'subscription_id', 'INTEGER');
   ensureColumn('calendar_events', 'category_id', 'INTEGER REFERENCES calendar_categories(id) ON DELETE SET NULL');
   ensureColumn('calendar_events', 'remote_calendar_id', 'INTEGER REFERENCES calendar_remote_calendars(id) ON DELETE CASCADE');
@@ -2702,6 +2704,7 @@ function calendarConnectionRow(row) {
     id: Number(row.id),
     provider: String(row.provider || ''),
     credentialKey: String(row.credential_key || ''),
+    oauthClientId: String(row.oauth_client_id || ''),
     email: String(row.email || ''),
     displayName: String(row.display_name || ''),
     enabled: Boolean(row.enabled),
@@ -2718,9 +2721,14 @@ function normalizeCalendarConnection(input = {}) {
   if (!/^[a-z0-9_-]{2,40}$/.test(provider)) throw new Error('Fournisseur de calendrier invalide');
   const credentialKey = String(input.credentialKey || '').trim();
   if (!/^[A-Za-z0-9._:-]{3,160}$/.test(credentialKey)) throw new Error('Clé de coffre calendrier invalide');
+  const oauthClientId = String(input.oauthClientId || '').trim();
+  if (oauthClientId.length > 1000 || /[\r\n]/.test(oauthClientId)) {
+    throw new Error('Client ID OAuth2 calendrier invalide');
+  }
   return {
     provider,
     credentialKey,
+    oauthClientId,
     email: String(input.email || '').trim().slice(0, 320),
     displayName: String(input.displayName || '').trim().slice(0, 240),
     enabled: input.enabled === false ? 0 : 1,
@@ -2743,16 +2751,16 @@ function saveCalendarConnection(input = {}, id = null) {
   const numericId = Number(id || input.id || 0);
   if (numericId > 0) {
     const result = db.prepare(`UPDATE calendar_connections
-      SET provider=?,credential_key=?,email=?,display_name=?,enabled=?,updated_at=? WHERE id=?`).run(
-      item.provider, item.credentialKey, item.email, item.displayName, item.enabled, now, numericId,
+      SET provider=?,credential_key=?,oauth_client_id=?,email=?,display_name=?,enabled=?,updated_at=? WHERE id=?`).run(
+      item.provider, item.credentialKey, item.oauthClientId, item.email, item.displayName, item.enabled, now, numericId,
     );
     if (!result.changes) throw new Error('Connexion calendrier introuvable');
     return getCalendarConnection(numericId);
   }
   const result = db.prepare(`INSERT INTO calendar_connections
-    (provider,credential_key,email,display_name,enabled,last_sync_at,last_status,last_error,created_at,updated_at)
-    VALUES (?,?,?,?,?,0,'','',?,?)`).run(
-    item.provider, item.credentialKey, item.email, item.displayName, item.enabled, now, now,
+    (provider,credential_key,oauth_client_id,email,display_name,enabled,last_sync_at,last_status,last_error,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,0,'','',?,?)`).run(
+    item.provider, item.credentialKey, item.oauthClientId, item.email, item.displayName, item.enabled, now, now,
   );
   return getCalendarConnection(result.lastInsertRowid);
 }
