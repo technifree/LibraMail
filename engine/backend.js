@@ -26,6 +26,7 @@ const calendarAuth = require('./lib/calendar_auth');
 const calendarGoogle = require('./lib/calendar_google');
 const calendarGoogleSync = require('./lib/calendar_google_sync');
 const calendarGoogleOAuth = require('./lib/calendar_google_oauth');
+const calendarGoogleMock = require('./lib/calendar_google_mock');
 const credentialStore = require('./lib/credential_store');
 const mailStore = require('./lib/mail_store');
 const masterPassword = require('./lib/master_password');
@@ -58,6 +59,12 @@ const RETENTION_CHECK_MS = 6 * 60 * 60 * 1000;
 const OUTBOX_CHECK_MS = 30 * 1000;
 const CALENDAR_SUBSCRIPTION_CHECK_MS = 60 * 1000;
 const RUNTIME_DATA_FILES = new Set(['engine.log', 'engine.stdout.log', 'engine.stderr.log', 'engine-startup.log', 'eml-import.log']);
+// LibraMail 0.6.0 — simulateur Google Calendar strictement opt-in.
+// Aucune interface ni donnée simulée n'est exposée sans cette variable.
+const GOOGLE_CALENDAR_MOCK_ENABLED = process.env.LIBRAMAIL_GOOGLE_CALENDAR_MOCK === '1';
+const googleCalendarMockService = GOOGLE_CALENDAR_MOCK_ENABLED
+  ? calendarGoogleMock.createGoogleCalendarMockService()
+  : null;
 
 function isRuntimeDataFile(name) {
   return RUNTIME_DATA_FILES.has(String(name || '').replace(/\\/g, '/'));
@@ -587,9 +594,45 @@ async function googleCalendarAccessToken(connection, { forceRefresh = false } = 
 }
 
 function googleCalendarClientForConnection(connection) {
+  if (calendarGoogleMock.isGoogleCalendarMockConnection(connection)) {
+    if (!GOOGLE_CALENDAR_MOCK_ENABLED || !googleCalendarMockService) {
+      throw new Error('Le simulateur Google Calendar n’est pas activé');
+    }
+    return googleCalendarMockService.client();
+  }
   return calendarGoogle.createGoogleCalendarClient({
     getAccessToken: options => googleCalendarAccessToken(connection, options || {}),
   });
+}
+
+function googleCalendarMockConnection() {
+  return db.listCalendarConnections().find(connection =>
+    connection.provider === 'google' && calendarGoogleMock.isGoogleCalendarMockConnection(connection)
+  ) || null;
+}
+
+async function connectGoogleCalendarMock() {
+  if (!GOOGLE_CALENDAR_MOCK_ENABLED || !googleCalendarMockService) {
+    throw new Error('Le simulateur Google Calendar n’est pas activé');
+  }
+  let connection = googleCalendarMockConnection();
+  if (!connection) {
+    connection = db.saveCalendarConnection({
+      provider: 'google',
+      credentialKey: `${calendarGoogleMock.MOCK_CREDENTIAL_PREFIX}local`,
+      oauthClientId: calendarGoogleMock.MOCK_CLIENT_ID,
+      email: calendarGoogleMock.MOCK_EMAIL,
+      displayName: 'Google Calendar simulé',
+      enabled: true,
+    });
+  }
+  const sync = await syncGoogleCalendarConnection(connection.id);
+  return {
+    connection: db.getCalendarConnection(connection.id),
+    calendars: db.listCalendarRemoteCalendars({ connectionId: connection.id }),
+    sync,
+    mock: googleCalendarMockService.status(),
+  };
 }
 
 async function syncGoogleCalendarConnection(connectionId) {
@@ -3552,6 +3595,44 @@ const methods = {
     return result;
   },
 
+  'calendar.google.mock.status': async () => {
+    const connection = GOOGLE_CALENDAR_MOCK_ENABLED ? googleCalendarMockConnection() : null;
+    return {
+      enabled: GOOGLE_CALENDAR_MOCK_ENABLED,
+      connected: Boolean(connection),
+      connectionId: connection?.id || null,
+      mock: GOOGLE_CALENDAR_MOCK_ENABLED && googleCalendarMockService ? googleCalendarMockService.status() : null,
+    };
+  },
+  'calendar.google.mock.connect': async () => connectGoogleCalendarMock(),
+  'calendar.google.mock.advance': async () => {
+    if (!GOOGLE_CALENDAR_MOCK_ENABLED || !googleCalendarMockService) throw new Error('Le simulateur Google Calendar n’est pas activé');
+    const connection = googleCalendarMockConnection();
+    if (!connection) throw new Error('Connectez d’abord le compte Google simulé');
+    googleCalendarMockService.advance();
+    return { result: await syncGoogleCalendarConnection(connection.id), mock: googleCalendarMockService.status() };
+  },
+  'calendar.google.mock.expireSyncToken': async () => {
+    if (!GOOGLE_CALENDAR_MOCK_ENABLED || !googleCalendarMockService) throw new Error('Le simulateur Google Calendar n’est pas activé');
+    const connection = googleCalendarMockConnection();
+    if (!connection) throw new Error('Connectez d’abord le compte Google simulé');
+    googleCalendarMockService.expireSyncTokens();
+    return { result: await syncGoogleCalendarConnection(connection.id), mock: googleCalendarMockService.status() };
+  },
+  'calendar.google.mock.reset': async () => {
+    if (!GOOGLE_CALENDAR_MOCK_ENABLED || !googleCalendarMockService) throw new Error('Le simulateur Google Calendar n’est pas activé');
+    const existing = googleCalendarMockConnection();
+    if (existing) {
+      clearGoogleCalendarTokenCache(existing.id);
+      db.removeCalendarConnection(existing.id);
+      cleanupOrphanCalendarAttachmentFiles();
+    }
+    googleCalendarMockService.reset();
+    const result = await connectGoogleCalendarMock();
+    broadcast('calendar.google.changed', { action: 'mock-reset', connectionId: result.connection.id });
+    return result;
+  },
+
   'calendar.google.oauth.begin': async ({ clientId = '', loginHint = '' } = {}) => {
     const flow = await googleCalendarOAuthManager.begin({ clientId, loginHint });
     try {
@@ -3602,7 +3683,7 @@ const methods = {
     clearGoogleCalendarTokenCache(connection.id);
     const result = db.removeCalendarConnection(connection.id);
     let credentialRemoved = true;
-    if (result.removed && connection.credentialKey) {
+    if (result.removed && connection.credentialKey && !calendarGoogleMock.isGoogleCalendarMockConnection(connection)) {
       try {
         credentialRemoved = credentialStore.removeCalendarOAuthRefreshToken(connection.credentialKey);
       } catch {

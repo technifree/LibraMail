@@ -1095,5 +1095,17 @@
   "startupSummary.enterApp": "Accéder à LibraMail",
   "startupSummary.dontShowAgain": "Ne plus afficher ce résumé au démarrage",
   "startupSummary.setting": "Résumé du jour au démarrage",
-  "startupSummary.settingHint": "Affiche les messages non lus, les rendez-vous du jour et l’état de la relève pendant le démarrage de LibraMail."
+  "startupSummary.settingHint": "Affiche les messages non lus, les rendez-vous du jour et l’état de la relève pendant le démarrage de LibraMail.",
+  "planner.googleMockTitle": "Simulation Google Calendar — développement",
+  "planner.googleMockHelp": "Visible uniquement avec LIBRAMAIL_GOOGLE_CALENDAR_MOCK=1. Aucun accès réseau Google et aucune donnée réelle.",
+  "planner.googleMockConnect": "Connecter le compte simulé",
+  "planner.googleMockAdvance": "Simuler des changements",
+  "planner.googleMockExpire": "Tester syncToken expiré",
+  "planner.googleMockReset": "Réinitialiser",
+  "planner.googleMockReady": "Simulateur prêt. Connectez le compte fictif pour lancer une synchronisation complète.",
+  "planner.googleMockConnected": "Compte simulé connecté — scénario distant révision {revision}.",
+  "planner.googleMockRunning": "Exécution du scénario simulé…",
+  "planner.googleMockAdvanced": "Changements distants simulés appliqués — révision {revision}.",
+  "planner.googleMockExpiredDone": "syncToken expiré simulé : resynchronisation complète terminée.",
+  "planner.googleMockResetDone": "Simulation réinitialisée et resynchronisée."
 }

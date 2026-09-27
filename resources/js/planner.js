@@ -20,6 +20,7 @@
     googleCalendars: {},
     googleOAuthFlowId: '',
     googleOAuthPollTimer: null,
+    googleMock: { enabled: false, connected: false, connectionId: null, mock: null },
     editingRemoteEvent: false,
     summaryTimer: null,
     refreshNoticeTimer: null,
@@ -1113,6 +1114,66 @@
     root.querySelectorAll('[data-google-calendar-select]').forEach(input => input.addEventListener('change', () => setGoogleCalendarSelected(Number(input.dataset.googleCalendarSelect), input.checked, input)));
   }
 
+  function renderGoogleMockStatus() {
+    const box = document.getElementById('planner-google-mock');
+    const status = document.getElementById('planner-google-mock-status');
+    const connect = document.getElementById('btn-planner-google-mock-connect');
+    const advance = document.getElementById('btn-planner-google-mock-advance');
+    const expire = document.getElementById('btn-planner-google-mock-expire');
+    const reset = document.getElementById('btn-planner-google-mock-reset');
+    if (!box) return;
+    const enabled = Boolean(state.googleMock?.enabled);
+    box.classList.toggle('hidden', !enabled);
+    if (!enabled) return;
+    const connected = Boolean(state.googleMock?.connected);
+    if (connect) connect.disabled = connected;
+    if (advance) advance.disabled = !connected;
+    if (expire) expire.disabled = !connected;
+    if (reset) reset.disabled = !connected;
+    if (status) {
+      const revision = Number(state.googleMock?.mock?.revision) || 1;
+      status.textContent = connected
+        ? t('planner.googleMockConnected', { revision })
+        : t('planner.googleMockReady');
+    }
+  }
+
+  async function loadGoogleMockStatus() {
+    try {
+      state.googleMock = await App.rpc('calendar.google.mock.status') || { enabled: false };
+    } catch {
+      state.googleMock = { enabled: false, connected: false, connectionId: null, mock: null };
+    }
+    renderGoogleMockStatus();
+  }
+
+  async function runGoogleMockAction(action, button = null) {
+    if (!state.googleMock?.enabled) return;
+    if (button) button.disabled = true;
+    const status = document.getElementById('planner-google-mock-status');
+    if (status) status.textContent = t('planner.googleMockRunning');
+    try {
+      const result = await App.rpc(`calendar.google.mock.${action}`);
+      await Promise.all([loadGoogleConnections(), loadGoogleMockStatus(), refreshSummary()]);
+      if (document.getElementById('planner-modal')?.classList.contains('open')) await loadEvents();
+      if (status) {
+        const revision = Number(result?.mock?.revision || state.googleMock?.mock?.revision) || 1;
+        status.textContent = action === 'expireSyncToken'
+          ? t('planner.googleMockExpiredDone')
+          : action === 'advance'
+            ? t('planner.googleMockAdvanced', { revision })
+            : action === 'reset'
+              ? t('planner.googleMockResetDone')
+              : t('planner.googleMockConnected', { revision });
+      }
+    } catch (error) {
+      if (status) status.textContent = `${t('error')} : ${error.message}`;
+    } finally {
+      renderGoogleMockStatus();
+      if (button) button.disabled = false;
+    }
+  }
+
   async function handleGoogleOAuthFlow(flow) {
     if (!flow || String(flow.id || '') !== String(state.googleOAuthFlowId || '')) return;
     if (flow.status === 'pending') {
@@ -1374,7 +1435,7 @@
     document.getElementById('planner-subscriptions-modal')?.classList.add('open');
     subscriptionStatus('');
     googleStatus('');
-    await Promise.all([loadSubscriptions(), loadGoogleConnections()]);
+    await Promise.all([loadSubscriptions(), loadGoogleConnections(), loadGoogleMockStatus()]);
   }
 
   async function saveSubscription() {
@@ -1614,6 +1675,10 @@
     document.getElementById('btn-planner-google-connect')?.addEventListener('click', connectGoogle);
     document.getElementById('btn-planner-google-cancel')?.addEventListener('click', cancelGoogleConnection);
     document.getElementById('btn-planner-google-sync-all')?.addEventListener('click', syncAllGoogleConnections);
+    document.getElementById('btn-planner-google-mock-connect')?.addEventListener('click', event => runGoogleMockAction('connect', event.currentTarget));
+    document.getElementById('btn-planner-google-mock-advance')?.addEventListener('click', event => runGoogleMockAction('advance', event.currentTarget));
+    document.getElementById('btn-planner-google-mock-expire')?.addEventListener('click', event => runGoogleMockAction('expireSyncToken', event.currentTarget));
+    document.getElementById('btn-planner-google-mock-reset')?.addEventListener('click', event => runGoogleMockAction('reset', event.currentTarget));
     document.getElementById('btn-close-planner-subscriptions')?.addEventListener('click', closeSubscriptions);
     document.getElementById('btn-close-planner-subscriptions-footer')?.addEventListener('click', closeSubscriptions);
     document.getElementById('planner-import-file')?.addEventListener('change', event => importFiles(event.target.files));
@@ -1675,7 +1740,10 @@
     } else if (event === 'calendar.google.changed') {
       refreshSummary();
       if (document.getElementById('planner-modal')?.classList.contains('open')) loadEvents();
-      if (document.getElementById('planner-subscriptions-modal')?.classList.contains('open')) loadGoogleConnections();
+      if (document.getElementById('planner-subscriptions-modal')?.classList.contains('open')) {
+        loadGoogleConnections();
+        loadGoogleMockStatus();
+      }
     } else if (event === 'calendar.google.oauth.changed') {
       handleGoogleOAuthFlow(data);
     }

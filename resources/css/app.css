@@ -3866,6 +3866,17 @@ html[data-theme="light"] #reader-empty.reader-empty-brand .reader-empty-logo-lig
   color:var(--fg-faint); font-size:9.5px; line-height:1.4;
 }
 .planner-google-help i { color:var(--accent); margin-top:2px; }
+.planner-google-mock {
+  margin-top:9px; padding:9px 10px; border:1px dashed var(--border); border-radius:10px;
+  background:color-mix(in srgb, var(--accent) 4%, var(--bg-panel-2));
+}
+.planner-google-mock-copy { display:flex; align-items:flex-start; gap:8px; color:var(--fg); }
+.planner-google-mock-copy > i { margin-top:2px; color:var(--accent); }
+.planner-google-mock-copy strong,.planner-google-mock-copy small { display:block; }
+.planner-google-mock-copy strong { font-size:10.5px; color:var(--fg-strong); }
+.planner-google-mock-copy small { margin-top:2px; font-size:9px; line-height:1.35; color:var(--fg-faint); }
+.planner-google-mock-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+.planner-google-mock-status { min-height:14px; margin-top:6px; font-size:9px; color:var(--fg-faint); }
 .planner-google-connections { display:flex; flex-direction:column; gap:8px; margin-top:10px; }
 .planner-google-connection {
   border:1px solid var(--border); border-radius:10px; background:var(--bg-panel-2); overflow:hidden;
