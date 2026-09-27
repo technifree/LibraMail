@@ -637,7 +637,12 @@
         <div class="field"><label data-i18n="account.security"></label>
           <select id="acc-imap-secure"><option value="1" data-i18n="account.security.ssl"></option><option value="0" data-i18n="account.security.starttls"></option></select></div>
         <div class="field"><label data-i18n="account.user"></label><input id="acc-imap-user" autocomplete="username"></div>
-        <div class="field field-span-2"><label data-i18n="account.pass"></label><input id="acc-imap-pass" type="password" autocomplete="new-password" data-i18n-ph="account.passwordKeep"></div>
+        <div class="field field-span-2"><label data-i18n="account.pass"></label>
+          <div class="security-password-input-wrap">
+            <input id="acc-imap-pass" type="password" autocomplete="new-password" data-i18n-ph="account.passwordKeep">
+            <button class="security-password-toggle" type="button" data-password-toggle="acc-imap-pass" data-i18n-title="security.showPassword"><i class="fa-solid fa-eye"></i></button>
+          </div>
+        </div>
       </div>
       </div>
       <div id="account-pop3-section" class="hidden">
@@ -647,7 +652,12 @@
           <div class="field"><label data-i18n="account.port"></label><input id="acc-pop3-port" type="number" min="1" max="65535" value="995"></div>
           <div class="field"><label data-i18n="account.security"></label><select id="acc-pop3-secure"><option value="1" data-i18n="account.security.ssl"></option><option value="0" data-i18n="account.security.starttls"></option></select></div>
           <div class="field"><label data-i18n="account.user"></label><input id="acc-pop3-user" autocomplete="username"></div>
-          <div class="field field-span-2"><label data-i18n="account.pass"></label><input id="acc-pop3-pass" type="password" autocomplete="new-password" data-i18n-ph="account.passwordKeep"></div>
+          <div class="field field-span-2"><label data-i18n="account.pass"></label>
+            <div class="security-password-input-wrap">
+              <input id="acc-pop3-pass" type="password" autocomplete="new-password" data-i18n-ph="account.passwordKeep">
+              <button class="security-password-toggle" type="button" data-password-toggle="acc-pop3-pass" data-i18n-title="security.showPassword"><i class="fa-solid fa-eye"></i></button>
+            </div>
+          </div>
           <div class="field"><label data-i18n="account.popDeletePolicy"></label>
             <select id="acc-pop3-delete-policy"><option value="keep" data-i18n="account.popKeep"></option><option value="immediate" data-i18n="account.popDeleteImmediate"></option><option value="after_days" data-i18n="account.popDeleteAfter"></option></select>
           </div>
@@ -662,7 +672,12 @@
         <div class="field"><label data-i18n="account.security"></label>
           <select id="acc-smtp-secure"><option value="1" data-i18n="account.security.ssl"></option><option value="0" data-i18n="account.security.starttls"></option></select></div>
         <div class="field"><label data-i18n="account.user"></label><input id="acc-smtp-user" autocomplete="username"></div>
-        <div class="field field-span-2"><label data-i18n="account.pass"></label><input id="acc-smtp-pass" type="password" autocomplete="new-password" data-i18n-ph="account.passwordKeep"></div>
+        <div class="field field-span-2"><label data-i18n="account.pass"></label>
+          <div class="security-password-input-wrap">
+            <input id="acc-smtp-pass" type="password" autocomplete="new-password" data-i18n-ph="account.passwordKeep">
+            <button class="security-password-toggle" type="button" data-password-toggle="acc-smtp-pass" data-i18n-title="security.showPassword"><i class="fa-solid fa-eye"></i></button>
+          </div>
+        </div>
       </div>
       <div class="grid2 account-options-grid">
         <div class="field"><label data-i18n="account.color"></label><input id="acc-color" type="color" value="#8b7dd8"></div>
@@ -1080,8 +1095,18 @@
             <p class="backup-security-warning"><i class="fa-solid fa-key"></i><span data-i18n="backup.credentialsWarning"></span></p>
           </div>
           <div class="backup-key-fields">
-            <label class="field"><span data-i18n="backup.recoveryPassword"></span><input id="backup-password" type="password" minlength="8" autocomplete="new-password" data-i18n-ph="backup.recoveryPasswordPlaceholder"></label>
-            <label class="field"><span data-i18n="backup.recoveryPasswordConfirm"></span><input id="backup-password-confirm" type="password" minlength="8" autocomplete="new-password" data-i18n-ph="backup.recoveryPasswordConfirmPlaceholder"></label>
+            <label class="field"><span data-i18n="backup.recoveryPassword"></span>
+              <div class="security-password-input-wrap">
+                <input id="backup-password" type="password" minlength="8" autocomplete="new-password" data-i18n-ph="backup.recoveryPasswordPlaceholder">
+                <button class="security-password-toggle" type="button" data-password-toggle="backup-password" data-i18n-title="security.showPassword"><i class="fa-solid fa-eye"></i></button>
+              </div>
+            </label>
+            <label class="field"><span data-i18n="backup.recoveryPasswordConfirm"></span>
+              <div class="security-password-input-wrap">
+                <input id="backup-password-confirm" type="password" minlength="8" autocomplete="new-password" data-i18n-ph="backup.recoveryPasswordConfirmPlaceholder">
+                <button class="security-password-toggle" type="button" data-password-toggle="backup-password-confirm" data-i18n-title="security.showPassword"><i class="fa-solid fa-eye"></i></button>
+              </div>
+            </label>
             <div class="field-hint" data-i18n="backup.recoveryPasswordHint"></div>
           </div>
           <div class="backup-settings-actions">
@@ -1523,7 +1548,12 @@
         </div>
         <div class="planner-google-connect">
           <div class="field planner-google-client-id"><label for="planner-google-client-id" data-i18n="planner.googleClientId"></label><input id="planner-google-client-id" type="text" maxlength="1000" autocomplete="off" spellcheck="false" data-i18n-ph="planner.googleClientIdPlaceholder"></div>
-          <div class="field planner-google-client-secret"><label for="planner-google-client-secret" data-i18n="planner.googleClientSecret"></label><input id="planner-google-client-secret" type="password" maxlength="4000" autocomplete="off" spellcheck="false" data-i18n-ph="planner.googleClientSecretPlaceholder"></div>
+          <div class="field planner-google-client-secret"><label for="planner-google-client-secret" data-i18n="planner.googleClientSecret"></label>
+            <div class="security-password-input-wrap">
+              <input id="planner-google-client-secret" type="password" maxlength="4000" autocomplete="off" spellcheck="false" data-i18n-ph="planner.googleClientSecretPlaceholder">
+              <button class="security-password-toggle" type="button" data-password-toggle="planner-google-client-secret" data-i18n-title="security.showPassword"><i class="fa-solid fa-eye"></i></button>
+            </div>
+          </div>
           <div class="field planner-google-login-hint"><label for="planner-google-login-hint" data-i18n="planner.googleAccountHint"></label><input id="planner-google-login-hint" type="email" maxlength="320" autocomplete="email" data-i18n-ph="planner.googleAccountHintPlaceholder"></div>
           <div class="planner-google-connect-actions">
             <button class="btn hidden" id="btn-planner-google-cancel" type="button"><i class="fa-solid fa-xmark"></i><span data-i18n="planner.googleCancelConnection"></span></button>
