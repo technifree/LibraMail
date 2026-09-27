@@ -869,6 +869,7 @@
   "planner.expandPane": "Afficher le volet planning",
   "planner.nextEventTooltip": "Prochain rendez-vous : {when} — {title}",
   "planner.localHint": "Le planning est stocké dans LibraMail. Import de fichiers et abonnements ICS Internet en lecture seule sont inclus dans la sauvegarde complète.",
+  "planner.legend": "Légende",
   "planner.editSubscription": "Modifier cet abonnement",
   "planner.saveSubscription": "Enregistrer",
   "planner.cancelSubscriptionEdit": "Annuler",

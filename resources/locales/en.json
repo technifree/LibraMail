@@ -869,6 +869,7 @@
   "planner.expandPane": "Show calendar pane",
   "planner.nextEventTooltip": "Next event: {when} — {title}",
   "planner.localHint": "The calendar is stored in LibraMail. File imports and read-only Internet ICS subscriptions are included in full backups.",
+  "planner.legend": "Legend",
   "planner.editSubscription": "Edit this subscription",
   "planner.saveSubscription": "Save changes",
   "planner.cancelSubscriptionEdit": "Cancel",

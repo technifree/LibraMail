@@ -149,6 +149,26 @@
     select.value = selectedId ? String(selectedId) : '';
   }
 
+  function renderCategoryLegend() {
+    const root = document.getElementById('planner-category-legend');
+    if (!root) return;
+    const categories = state.categories.filter(category => category.active);
+    root.classList.toggle('hidden', categories.length === 0);
+    if (!categories.length) {
+      root.innerHTML = '';
+      return;
+    }
+
+    const items = categories.map(category => {
+      const color = /^#[0-9a-fA-F]{6}$/.test(String(category.color || ''))
+        ? category.color
+        : '#4F8BD6';
+      return `<span class="planner-category-legend-item"><i class="planner-category-legend-dot" style="--category-color:${esc(color)}" aria-hidden="true"></i><span>${esc(category.name)}</span></span>`;
+    }).join('');
+
+    root.innerHTML = `<span class="planner-category-legend-title">${esc(t('planner.legend'))}</span><span class="planner-category-legend-items">${items}</span>`;
+  }
+
   async function loadCategories() {
     try {
       state.categories = await App.rpc('calendar.categories.list', {
@@ -156,6 +176,7 @@
         locale: locale(),
       }) || [];
       populateCategorySelect(document.getElementById('planner-category')?.value || '');
+      renderCategoryLegend();
     } catch (error) {
       App.status(`${t('error')} : ${error.message}`, 'error');
     }
