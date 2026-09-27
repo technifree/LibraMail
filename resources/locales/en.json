@@ -362,6 +362,7 @@
   "list.conversationCount": "{conversations} conversations · {messages} messages · {unread} unread",
   "list.empty": "No messages",
   "list.loading": "Loading…",
+  "list.refreshing": "Refreshing…",
   "list.messageCount": "{messages} messages · {unread} unread",
   "list.searchCount": "{count} result(s)",
   "attachment.download": "Save attachment",

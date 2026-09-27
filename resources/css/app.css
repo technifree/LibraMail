@@ -830,6 +830,14 @@ body.resizing-panes.resize-rows { cursor: row-resize; }
 .list-controls .iconbtn { width: 28px; height: 28px; }
 .list-controls .iconbtn.active { background: var(--accent-soft); color: var(--accent); }
 .list-controls .iconbtn:disabled { opacity: .35; cursor: default; }
+.list-refreshing {
+  display: inline-flex; align-items: center; gap: 5px;
+  color: var(--fg-muted); font-size: 10.5px; font-weight: 400;
+  white-space: nowrap; margin-right: 3px;
+}
+.list-refreshing.hidden { display: none; }
+.list-refreshing i { color: var(--accent); font-size: 10px; }
+@media (max-width: 1080px) { .list-refreshing span { display: none; } }
 
 .mail-group-header {
   position: absolute; left: 0; right: 0;

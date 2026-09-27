@@ -2701,8 +2701,12 @@ const App = (() => {
   // ancienne d'écraser la vue si l'utilisateur clique rapidement ailleurs.
   const listViewCache = new Map();
   let listRefreshToken = 0;
+  // Clé de la vue réellement affichée. Elle permet de conserver les lignes
+  // visibles même si le cache mémoire a été invalidé entre-temps.
+  let renderedListCacheKey = '';
   let mailListLoadingTimer = null;
   let mailListLoadingToken = 0;
+  let mailListRefreshingToken = 0;
   let sidebarCountsTimer = null;
   let sidebarCountsBusy = false;
   let sidebarCountsAgain = false;
@@ -3206,6 +3210,20 @@ const App = (() => {
     document.getElementById('mail-list-loading')?.classList.add('hidden');
   }
 
+  // Lorsqu'une liste est déjà visible, une actualisation ne doit jamais la
+  // masquer. On affiche seulement ce témoin discret dans l'en-tête.
+  function prepareMailListRefreshing(token, shouldShow) {
+    mailListRefreshingToken = token;
+    const indicator = document.getElementById('list-refreshing');
+    if (!indicator) return;
+    indicator.classList.toggle('hidden', !shouldShow);
+  }
+
+  function finishMailListRefreshing(token) {
+    if (mailListRefreshingToken !== token) return;
+    document.getElementById('list-refreshing')?.classList.add('hidden');
+  }
+
   async function refresh({
     preserveListState = false,
     preferCache = true,
@@ -3220,13 +3238,20 @@ const App = (() => {
     const cacheKey = listViewCacheKey(params, conversationMode);
     const token = ++listRefreshToken;
     const cached = preferCache ? listViewCache.get(cacheKey) : null;
-    prepareMailListLoading(token, !cached);
+    const sameRenderedView = renderedListCacheKey === cacheKey;
+    const hasVisibleRows = sameRenderedView
+      && Array.isArray(list.rows)
+      && list.rows.length > 0;
+    const backgroundRefresh = Boolean(cached || hasVisibleRows);
+    prepareMailListLoading(token, !backgroundRefresh);
+    prepareMailListRefreshing(token, backgroundRefresh);
     const currentLocalFolderId = view.type === 'localFolder'
       ? view.localFolderId
       : null;
 
     if (cached) {
       renderListResult(cached, { preserveListState, conversationMode });
+      renderedListCacheKey = cacheKey;
 
       if (localFolderNavigation
           && currentLocalFolderId !== null
@@ -3240,10 +3265,14 @@ const App = (() => {
           folderId: currentLocalFolderId,
         });
         scheduleLocalFolderPrefetch(currentLocalFolderId);
+        finishMailListRefreshing(token);
         return;
       }
-    } else {
+    } else if (!hasVisibleRows) {
+      // Premier affichage réel de cette vue : aucune donnée existante à
+      // préserver, le grand indicateur de chargement reste pertinent.
       list.setData([], mailListOptions(false));
+      renderedListCacheKey = cacheKey;
       document.getElementById('list-sub').textContent = t('list.loading');
     }
 
@@ -3263,6 +3292,7 @@ const App = (() => {
         preserveListState: true,
         conversationMode,
       });
+      renderedListCacheKey = cacheKey;
 
       if (!localFolderNavigation) scheduleSidebarCountsRefresh();
 
@@ -3270,13 +3300,14 @@ const App = (() => {
         scheduleLocalFolderPrefetch(currentLocalFolderId);
       }
     } catch (error) {
-      if (token === listRefreshToken && !cached) {
+      if (token === listRefreshToken && !cached && !hasVisibleRows) {
         document.getElementById('list-sub').textContent =
           `${t('error')} : ${error.message}`;
       }
       throw error;
     } finally {
       finishMailListLoading(token);
+      finishMailListRefreshing(token);
     }
   }
 
