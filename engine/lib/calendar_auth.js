@@ -14,6 +14,7 @@ const GOOGLE = Object.freeze({
 });
 
 const PROVIDERS = Object.freeze({ google: GOOGLE });
+const DEFAULT_TOKEN_TIMEOUT_MS = 30_000;
 
 function providerFor(value = 'google') {
   const key = String(value || '').trim().toLowerCase();
@@ -127,19 +128,33 @@ function cleanOAuthError(value, fallback = 'Erreur OAuth2 calendrier') {
   return text || fallback;
 }
 
-async function tokenRequest(definition, body, fetchImpl) {
+async function tokenRequest(definition, body, fetchImpl, timeoutMs = DEFAULT_TOKEN_TIMEOUT_MS) {
   const fetchFn = fetchImpl || globalThis.fetch;
   if (typeof fetchFn !== 'function') throw new Error('Client HTTP OAuth2 indisponible');
+  const requestTimeout = Math.max(1_000, Math.min(120_000, Number(timeoutMs) || DEFAULT_TOKEN_TIMEOUT_MS));
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), requestTimeout);
 
-  const response = await fetchFn(definition.tokenEndpoint, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/x-www-form-urlencoded',
-      'accept': 'application/json',
-    },
-    body: new URLSearchParams(body).toString(),
-    redirect: 'error',
-  });
+  let response;
+  try {
+    response = await fetchFn(definition.tokenEndpoint, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        'accept': 'application/json',
+      },
+      body: new URLSearchParams(body).toString(),
+      redirect: 'error',
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error('OAuth2 calendrier : délai d’attente dépassé lors de l’échange avec Google');
+    }
+    throw new Error(cleanOAuthError(error?.message || error, 'OAuth2 calendrier : erreur réseau'));
+  } finally {
+    clearTimeout(timer);
+  }
 
   let payload = {};
   try { payload = await response.json(); }
@@ -173,6 +188,7 @@ async function exchangeAuthorizationCode({
   codeVerifier,
   redirectUri,
   fetchImpl = null,
+  timeoutMs = DEFAULT_TOKEN_TIMEOUT_MS,
 } = {}) {
   const definition = providerFor(provider);
   const authorizationCode = String(code || '').trim();
@@ -193,7 +209,7 @@ async function exchangeAuthorizationCode({
   };
   const secret = normalizeClientSecret(clientSecret);
   if (secret) body.client_secret = secret;
-  return tokenRequest(definition, body, fetchImpl);
+  return tokenRequest(definition, body, fetchImpl, timeoutMs);
 }
 
 async function refreshAccessToken({
@@ -202,6 +218,7 @@ async function refreshAccessToken({
   clientSecret = '',
   refreshToken,
   fetchImpl = null,
+  timeoutMs = DEFAULT_TOKEN_TIMEOUT_MS,
 } = {}) {
   const definition = providerFor(provider);
   const token = String(refreshToken || '').trim();
@@ -216,11 +233,12 @@ async function refreshAccessToken({
   };
   const secret = normalizeClientSecret(clientSecret);
   if (secret) body.client_secret = secret;
-  return tokenRequest(definition, body, fetchImpl);
+  return tokenRequest(definition, body, fetchImpl, timeoutMs);
 }
 
 module.exports = {
   PROVIDERS,
+  DEFAULT_TOKEN_TIMEOUT_MS,
   providerFor,
   generatePkce,
   generateState,

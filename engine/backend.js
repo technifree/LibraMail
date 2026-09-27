@@ -676,6 +676,48 @@ async function syncGoogleCalendarConnection(connectionId) {
   return result;
 }
 
+function updateGoogleCalendarConnectionIdentity(connectionId, loginHint = '') {
+  let connection = db.getCalendarConnection(connectionId);
+  if (!connection) return null;
+  const calendars = db.listCalendarRemoteCalendars({ connectionId: connection.id });
+  const primary = calendars.find(item => item.primary) || null;
+  if (!primary) return connection;
+  connection = db.saveCalendarConnection({
+    ...connection,
+    email: String(primary.remoteId || '').includes('@')
+      ? String(primary.remoteId)
+      : String(loginHint || '').trim(),
+    displayName: String(primary.name || '').trim()
+      || String(loginHint || '').trim()
+      || 'Google Calendar',
+  }, connection.id);
+  return connection;
+}
+
+function startInitialGoogleCalendarSync(connectionId, loginHint = '') {
+  setImmediate(async () => {
+    try {
+      await syncGoogleCalendarConnection(connectionId);
+      const connection = updateGoogleCalendarConnectionIdentity(connectionId, loginHint);
+      broadcast('calendar.google.changed', {
+        action: 'initial-sync-complete',
+        connectionId,
+        status: connection?.lastStatus || 'ok',
+        error: connection?.lastError || '',
+      });
+    } catch (error) {
+      const current = db.getCalendarConnection(connectionId);
+      broadcast('calendar.google.changed', {
+        action: 'initial-sync-error',
+        connectionId,
+        status: current?.lastStatus || 'error',
+        error: String(error?.message || error || 'Synchronisation Google Calendar impossible')
+          .replace(/[\r\n\t]+/g, ' ').trim().slice(0, 2000),
+      });
+    }
+  });
+}
+
 async function completeGoogleCalendarOAuth({
   clientId,
   loginHint = '',
@@ -719,45 +761,26 @@ async function completeGoogleCalendarOAuth({
     throw error;
   }
 
+  // À partir d'ici la connexion est durable : le refresh token est dans le
+  // coffre système et la connexion est en SQLite. Le flux OAuth peut donc se
+  // terminer immédiatement. La première synchro Calendar s'effectue ensuite
+  // en arrière-plan et ne peut plus bloquer l'interface sur "autorisation".
   cacheGoogleCalendarAccessToken(connection.id, tokens.accessToken, tokens.expiresIn);
-
-  let sync = null;
-  let syncError = '';
-  try {
-    sync = await syncGoogleCalendarConnection(connection.id);
-  } catch (error) {
-    syncError = String(error?.message || error || 'Synchronisation Google Calendar impossible')
-      .replace(/[\r\n\t]+/g, ' ').trim().slice(0, 2000);
-  }
-
-  const calendars = db.listCalendarRemoteCalendars({ connectionId: connection.id });
-  const primary = calendars.find(item => item.primary) || null;
-  if (primary) {
-    connection = db.saveCalendarConnection({
-      ...db.getCalendarConnection(connection.id),
-      email: String(primary.remoteId || '').includes('@')
-        ? String(primary.remoteId)
-        : String(loginHint || '').trim(),
-      displayName: String(primary.name || '').trim()
-        || String(loginHint || '').trim()
-        || 'Google Calendar',
-    }, connection.id);
-  } else {
-    connection = db.getCalendarConnection(connection.id);
-  }
-
   const result = {
     connection,
-    calendars: db.listCalendarRemoteCalendars({ connectionId: connection.id }),
-    sync,
-    syncError,
+    calendars: [],
+    sync: null,
+    syncPending: true,
+    syncError: '',
   };
+
   broadcast('calendar.google.changed', {
     action: 'connected',
     connectionId: connection.id,
-    status: connection.lastStatus || (syncError ? 'error' : 'ok'),
-    error: syncError,
+    status: 'syncing',
+    error: '',
   });
+  startInitialGoogleCalendarSync(connection.id, loginHint);
   return result;
 }
 

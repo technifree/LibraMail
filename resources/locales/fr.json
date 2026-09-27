@@ -1113,5 +1113,6 @@
   "planner.googleConflictDelete": "Ce rendez-vous a été modifié sur Google depuis votre dernière synchronisation. La suppression a été annulée et la version distante a été rechargée. Vérifiez-la puis supprimez de nouveau si nécessaire.",
   "planner.googleConflictRemoved": "Le rendez-vous n’existe plus dans Google Calendar ; sa copie locale a été retirée.",
   "planner.googleMockConflict": "Créer un conflit ETag",
-  "planner.googleMockConflictDone": "Conflit ETag simulé à distance — révision {revision}. Modifiez maintenant le rendez-vous concerné sans synchroniser d’abord."
+  "planner.googleMockConflictDone": "Conflit ETag simulé à distance — révision {revision}. Modifiez maintenant le rendez-vous concerné sans synchroniser d’abord.",
+  "planner.googleConnectedSyncing": "Compte Google connecté. Première synchronisation en cours…"
 }

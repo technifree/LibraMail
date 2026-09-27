@@ -1278,7 +1278,15 @@
       await refreshSummary();
       if (document.getElementById('planner-modal')?.classList.contains('open')) await loadEvents();
       const syncError = flow.result?.syncError || '';
-      googleStatus(syncError ? t('planner.googleConnectedWithError', { error: syncError }) : t('planner.googleConnected'), syncError ? 'error' : 'success');
+      const syncPending = Boolean(flow.result?.syncPending);
+      googleStatus(
+        syncError
+          ? t('planner.googleConnectedWithError', { error: syncError })
+          : syncPending
+            ? t('planner.googleConnectedSyncing')
+            : t('planner.googleConnected'),
+        syncError ? 'error' : (syncPending ? 'info' : 'success'),
+      );
     } else if (flow.status === 'cancelled') {
       googleStatus(t('planner.googleConnectionCancelled'), 'info');
     } else if (flow.status === 'timeout') {

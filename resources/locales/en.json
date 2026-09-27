@@ -1113,5 +1113,6 @@
   "planner.googleConflictDelete": "This event changed in Google since your last sync. Deletion was cancelled and the remote version was refreshed. Review it and delete again if needed.",
   "planner.googleConflictRemoved": "This event no longer exists in Google Calendar; its local copy was removed.",
   "planner.googleMockConflict": "Create ETag conflict",
-  "planner.googleMockConflictDone": "Remote ETag conflict simulated — revision {revision}. Edit the affected event now without syncing first."
+  "planner.googleMockConflictDone": "Remote ETag conflict simulated — revision {revision}. Edit the affected event now without syncing first.",
+  "planner.googleConnectedSyncing": "Google account connected. Initial synchronization in progress…"
 }
