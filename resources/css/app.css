@@ -1540,6 +1540,27 @@ body.resizing-panes.resize-rows { cursor: row-resize; }
   margin-top: 2px;
 }
 
+.confirm-action-typed {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+}
+.confirm-action-typed > span {
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+.confirm-action-typed input {
+  width: 100%;
+  border-color: color-mix(in srgb, var(--danger) 42%, var(--border));
+  font: 700 13px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: .06em;
+}
+.confirm-action-typed input:focus {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 16%, transparent);
+}
+
 @media (max-width: 1180px) {
   .retention-account-row {
     grid-template-columns: 10px minmax(130px, 1fr) 70px auto;
@@ -6241,6 +6262,65 @@ button.planner-attachment-open:hover strong {
 .imap-migration-accounts .field { margin: 0; min-width: 0; }
 .imap-migration-swap { align-self: end; margin-bottom: 1px; }
 .imap-migration-scope-card,
+
+.imap-migration-mirror-card {
+  margin-top: 14px;
+  padding: 13px 14px;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--danger) 5%, var(--bg-panel-2));
+}
+.imap-migration-mirror-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.imap-migration-mirror-heading > div {
+  display: grid;
+  gap: 4px;
+}
+.imap-migration-mirror-heading strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--danger);
+}
+.imap-migration-mirror-heading small {
+  max-width: 760px;
+  color: var(--fg-muted);
+  line-height: 1.45;
+}
+.imap-migration-mirror-toggle {
+  flex: none;
+  margin: 0;
+}
+.imap-migration-mirror-warning {
+  display: none;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 11px;
+  padding-top: 11px;
+  border-top: 1px solid color-mix(in srgb, var(--danger) 24%, var(--border));
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.imap-migration-mirror-card.active .imap-migration-mirror-warning { display: flex; }
+.imap-migration-mirror-warning i { margin-top: 2px; flex: none; }
+.imap-migration-history-mirror {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  border-radius: 999px;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
 .imap-migration-filter-card {
   display: flex;
   flex-direction: column;

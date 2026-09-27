@@ -4972,6 +4972,8 @@ const App = (() => {
     danger = true,
     note = t('trash.serverNote'),
     details = null,
+    requireText = '',
+    requireTextLabel = '',
   }) {
     return new Promise(resolve => {
       pendingConfirmAction = resolve;
@@ -4989,7 +4991,21 @@ const App = (() => {
       button.classList.toggle('danger', danger);
       button.classList.toggle('primary', !danger);
       button.querySelector('span').textContent = confirmLabel;
+      const typedBox = document.getElementById('confirm-action-typed');
+      const typedLabel = document.getElementById('confirm-action-typed-label');
+      const typedInput = document.getElementById('confirm-action-typed-input');
+      const required = String(requireText || '');
+      if (typedBox && typedLabel && typedInput) {
+        typedBox.classList.toggle('hidden', !required);
+        typedLabel.textContent = required ? (requireTextLabel || required) : '';
+        typedInput.value = '';
+        typedInput.dataset.requiredValue = required;
+        button.disabled = Boolean(required);
+      } else {
+        button.disabled = false;
+      }
       openModal('confirm-action-modal');
+      if (required) setTimeout(() => typedInput?.focus(), 0);
     });
   }
 
@@ -4997,6 +5013,15 @@ const App = (() => {
     const resolve = pendingConfirmAction;
     pendingConfirmAction = null;
     document.getElementById('confirm-action-modal').classList.remove('open');
+    const typedBox = document.getElementById('confirm-action-typed');
+    const typedInput = document.getElementById('confirm-action-typed-input');
+    const button = document.getElementById('btn-confirm-action');
+    if (typedBox) typedBox.classList.add('hidden');
+    if (typedInput) {
+      typedInput.value = '';
+      delete typedInput.dataset.requiredValue;
+    }
+    if (button) button.disabled = false;
     if (resolve) resolve(Boolean(accepted));
   }
 
@@ -9387,6 +9412,7 @@ const App = (() => {
   let imapMigrationFolderMappings = null;
   let imapMigrationDiscoveryKey = '';
   let imapMigrationHistory = [];
+  let imapMigrationPreviewMarkedDeleted = 0;
   const imapMigrationLogLines = [];
 
   function setImapMigrationStatus(message = '', state = '') {
@@ -9486,6 +9512,25 @@ const App = (() => {
     renderImapMigrationFolders();
   }
 
+  function imapMigrationMirrorEnabled() {
+    return Boolean(document.getElementById('imap-migration-mirror')?.checked);
+  }
+
+  function imapMigrationHasFilters() {
+    try {
+      const filters = imapMigrationFilters();
+      return Boolean(filters.since || filters.until || filters.minSize != null || filters.maxSize != null);
+    } catch {
+      return true;
+    }
+  }
+
+  function syncImapMigrationMirrorCard() {
+    const checkbox = document.getElementById('imap-migration-mirror');
+    const card = checkbox?.closest('.imap-migration-mirror-card');
+    if (card) card.classList.toggle('active', Boolean(checkbox?.checked));
+  }
+
   function imapMigrationFilters() {
     const since = document.getElementById('imap-migration-date-from')?.value || '';
     const until = document.getElementById('imap-migration-date-to')?.value || '';
@@ -9532,7 +9577,12 @@ const App = (() => {
         destinations.add(key);
       }
     }
-    return { folders, filters: imapMigrationFilters() };
+    const filters = imapMigrationFilters();
+    const mirror = imapMigrationMirrorEnabled();
+    if (mirror && (filters.since || filters.until || filters.minSize != null || filters.maxSize != null)) {
+      throw new Error(t('migrationImap.mirrorFiltersRefused'));
+    }
+    return { folders, filters, mirror };
   }
 
   function imapMigrationPlanValid() {
@@ -9553,6 +9603,7 @@ const App = (() => {
     const preview = document.getElementById('btn-imap-migration-preview');
     const copy = document.getElementById('btn-imap-migration-copy');
     const cancel = document.getElementById('btn-imap-migration-cancel');
+    const mirror = document.getElementById('imap-migration-mirror');
     const filters = [
       'imap-migration-date-from',
       'imap-migration-date-to',
@@ -9569,7 +9620,9 @@ const App = (() => {
     if (test) test.disabled = locked || !imapMigrationEngineAvailable || !selectedAccounts;
     if (preview) preview.disabled = locked || !usable;
     if (copy) copy.disabled = locked || !usable || !imapMigrationPreviewToken;
-    for (const input of filters) input.disabled = locked;
+    if (mirror) mirror.disabled = locked;
+    for (const input of filters) input.disabled = locked || Boolean(mirror?.checked);
+    syncImapMigrationMirrorCard();
     document.querySelectorAll('[data-imap-migration-folder-enable], [data-imap-migration-folder-destination]')
       .forEach(element => {
         const index = Number(element.dataset.imapMigrationFolderEnable ?? element.dataset.imapMigrationFolderDestination);
@@ -9609,6 +9662,7 @@ const App = (() => {
         size: size(summary.estimatedBytes),
       });
       if (summary.estimateBeforeSizeFilter) text += ` ${t('migrationImap.sizeEstimateMaximum')}`;
+      if (summary.mirror) text += ` ${t('migrationImap.mirrorPreviewSummary', { count: count(summary.markedDeleted) })}`;
     } else if (result.mode === 'copy') {
       text = t('migrationImap.copySummary', {
         count: count(summary.transferred),
@@ -9617,6 +9671,7 @@ const App = (() => {
         size: size(summary.transferredBytes),
       });
       if (summary.destinationConfirmed) text += ` ${t('migrationImap.destinationConfirmed')}`;
+      if (summary.mirror) text += ` ${t('migrationImap.mirrorCopySummary', { count: count(summary.markedDeleted) })}`;
     }
     root.textContent = text;
     root.className = `imap-migration-summary ${state}`;
@@ -9648,6 +9703,7 @@ const App = (() => {
               <i class="fa-solid fa-arrow-right"></i>
               <span>${esc(imapMigrationHistoryAccountLabel(entry.destinationAccountId))}</span>
               <span class="imap-migration-history-status ${status}"><i class="fa-solid ${icon}"></i>${esc(t(`migrationImap.historyStatus.${status}`))}</span>
+              ${entry.mirror ? `<span class="imap-migration-history-mirror"><i class="fa-solid fa-triangle-exclamation"></i>${esc(t('migrationImap.historyMirror'))}</span>` : ''}
             </div>
             <div class="imap-migration-history-meta">
               <span>${esc(fmtDateTime(entry.finishedAt))}</span>
@@ -9699,6 +9755,9 @@ const App = (() => {
     destination.value = String(entry.destinationAccountId);
     resetImapMigrationDiscovery();
     applyImapMigrationHistoryFilters(entry.plan?.filters || {});
+    const mirror = document.getElementById('imap-migration-mirror');
+    if (mirror) mirror.checked = false;
+    syncImapMigrationMirrorCard();
     await invalidateImapMigrationPreview();
 
     const discovered = await discoverImapMigrationFolders({ forResume: true });
@@ -9723,9 +9782,10 @@ const App = (() => {
     }
     await invalidateImapMigrationPreview();
     syncImapMigrationControls();
+    const baseMessage = t(missing ? 'migrationImap.historyRestoredPartial' : 'migrationImap.historyRestored');
     setImapMigrationStatus(
-      t(missing ? 'migrationImap.historyRestoredPartial' : 'migrationImap.historyRestored'),
-      missing ? 'info' : 'success'
+      entry.mirror ? `${baseMessage} ${t('migrationImap.historyMirrorNotRestored')}` : baseMessage,
+      missing || entry.mirror ? 'info' : 'success'
     );
   }
 
@@ -9784,6 +9844,7 @@ const App = (() => {
   async function invalidateImapMigrationPreview({ remote = true } = {}) {
     const hadPreview = Boolean(imapMigrationPreviewToken);
     imapMigrationPreviewToken = '';
+    imapMigrationPreviewMarkedDeleted = 0;
     renderImapMigrationSummary(null);
     syncImapMigrationControls();
     if (hadPreview) setImapMigrationStatus(t('migrationImap.previewInvalidated'), 'info');
@@ -9796,7 +9857,14 @@ const App = (() => {
       setImapMigrationEngineStatus(data);
       populateImapMigrationAccounts(data);
       imapMigrationBusy = Boolean(data.running);
-      imapMigrationPreviewToken = data.previewValid ? String(data.previewToken || '') : '';
+      const mirror = document.getElementById('imap-migration-mirror');
+      if (mirror && !imapMigrationBusy) mirror.checked = false;
+      imapMigrationPreviewToken = data.previewValid && !data.previewMirror ? String(data.previewToken || '') : '';
+      imapMigrationPreviewMarkedDeleted = 0;
+      if (data.previewValid && data.previewMirror && !imapMigrationBusy) {
+        rpc('migration.imap.invalidatePreview').catch(() => {});
+      }
+      syncImapMigrationMirrorCard();
       renderImapMigrationFolders();
       await refreshImapMigrationHistory();
       syncImapMigrationControls();
@@ -9873,6 +9941,28 @@ const App = (() => {
       }
     }
 
+    let mirrorConfirmation = '';
+    if (mode === 'copy' && plan.mirror) {
+      if (imapMigrationPreviewMarkedDeleted > 0) {
+        const accepted = await confirmAction({
+          title: t('migrationImap.mirrorConfirmTitle'),
+          message: t('migrationImap.mirrorConfirmMessage', { count: numberFormat(imapMigrationPreviewMarkedDeleted) }),
+          confirmLabel: t('migrationImap.mirrorConfirmLabel'),
+          danger: true,
+          note: t('migrationImap.mirrorConfirmNote'),
+          requireText: I18N.locale === 'en' ? 'DELETE' : 'SUPPRIMER',
+          requireTextLabel: t('migrationImap.mirrorTypeLabel'),
+        });
+        if (!accepted) return;
+        mirrorConfirmation = 'SUPPRIMER';
+      } else {
+        // The backend still requires the same explicit confirmation marker for a
+        // mirror run, even when the preview announced zero deletions.
+        mirrorConfirmation = 'SUPPRIMER';
+        setImapMigrationStatus(t('migrationImap.mirrorNoDeletion'), 'info');
+      }
+    }
+
     const method = mode === 'login' ? 'migration.imap.test'
       : mode === 'preview' ? 'migration.imap.preview'
         : 'migration.imap.copy';
@@ -9887,13 +9977,20 @@ const App = (() => {
         ...selection,
         plan,
         previewToken: mode === 'copy' ? imapMigrationPreviewToken : '',
+        mirrorConfirmation,
       });
-      if (mode === 'preview') imapMigrationPreviewToken = String(result.previewToken || '');
-      else if (mode === 'copy') imapMigrationPreviewToken = '';
+      if (mode === 'preview') {
+        imapMigrationPreviewToken = String(result.previewToken || '');
+        imapMigrationPreviewMarkedDeleted = Number(result.summary?.markedDeleted || 0);
+      } else if (mode === 'copy') {
+        imapMigrationPreviewToken = '';
+        imapMigrationPreviewMarkedDeleted = 0;
+      }
       renderImapMigrationSummary(result, 'success');
       setImapMigrationStatus(t(`migrationImap.done.${mode}`), 'success');
     } catch (error) {
       imapMigrationPreviewToken = '';
+      imapMigrationPreviewMarkedDeleted = 0;
       renderImapMigrationSummary({ message: error.message }, 'error');
       setImapMigrationStatus(`${t('error')} : ${error.message}`, 'error');
     } finally {
@@ -10460,6 +10557,12 @@ const App = (() => {
     document.getElementById('btn-bulk-delete').onclick = runBulkDelete;
     document.getElementById('btn-empty-folder').onclick = emptyCurrentFolder;
     document.getElementById('btn-confirm-action').onclick = () => resolveConfirmAction(true);
+    document.getElementById('confirm-action-typed-input')?.addEventListener('input', event => {
+      const input = event.currentTarget;
+      const button = document.getElementById('btn-confirm-action');
+      const required = String(input.dataset.requiredValue || '');
+      if (button && required) button.disabled = input.value.trim() !== required;
+    });
     document.getElementById('btn-cancel-confirm-action').onclick = () => resolveConfirmAction(false);
     document.getElementById('btn-close-confirm-action').onclick = () => resolveConfirmAction(false);
     document.getElementById('btn-contacts').onclick = () => openContacts();
@@ -10659,6 +10762,18 @@ const App = (() => {
       clearImapMigrationHistory().catch(error =>
         setImapMigrationStatus(`${t('error')} : ${error.message}`, 'error')
       );
+    });
+    document.getElementById('imap-migration-mirror')?.addEventListener('change', async event => {
+      const checkbox = event.currentTarget;
+      if (checkbox.checked && imapMigrationHasFilters()) {
+        checkbox.checked = false;
+        syncImapMigrationMirrorCard();
+        setImapMigrationStatus(t('migrationImap.mirrorFiltersRefused'), 'error');
+        return;
+      }
+      syncImapMigrationMirrorCard();
+      await invalidateImapMigrationPreview();
+      syncImapMigrationControls();
     });
     document.getElementById('btn-imap-migration-origin')?.addEventListener('click', () => {
       openExternal('https://github.com/Othman-Benbrahim/Mailbox-Synchroniseur', { displayText: 'Mailbox Synchroniseur' });

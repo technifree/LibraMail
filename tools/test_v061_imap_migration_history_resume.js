@@ -134,7 +134,7 @@ function fakeSpawn(program, args) {
     assert(backend.includes("'migration.imap.history.clear'"));
     assert(backend.includes("broadcast('migration.imap.history.changed'"));
     assert(backup.includes("'imap-migration-history.json'"), 'l’historique ne doit pas être inclus dans les sauvegardes');
-    assert(fr['migrationImap.phaseBadge'].includes('Phase C'));
+    assert(fr['migrationImap.phaseBadge'].includes('Phase D'));
     assert(fr['migrationImap.historyHint'].includes('aucun mot de passe'));
     assert(fr['migrationImap.historyRestored'].includes('nouvelle simulation'));
 

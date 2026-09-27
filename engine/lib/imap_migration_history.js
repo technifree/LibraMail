@@ -10,6 +10,7 @@ const VALID_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 const SUMMARY_FIELDS = [
   'transferred', 'plannable', 'skipped', 'errors', 'missing', 'unidentified',
   'sourceBytes', 'skippedBytes', 'transferredBytes', 'estimatedBytes',
+  'markedDeleted', 'deletedFolders',
 ];
 
 function cleanString(value, maxLength = 2048) {
@@ -63,6 +64,7 @@ function sanitizeRecord(record = {}) {
     status,
     sourceAccountId: cleanString(record.sourceAccountId, 256),
     destinationAccountId: cleanString(record.destinationAccountId, 256),
+    mirror: record.mirror === true,
     plan: sanitizePlan(record.plan),
     summary: sanitizeSummary(record.summary),
     elapsedMs: cleanInteger(record.elapsedMs, { min: 0, nullable: false }),

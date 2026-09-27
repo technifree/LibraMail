@@ -342,6 +342,11 @@ function normalizeMigrationPlan(plan = {}) {
     });
   }
 
+  if (plan.mirror != null && typeof plan.mirror !== 'boolean') {
+    throw new Error('Option miroir invalide.');
+  }
+  const mirror = plan.mirror === true;
+
   const filtersInput = plan.filters && typeof plan.filters === 'object' ? plan.filters : {};
   const sinceDate = parseIsoDate(filtersInput.since, 'Date de début');
   const untilDate = parseIsoDate(filtersInput.until, 'Date de fin');
@@ -353,9 +358,13 @@ function normalizeMigrationPlan(plan = {}) {
   if (minSize != null && maxSize != null && maxSize <= minSize) {
     throw new Error('La taille maximale doit être supérieure à la taille minimale.');
   }
+  if (mirror && (sinceDate || untilDate || minSize != null || maxSize != null)) {
+    throw new Error('Le miroir est incompatible avec les filtres : des messages masqués par un filtre pourraient être supprimés à destination.');
+  }
 
   return {
     folders,
+    mirror,
     filters: {
       since: sinceDate ? String(filtersInput.since) : null,
       until: untilDate ? String(filtersInput.until) : null,
@@ -389,6 +398,7 @@ function buildCommandArgs(source, destination, mode = 'preview', plan = {}) {
     '--noresyncflags',
     '--regexflag', 's/\\\\Deleted//g',
     '--noexpunge2',
+    '--nouidexpunge2',
     '--host1', source.host,
     '--user1', source.user,
     '--port1', String(source.port),
@@ -404,6 +414,14 @@ function buildCommandArgs(source, destination, mode = 'preview', plan = {}) {
   }
 
   if (mode === 'preview') args.push('--dry');
+
+  if (normalizedPlan.mirror) {
+    // --delete2 is the only destructive imapsync switch LibraMail permits.
+    // imapsync may otherwise enable an expunge as a side effect, so both forms
+    // of destination expunge are explicitly disabled. Source deletion/expunge
+    // is already disabled above and must never be added here.
+    args.push('--delete2', '--noexpunge2', '--nouidexpunge2');
+  }
 
   if (normalizedPlan.folders) {
     for (const mapping of normalizedPlan.folders) {
@@ -449,6 +467,8 @@ function emptySummary() {
     sourceBytes: null,
     skippedBytes: null,
     transferredBytes: null,
+    markedDeleted: 0,
+    deletedFolders: null,
   };
 }
 
@@ -470,6 +490,9 @@ function parseSummaryLine(summary, input) {
   if (match) summary.plannable = Number(match[1]);
   match = line.match(/^Detected (\d+) errors\b/);
   if (match) summary.errors = Number(match[1]);
+  if (/^Host2: msg .+ marked \\Deleted/.test(line)) summary.markedDeleted += 1;
+  match = line.match(/^Folders deleted on host2\s*:\s*(\d+)\b/);
+  if (match) summary.deletedFolders = Number(match[1]);
   if (line.startsWith('There is no unidentified message on host1.')) summary.unidentified = 0;
   match = line.match(/^There are (\d+) unidentified messages/);
   if (match) summary.unidentified = Number(match[1]);
@@ -594,6 +617,7 @@ class ImapMigrationManager {
         sourceAccountId: source.id,
         destinationAccountId: destination.id,
         plan: normalizeMigrationPlan(plan),
+        mirror: normalizeMigrationPlan(plan).mirror === true,
         summary: { ...summary },
         elapsedMs: Math.max(0, Number(elapsedMs) || 0),
         exitCode: Number.isInteger(exitCode) ? exitCode : -1,
@@ -631,10 +655,12 @@ class ImapMigrationManager {
       previewToken: previewValid ? this.preview.token : '',
       previewSourceId: previewValid ? this.preview.sourceId : '',
       previewDestinationId: previewValid ? this.preview.destinationId : '',
+      previewMirror: previewValid ? Boolean(this.preview.mirror) : false,
+      previewMarkedDeleted: previewValid ? Number(this.preview.markedDeleted || 0) : 0,
     };
   }
 
-  async run({ mode, sourceAccount, destinationAccount, previewToken = '', plan = {} } = {}) {
+  async run({ mode, sourceAccount, destinationAccount, previewToken = '', plan = {}, mirrorConfirmation = '' } = {}) {
     if (this.active) throw new Error('Une migration IMAP est déjà en cours.');
     if (!['login', 'preview', 'copy'].includes(mode)) throw new Error('Mode de migration IMAP invalide.');
 
@@ -650,6 +676,15 @@ class ImapMigrationManager {
           || (this.now() - preview.createdAt) > PREVIEW_MAX_AGE_MS) {
         this.preview = null;
         throw new Error('Une simulation réussie du même plan est obligatoire avant la copie.');
+      }
+      if (normalizedPlan.mirror) {
+        if (preview.mirror !== true) {
+          this.preview = null;
+          throw new Error('Refaites une simulation avec le miroir activé avant la copie.');
+        }
+        if (String(mirrorConfirmation || '').trim() !== 'SUPPRIMER') {
+          throw new Error('Confirmation miroir incorrecte : aucune suppression n’a été lancée.');
+        }
       }
       this.preview = null;
     }
@@ -774,6 +809,7 @@ class ImapMigrationManager {
         const hasSizeFilter = normalizedPlan.filters.minSize != null || normalizedPlan.filters.maxSize != null;
         const resultSummary = {
           ...summary,
+          mirror: normalizedPlan.mirror === true,
           estimatedBytes: mode === 'preview' ? estimatedBytes(summary) : null,
           estimateBeforeSizeFilter: mode === 'preview' && hasSizeFilter,
           destinationConfirmed: mode === 'copy' && exitCode === 0 && successfulCopySummary(summary),
@@ -820,6 +856,8 @@ class ImapMigrationManager {
             createdAt: this.now(),
             sourceId: source.id,
             destinationId: destination.id,
+            mirror: normalizedPlan.mirror === true,
+            markedDeleted: Number(resultSummary.markedDeleted || 0),
           };
         }
         if (mode === 'copy') {

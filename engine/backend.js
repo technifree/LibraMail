@@ -3343,7 +3343,7 @@ const methods = {
     return imap.listFolders(account);
   },
 
-  // ---------- Migration IMAP (0.6.1, phase B : périmètre, dossiers et filtres) ----------
+  // ---------- Migration IMAP (0.6.1, phase D : miroir destination protégé) ----------
   'migration.imap.status': async () => ({
     ...imapMigrationManager.status(),
     accounts: accounts
@@ -3381,7 +3381,7 @@ const methods = {
     return imapMigrationManager.run({ mode: 'preview', sourceAccount, destinationAccount, plan });
   },
 
-  'migration.imap.copy': async ({ sourceAccountId = '', destinationAccountId = '', previewToken = '', plan = {} } = {}) => {
+  'migration.imap.copy': async ({ sourceAccountId = '', destinationAccountId = '', previewToken = '', plan = {}, mirrorConfirmation = '' } = {}) => {
     const sourceAccount = getImapMigrationAccount(sourceAccountId, 'Source');
     const destinationAccount = getImapMigrationAccount(destinationAccountId, 'Destination');
     return imapMigrationManager.run({
@@ -3390,6 +3390,7 @@ const methods = {
       destinationAccount,
       previewToken,
       plan,
+      mirrorConfirmation,
     });
   },
 

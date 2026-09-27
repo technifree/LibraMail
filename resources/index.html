@@ -992,6 +992,23 @@
             <div class="field-hint" data-i18n="migrationImap.filterSemantics"></div>
           </div>
 
+          <div class="imap-migration-mirror-card">
+            <div class="imap-migration-mirror-heading">
+              <div>
+                <strong><i class="fa-solid fa-triangle-exclamation"></i><span data-i18n="migrationImap.mirrorTitle"></span></strong>
+                <small data-i18n="migrationImap.mirrorHint"></small>
+              </div>
+              <label class="toggle-row imap-migration-mirror-toggle">
+                <input id="imap-migration-mirror" type="checkbox">
+                <span data-i18n="migrationImap.mirrorEnable"></span>
+              </label>
+            </div>
+            <div class="imap-migration-mirror-warning" id="imap-migration-mirror-warning">
+              <i class="fa-solid fa-shield-halved"></i>
+              <span data-i18n="migrationImap.mirrorSafety"></span>
+            </div>
+          </div>
+
           <div class="imap-migration-actions">
             <button class="btn" id="btn-imap-migration-test" type="button"><i class="fa-solid fa-plug-circle-check"></i><span data-i18n="migrationImap.test"></span></button>
             <button class="btn" id="btn-imap-migration-preview" type="button"><i class="fa-solid fa-magnifying-glass"></i><span data-i18n="migrationImap.preview"></span></button>
@@ -1475,6 +1492,10 @@
         <i class="fa-solid fa-circle-info"></i>
         <span id="confirm-action-note-text" data-i18n="trash.serverNote"></span>
       </div>
+      <label class="confirm-action-typed hidden" id="confirm-action-typed">
+        <span id="confirm-action-typed-label"></span>
+        <input id="confirm-action-typed-input" type="text" autocomplete="off" spellcheck="false">
+      </label>
     </div>
     <footer>
       <button class="btn" id="btn-cancel-confirm-action" type="button" data-i18n="cancel"></button>
