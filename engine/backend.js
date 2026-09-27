@@ -3333,7 +3333,7 @@ const methods = {
     return imap.listFolders(account);
   },
 
-  // ---------- Migration IMAP (0.6.1, phase A non destructive) ----------
+  // ---------- Migration IMAP (0.6.1, phase B : périmètre, dossiers et filtres) ----------
   'migration.imap.status': async () => ({
     ...imapMigrationManager.status(),
     accounts: accounts
@@ -3347,13 +3347,31 @@ const methods = {
     return imapMigrationManager.run({ mode: 'login', sourceAccount, destinationAccount });
   },
 
-  'migration.imap.preview': async ({ sourceAccountId = '', destinationAccountId = '' } = {}) => {
+  'migration.imap.discover': async ({ sourceAccountId = '', destinationAccountId = '' } = {}) => {
     const sourceAccount = getImapMigrationAccount(sourceAccountId, 'Source');
     const destinationAccount = getImapMigrationAccount(destinationAccountId, 'Destination');
-    return imapMigrationManager.run({ mode: 'preview', sourceAccount, destinationAccount });
+    try {
+      const [sourceFolders, destinationFolders] = await Promise.all([
+        imap.listFolders(sourceAccount, { requireStartTls: true }),
+        imap.listFolders(destinationAccount, { requireStartTls: true }),
+      ]);
+      return imapMigration.proposeFolderMappings(sourceFolders, destinationFolders);
+    } catch (error) {
+      const safe = imapMigration.redactLine(error?.message || error, [
+        sourceAccount.imap?.pass,
+        destinationAccount.imap?.pass,
+      ]);
+      throw new Error(safe || 'Découverte des dossiers IMAP impossible.');
+    }
   },
 
-  'migration.imap.copy': async ({ sourceAccountId = '', destinationAccountId = '', previewToken = '' } = {}) => {
+  'migration.imap.preview': async ({ sourceAccountId = '', destinationAccountId = '', plan = {} } = {}) => {
+    const sourceAccount = getImapMigrationAccount(sourceAccountId, 'Source');
+    const destinationAccount = getImapMigrationAccount(destinationAccountId, 'Destination');
+    return imapMigrationManager.run({ mode: 'preview', sourceAccount, destinationAccount, plan });
+  },
+
+  'migration.imap.copy': async ({ sourceAccountId = '', destinationAccountId = '', previewToken = '', plan = {} } = {}) => {
     const sourceAccount = getImapMigrationAccount(sourceAccountId, 'Source');
     const destinationAccount = getImapMigrationAccount(destinationAccountId, 'Destination');
     return imapMigrationManager.run({
@@ -3361,6 +3379,7 @@ const methods = {
       sourceAccount,
       destinationAccount,
       previewToken,
+      plan,
     });
   },
 

@@ -950,6 +950,48 @@
           </div>
           <div class="field-hint" id="imap-migration-account-hint" data-i18n="migrationImap.accountHint"></div>
 
+          <div class="imap-migration-scope-card">
+            <div class="imap-migration-subheading">
+              <div>
+                <strong data-i18n="migrationImap.foldersTitle"></strong>
+                <small data-i18n="migrationImap.foldersHint"></small>
+              </div>
+              <button class="btn" id="btn-imap-migration-discover" type="button">
+                <i class="fa-solid fa-folder-tree"></i><span data-i18n="migrationImap.discover"></span>
+              </button>
+            </div>
+            <div id="imap-migration-folder-summary" class="field-hint" data-i18n="migrationImap.allFolders"></div>
+            <div id="imap-migration-folder-wrap" class="imap-migration-folder-wrap hidden">
+              <table class="imap-migration-folder-table">
+                <thead>
+                  <tr>
+                    <th data-i18n="migrationImap.folderUse"></th>
+                    <th data-i18n="migrationImap.folderSource"></th>
+                    <th data-i18n="migrationImap.folderDestination"></th>
+                    <th data-i18n="migrationImap.folderProposal"></th>
+                  </tr>
+                </thead>
+                <tbody id="imap-migration-folder-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="imap-migration-filter-card">
+            <div class="imap-migration-subheading">
+              <div>
+                <strong data-i18n="migrationImap.filtersTitle"></strong>
+                <small data-i18n="migrationImap.filtersHint"></small>
+              </div>
+            </div>
+            <div class="imap-migration-filter-grid">
+              <label class="field"><span data-i18n="migrationImap.dateFrom"></span><input id="imap-migration-date-from" type="date"></label>
+              <label class="field"><span data-i18n="migrationImap.dateTo"></span><input id="imap-migration-date-to" type="date"></label>
+              <label class="field"><span data-i18n="migrationImap.minSize"></span><div class="input-suffix"><input id="imap-migration-min-size" type="number" min="1" step="1"><span data-i18n="migrationImap.kib"></span></div></label>
+              <label class="field"><span data-i18n="migrationImap.maxSize"></span><div class="input-suffix"><input id="imap-migration-max-size" type="number" min="1" step="1"><span data-i18n="migrationImap.kib"></span></div></label>
+            </div>
+            <div class="field-hint" data-i18n="migrationImap.filterSemantics"></div>
+          </div>
+
           <div class="imap-migration-actions">
             <button class="btn" id="btn-imap-migration-test" type="button"><i class="fa-solid fa-plug-circle-check"></i><span data-i18n="migrationImap.test"></span></button>
             <button class="btn" id="btn-imap-migration-preview" type="button"><i class="fa-solid fa-magnifying-glass"></i><span data-i18n="migrationImap.preview"></span></button>

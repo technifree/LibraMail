@@ -9380,7 +9380,10 @@ const App = (() => {
   let imapMigrationAccounts = [];
   let imapMigrationPreviewToken = '';
   let imapMigrationBusy = false;
+  let imapMigrationDiscovering = false;
   let imapMigrationEngineAvailable = false;
+  let imapMigrationFolderMappings = null;
+  let imapMigrationDiscoveryKey = '';
   const imapMigrationLogLines = [];
 
   function setImapMigrationStatus(message = '', state = '') {
@@ -9426,26 +9429,155 @@ const App = (() => {
     };
   }
 
+  function imapMigrationSelectionKey() {
+    const { sourceAccountId, destinationAccountId } = imapMigrationSelection();
+    return `${sourceAccountId}\u0000${destinationAccountId}`;
+  }
+
   function imapMigrationSelectionValid() {
     const { sourceAccountId, destinationAccountId } = imapMigrationSelection();
     return Boolean(sourceAccountId && destinationAccountId && sourceAccountId !== destinationAccountId);
+  }
+
+  function migrationMappingReason(mapping = {}) {
+    const key = `migrationImap.mappingReason.${mapping.kind || 'new'}`;
+    return t(key, { target: mapping.destination || mapping.source || '' });
+  }
+
+  function renderImapMigrationFolders() {
+    const wrap = document.getElementById('imap-migration-folder-wrap');
+    const body = document.getElementById('imap-migration-folder-body');
+    const summary = document.getElementById('imap-migration-folder-summary');
+    if (!wrap || !body || !summary) return;
+
+    if (!Array.isArray(imapMigrationFolderMappings)) {
+      wrap.classList.add('hidden');
+      body.innerHTML = '';
+      summary.textContent = t('migrationImap.allFolders');
+      return;
+    }
+
+    const selected = imapMigrationFolderMappings.filter(mapping => mapping.selected && !mapping.locked).length;
+    const excluded = imapMigrationFolderMappings.length - selected;
+    summary.textContent = t('migrationImap.folderCount', {
+      selected: numberFormat(selected),
+      excluded: numberFormat(excluded),
+    });
+
+    body.innerHTML = imapMigrationFolderMappings.map((mapping, index) => {
+      const disabled = Boolean(mapping.locked);
+      return `
+        <tr class="${disabled ? 'is-excluded' : ''}" data-imap-migration-folder-row="${index}">
+          <td><input type="checkbox" data-imap-migration-folder-enable="${index}" ${mapping.selected ? 'checked' : ''} ${disabled ? 'disabled' : ''}></td>
+          <td>${esc(mapping.source || '')}</td>
+          <td><input type="text" data-imap-migration-folder-destination="${index}" value="${esc(mapping.destination || mapping.source || '')}" ${disabled || !mapping.selected ? 'disabled' : ''}></td>
+          <td class="imap-migration-folder-reason">${esc(migrationMappingReason(mapping))}</td>
+        </tr>`;
+    }).join('');
+    wrap.classList.remove('hidden');
+  }
+
+  function resetImapMigrationDiscovery() {
+    imapMigrationFolderMappings = null;
+    imapMigrationDiscoveryKey = '';
+    renderImapMigrationFolders();
+  }
+
+  function imapMigrationFilters() {
+    const since = document.getElementById('imap-migration-date-from')?.value || '';
+    const until = document.getElementById('imap-migration-date-to')?.value || '';
+    const minKibRaw = document.getElementById('imap-migration-min-size')?.value || '';
+    const maxKibRaw = document.getElementById('imap-migration-max-size')?.value || '';
+    if (since && until && since > until) throw new Error(t('migrationImap.invalidDateRange'));
+
+    const toBytes = (raw, labelKey) => {
+      if (!raw) return null;
+      const kib = Number(raw);
+      if (!Number.isInteger(kib) || kib <= 0 || kib > Math.floor((2 ** 40) / 1024)) {
+        throw new Error(t(labelKey));
+      }
+      return kib * 1024;
+    };
+    const minSize = toBytes(minKibRaw, 'migrationImap.invalidMinSize');
+    const maxSize = toBytes(maxKibRaw, 'migrationImap.invalidMaxSize');
+    if (minSize != null && maxSize != null && maxSize <= minSize) {
+      throw new Error(t('migrationImap.invalidSizeRange'));
+    }
+    return {
+      since: since || null,
+      until: until || null,
+      minSize,
+      maxSize,
+    };
+  }
+
+  function imapMigrationPlan() {
+    let folders = null;
+    if (Array.isArray(imapMigrationFolderMappings)) {
+      folders = imapMigrationFolderMappings
+        .filter(mapping => mapping.selected && !mapping.locked)
+        .map(mapping => ({
+          source: String(mapping.source || ''),
+          destination: String(mapping.destination || mapping.source || ''),
+        }));
+      if (!folders.length) throw new Error(t('migrationImap.needFolder'));
+      const destinations = new Set();
+      for (const mapping of folders) {
+        if (!mapping.destination.trim()) throw new Error(t('migrationImap.invalidFolderDestination'));
+        const key = mapping.destination.toLocaleLowerCase();
+        if (destinations.has(key)) throw new Error(t('migrationImap.duplicateDestination'));
+        destinations.add(key);
+      }
+    }
+    return { folders, filters: imapMigrationFilters() };
+  }
+
+  function imapMigrationPlanValid() {
+    try {
+      imapMigrationPlan();
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   function syncImapMigrationControls() {
     const source = document.getElementById('imap-migration-source');
     const destination = document.getElementById('imap-migration-destination');
     const swap = document.getElementById('btn-imap-migration-swap');
+    const discover = document.getElementById('btn-imap-migration-discover');
     const test = document.getElementById('btn-imap-migration-test');
     const preview = document.getElementById('btn-imap-migration-preview');
     const copy = document.getElementById('btn-imap-migration-copy');
     const cancel = document.getElementById('btn-imap-migration-cancel');
-    const usable = imapMigrationEngineAvailable && imapMigrationSelectionValid() && imapMigrationAccounts.length >= 2;
-    if (source) source.disabled = imapMigrationBusy;
-    if (destination) destination.disabled = imapMigrationBusy;
-    if (swap) swap.disabled = imapMigrationBusy || imapMigrationAccounts.length < 2;
-    if (test) test.disabled = imapMigrationBusy || !usable;
-    if (preview) preview.disabled = imapMigrationBusy || !usable;
-    if (copy) copy.disabled = imapMigrationBusy || !usable || !imapMigrationPreviewToken;
+    const filters = [
+      'imap-migration-date-from',
+      'imap-migration-date-to',
+      'imap-migration-min-size',
+      'imap-migration-max-size',
+    ].map(id => document.getElementById(id)).filter(Boolean);
+    const selectedAccounts = imapMigrationSelectionValid() && imapMigrationAccounts.length >= 2;
+    const usable = imapMigrationEngineAvailable && selectedAccounts && imapMigrationPlanValid();
+    const locked = imapMigrationBusy || imapMigrationDiscovering;
+    if (source) source.disabled = locked;
+    if (destination) destination.disabled = locked;
+    if (swap) swap.disabled = locked || imapMigrationAccounts.length < 2;
+    if (discover) discover.disabled = locked || !selectedAccounts;
+    if (test) test.disabled = locked || !imapMigrationEngineAvailable || !selectedAccounts;
+    if (preview) preview.disabled = locked || !usable;
+    if (copy) copy.disabled = locked || !usable || !imapMigrationPreviewToken;
+    for (const input of filters) input.disabled = locked;
+    document.querySelectorAll('[data-imap-migration-folder-enable], [data-imap-migration-folder-destination]')
+      .forEach(element => {
+        const index = Number(element.dataset.imapMigrationFolderEnable ?? element.dataset.imapMigrationFolderDestination);
+        const mapping = imapMigrationFolderMappings?.[index];
+        if (!mapping) return;
+        if (element.matches('[data-imap-migration-folder-enable]')) {
+          element.disabled = locked || Boolean(mapping.locked);
+        } else {
+          element.disabled = locked || Boolean(mapping.locked) || !mapping.selected;
+        }
+      });
     if (cancel) cancel.classList.toggle('hidden', !imapMigrationBusy);
   }
 
@@ -9468,6 +9600,7 @@ const App = (() => {
         errors: count(summary.errors),
         size: size(summary.estimatedBytes),
       });
+      if (summary.estimateBeforeSizeFilter) text += ` ${t('migrationImap.sizeEstimateMaximum')}`;
     } else if (result.mode === 'copy') {
       text = t('migrationImap.copySummary', {
         count: count(summary.transferred),
@@ -9512,6 +9645,10 @@ const App = (() => {
     if (hint) hint.textContent = imapMigrationAccounts.length < 2
       ? t('migrationImap.needTwoAccounts')
       : t('migrationImap.accountHint');
+
+    if (imapMigrationDiscoveryKey && imapMigrationDiscoveryKey !== imapMigrationSelectionKey()) {
+      resetImapMigrationDiscovery();
+    }
   }
 
   async function invalidateImapMigrationPreview({ remote = true } = {}) {
@@ -9530,6 +9667,7 @@ const App = (() => {
       populateImapMigrationAccounts(data);
       imapMigrationBusy = Boolean(data.running);
       imapMigrationPreviewToken = data.previewValid ? String(data.previewToken || '') : '';
+      renderImapMigrationFolders();
       syncImapMigrationControls();
       if (!data.available) setImapMigrationStatus(t('migrationImap.enginePhaseHint'), 'info');
       else if (imapMigrationAccounts.length < 2) setImapMigrationStatus(t('migrationImap.needTwoAccounts'), 'info');
@@ -9539,8 +9677,47 @@ const App = (() => {
     }
   }
 
+  async function discoverImapMigrationFolders() {
+    if (imapMigrationBusy || imapMigrationDiscovering) return;
+    const selection = imapMigrationSelection();
+    if (!imapMigrationSelectionValid()) {
+      setImapMigrationStatus(t('migrationImap.chooseDifferentAccounts'), 'error');
+      return;
+    }
+    imapMigrationDiscovering = true;
+    syncImapMigrationControls();
+    setImapMigrationStatus(t('migrationImap.discovering'), 'busy');
+    try {
+      const result = await rpc('migration.imap.discover', selection);
+      imapMigrationFolderMappings = Array.isArray(result.mappings)
+        ? result.mappings.map(mapping => ({
+          source: String(mapping.source || ''),
+          destination: String(mapping.destination || mapping.source || ''),
+          selected: Boolean(mapping.selected),
+          locked: Boolean(mapping.locked),
+          kind: String(mapping.kind || 'new'),
+        }))
+        : [];
+      imapMigrationDiscoveryKey = imapMigrationSelectionKey();
+      renderImapMigrationFolders();
+      await invalidateImapMigrationPreview();
+      const selected = imapMigrationFolderMappings.filter(mapping => mapping.selected && !mapping.locked).length;
+      const excluded = imapMigrationFolderMappings.length - selected;
+      setImapMigrationStatus(t('migrationImap.discovered', {
+        selected: numberFormat(selected),
+        excluded: numberFormat(excluded),
+      }), selected ? 'success' : 'error');
+    } catch (error) {
+      resetImapMigrationDiscovery();
+      setImapMigrationStatus(`${t('error')} : ${error.message}`, 'error');
+    } finally {
+      imapMigrationDiscovering = false;
+      syncImapMigrationControls();
+    }
+  }
+
   async function runImapMigration(mode) {
-    if (imapMigrationBusy) return;
+    if (imapMigrationBusy || imapMigrationDiscovering) return;
     const selection = imapMigrationSelection();
     if (!imapMigrationSelectionValid()) {
       setImapMigrationStatus(t('migrationImap.chooseDifferentAccounts'), 'error');
@@ -9550,6 +9727,17 @@ const App = (() => {
       setImapMigrationStatus(t('migrationImap.engineMissing'), 'error');
       return;
     }
+
+    let plan = {};
+    if (mode !== 'login') {
+      try {
+        plan = imapMigrationPlan();
+      } catch (error) {
+        setImapMigrationStatus(error.message, 'error');
+        return;
+      }
+    }
+
     const method = mode === 'login' ? 'migration.imap.test'
       : mode === 'preview' ? 'migration.imap.preview'
         : 'migration.imap.copy';
@@ -9562,6 +9750,7 @@ const App = (() => {
     try {
       const result = await rpc(method, {
         ...selection,
+        plan,
         previewToken: mode === 'copy' ? imapMigrationPreviewToken : '',
       });
       if (mode === 'preview') imapMigrationPreviewToken = String(result.previewToken || '');
@@ -10277,18 +10466,49 @@ const App = (() => {
     document.getElementById('contacts-group-filter').onchange = () => loadContacts().catch(() => {});
     document.getElementById('btn-settings').onclick = openSettings;
     wireSettingsTabs();
-    document.getElementById('imap-migration-source')?.addEventListener('change', () => invalidateImapMigrationPreview());
-    document.getElementById('imap-migration-destination')?.addEventListener('change', () => invalidateImapMigrationPreview());
+    const onImapMigrationAccountChange = () => {
+      resetImapMigrationDiscovery();
+      invalidateImapMigrationPreview();
+      syncImapMigrationControls();
+    };
+    document.getElementById('imap-migration-source')?.addEventListener('change', onImapMigrationAccountChange);
+    document.getElementById('imap-migration-destination')?.addEventListener('change', onImapMigrationAccountChange);
     document.getElementById('btn-imap-migration-swap')?.addEventListener('click', () => {
-      if (imapMigrationBusy) return;
+      if (imapMigrationBusy || imapMigrationDiscovering) return;
       const source = document.getElementById('imap-migration-source');
       const destination = document.getElementById('imap-migration-destination');
       if (!source || !destination) return;
       const current = source.value;
       source.value = destination.value;
       destination.value = current;
+      resetImapMigrationDiscovery();
       invalidateImapMigrationPreview();
     });
+    document.getElementById('btn-imap-migration-discover')?.addEventListener('click', discoverImapMigrationFolders);
+    document.getElementById('imap-migration-folder-body')?.addEventListener('change', event => {
+      const checkbox = event.target.closest('[data-imap-migration-folder-enable]');
+      if (!checkbox) return;
+      const index = Number(checkbox.dataset.imapMigrationFolderEnable);
+      const mapping = imapMigrationFolderMappings?.[index];
+      if (!mapping || mapping.locked) return;
+      mapping.selected = Boolean(checkbox.checked);
+      renderImapMigrationFolders();
+      invalidateImapMigrationPreview();
+    });
+    document.getElementById('imap-migration-folder-body')?.addEventListener('input', event => {
+      const input = event.target.closest('[data-imap-migration-folder-destination]');
+      if (!input) return;
+      const index = Number(input.dataset.imapMigrationFolderDestination);
+      const mapping = imapMigrationFolderMappings?.[index];
+      if (!mapping || mapping.locked) return;
+      mapping.destination = input.value;
+      invalidateImapMigrationPreview();
+    });
+    ['imap-migration-date-from', 'imap-migration-date-to', 'imap-migration-min-size', 'imap-migration-max-size']
+      .forEach(id => document.getElementById(id)?.addEventListener('input', () => {
+        invalidateImapMigrationPreview();
+        syncImapMigrationControls();
+      }));
     document.getElementById('btn-imap-migration-test')?.addEventListener('click', () => runImapMigration('login'));
     document.getElementById('btn-imap-migration-preview')?.addEventListener('click', () => runImapMigration('preview'));
     document.getElementById('btn-imap-migration-copy')?.addEventListener('click', () => runImapMigration('copy'));

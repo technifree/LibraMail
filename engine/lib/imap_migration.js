@@ -68,9 +68,319 @@ function tlsArgs(index, account) {
   return result;
 }
 
-function buildCommandArgs(source, destination, mode = 'preview') {
+const IMAP_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const ROLE_ALIASES = {
+  sent: ['sent', 'sent items', 'sent messages', 'sent mail', 'envoyés', 'envoyes',
+    'éléments envoyés', 'elements envoyes', 'messages envoyés', 'messages envoyes',
+    '[gmail]/sent mail', '[google mail]/sent mail'],
+  drafts: ['drafts', 'draft', 'brouillons', '[gmail]/drafts', '[google mail]/drafts'],
+  trash: ['trash', 'deleted items', 'deleted messages', 'corbeille', 'éléments supprimés',
+    'elements supprimes', 'bin', '[gmail]/trash', '[gmail]/bin', '[google mail]/trash'],
+  junk: ['junk', 'junk e-mail', 'junk email', 'spam', 'pourriel', 'pourriels',
+    'courrier indésirable', 'courrier indesirable', 'indésirables', 'indesirables',
+    '[gmail]/spam', '[google mail]/spam'],
+  archive: ['archive', 'archives', 'archived'],
+};
+
+function imapUtf7(name) {
+  const input = String(name ?? '');
+  const output = [];
+  let pending = '';
+
+  const flush = () => {
+    if (!pending) return;
+    const le = Buffer.from(pending, 'utf16le');
+    const be = Buffer.allocUnsafe(le.length);
+    for (let index = 0; index < le.length; index += 2) {
+      be[index] = le[index + 1];
+      be[index + 1] = le[index];
+    }
+    output.push(`&${be.toString('base64').replace(/\//g, ',').replace(/=+$/g, '')}-`);
+    pending = '';
+  };
+
+  for (const char of input) {
+    const code = char.codePointAt(0);
+    if (code >= 0x20 && code <= 0x7e) {
+      flush();
+      output.push(char === '&' ? '&-' : char);
+    } else {
+      pending += char;
+    }
+  }
+  flush();
+  return output.join('');
+}
+
+function normalizeSpecialUse(value) {
+  const normalized = String(value || '').trim().replace(/^\\/, '').toLowerCase();
+  const aliases = {
+    inbox: 'inbox',
+    sent: 'sent',
+    drafts: 'drafts',
+    trash: 'trash',
+    junk: 'junk',
+    spam: 'junk',
+    archive: 'archive',
+    all: 'all',
+    allmail: 'all',
+  };
+  return aliases[normalized] || '';
+}
+
+function normalizeFolder(folder = {}) {
+  const pathValue = String(folder.path || folder.name || '').normalize('NFC');
+  const flags = Array.isArray(folder.flags) ? folder.flags.map(flag => String(flag)) : [];
+  const selectable = folder.selectable !== false
+    && !flags.some(flag => String(flag).toLowerCase() === '\\noselect');
+  return {
+    path: pathValue,
+    name: String(folder.name || pathValue).normalize('NFC'),
+    delimiter: folder.delimiter == null ? null : String(folder.delimiter),
+    specialUse: String(folder.specialUse || ''),
+    role: normalizeSpecialUse(folder.specialUse),
+    flags,
+    selectable,
+  };
+}
+
+function folderRole(folder) {
+  const normalized = normalizeFolder(folder);
+  if (normalized.role) return normalized.role;
+  const lowered = normalized.path.toLocaleLowerCase('fr');
+  for (const [role, aliases] of Object.entries(ROLE_ALIASES)) {
+    if (aliases.some(alias => lowered === alias.toLocaleLowerCase('fr'))) return role;
+  }
+  if (lowered === 'inbox') return 'inbox';
+  return '';
+}
+
+function translateDelimiter(name, sourceDelimiter, destinationDelimiter) {
+  const source = String(sourceDelimiter || '');
+  const destination = String(destinationDelimiter || '');
+  if (!source || !destination || source === destination) return String(name || '');
+  return String(name || '').split(source).join(destination);
+}
+
+function folderDepth(folder) {
+  const delimiter = String(folder.delimiter || '');
+  if (!delimiter) return 0;
+  return String(folder.path || '').split(delimiter).length - 1;
+}
+
+function proposeFolderMappings(sourceFolders = [], destinationFolders = []) {
+  const source = sourceFolders.map(normalizeFolder).filter(folder => folder.path);
+  const destination = destinationFolders.map(normalizeFolder).filter(folder => folder.path);
+  const byName = new Map(destination.map(folder => [folder.path, folder]));
+  const byCase = new Map();
+  for (const folder of destination) {
+    const key = folder.path.toLocaleLowerCase('fr');
+    if (!byCase.has(key)) byCase.set(key, folder);
+  }
+  const byRole = new Map();
+  for (const folder of destination) {
+    const role = folderRole(folder);
+    if (role && folder.selectable && !byRole.has(role)) byRole.set(role, folder);
+  }
+  const destinationDelimiter = destination.find(folder => folder.delimiter)?.delimiter
+    || source.find(folder => folder.delimiter)?.delimiter
+    || '/';
+  const used = new Set();
+  const renamed = new Map();
+  const results = [];
+
+  const ordered = [...source].sort((a, b) => folderDepth(a) - folderDepth(b));
+
+  const inheritedTarget = folder => {
+    if (!folder.delimiter) return '';
+    const parts = folder.path.split(folder.delimiter);
+    for (let cut = parts.length - 1; cut > 0; cut--) {
+      const prefix = parts.slice(0, cut).join(folder.delimiter);
+      const targetPrefix = renamed.get(prefix);
+      if (targetPrefix && targetPrefix !== prefix) {
+        return `${targetPrefix}${destinationDelimiter}${parts.slice(cut).join(destinationDelimiter)}`;
+      }
+    }
+    return '';
+  };
+
+  for (const folder of ordered) {
+    if (!folder.selectable) {
+      results.push({
+        source: folder.path,
+        destination: '',
+        selected: false,
+        locked: true,
+        kind: 'excludedNoselect',
+      });
+      continue;
+    }
+    if (folderRole(folder) === 'all') {
+      results.push({
+        source: folder.path,
+        destination: '',
+        selected: false,
+        locked: true,
+        kind: 'excludedAll',
+      });
+      continue;
+    }
+
+    const role = folderRole(folder);
+    let candidate = '';
+    let kind = '';
+
+    if (folder.path === 'INBOX' || byName.has(folder.path)) {
+      candidate = folder.path;
+      kind = 'identical';
+    } else if (role && byRole.has(role)) {
+      candidate = byRole.get(role).path;
+      kind = 'role';
+    } else if (byCase.has(folder.path.toLocaleLowerCase('fr'))) {
+      candidate = byCase.get(folder.path.toLocaleLowerCase('fr')).path;
+      kind = 'case';
+    } else {
+      const inherited = inheritedTarget(folder);
+      if (inherited) {
+        candidate = inherited;
+        kind = 'parent';
+      } else {
+        candidate = translateDelimiter(folder.path, folder.delimiter, destinationDelimiter);
+        kind = byName.has(candidate) ? 'delimiter' : 'new';
+      }
+    }
+
+    const collisionKey = candidate.toLocaleLowerCase('fr');
+    if (used.has(collisionKey)) {
+      results.push({
+        source: folder.path,
+        destination: candidate,
+        selected: false,
+        locked: false,
+        kind: 'collision',
+      });
+      continue;
+    }
+
+    used.add(collisionKey);
+    renamed.set(folder.path, candidate);
+    results.push({
+      source: folder.path,
+      destination: candidate,
+      selected: true,
+      locked: false,
+      kind,
+    });
+  }
+
+  return {
+    sourceFolders: source,
+    destinationFolders: destination,
+    mappings: results,
+    destinationDelimiter,
+  };
+}
+
+function validFolderName(value, label) {
+  const name = String(value ?? '').normalize('NFC');
+  if (!name.trim() || name.startsWith('-') || /[\r\n\0]/.test(name)) {
+    throw new Error(`${label} : nom de dossier invalide.`);
+  }
+  if (name.length > 2048) throw new Error(`${label} : nom de dossier trop long.`);
+  return name;
+}
+
+function parseIsoDate(value, label) {
+  if (value == null || value === '') return null;
+  const text = String(value);
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) throw new Error(`${label} : date invalide (AAAA-MM-JJ attendu).`);
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    throw new Error(`${label} : date invalide.`);
+  }
+  return date;
+}
+
+function imapDate(date) {
+  return `${date.getUTCDate()}-${IMAP_MONTHS[date.getUTCMonth()]}-${date.getUTCFullYear()}`;
+}
+
+function normalizePositiveInteger(value, label) {
+  if (value == null || value === '') return null;
+  const numeric = Number(value);
+  if (!Number.isSafeInteger(numeric) || numeric <= 0 || numeric > 2 ** 40) {
+    throw new Error(`${label} : valeur invalide.`);
+  }
+  return numeric;
+}
+
+function normalizeMigrationPlan(plan = {}) {
+  let folders = null;
+  if (plan.folders != null) {
+    if (!Array.isArray(plan.folders) || plan.folders.length === 0) {
+      throw new Error('Sélectionnez au moins un dossier à copier.');
+    }
+    const sourceSeen = new Set();
+    const destinationSeen = new Set();
+    folders = plan.folders.map((mapping, index) => {
+      const source = validFolderName(mapping?.source, `Dossier source ${index + 1}`);
+      const destination = validFolderName(mapping?.destination || source, `Dossier destination ${index + 1}`);
+      if (source.includes('=')) {
+        throw new Error('Un nom de dossier source contenant « = » ne peut pas être utilisé dans une correspondance explicite.');
+      }
+      const sourceKey = source.toLocaleLowerCase('fr');
+      const destinationKey = destination.toLocaleLowerCase('fr');
+      if (sourceSeen.has(sourceKey)) throw new Error('Un dossier source est sélectionné plusieurs fois.');
+      if (destinationSeen.has(destinationKey)) throw new Error('Deux dossiers source ne peuvent pas viser le même dossier destination.');
+      sourceSeen.add(sourceKey);
+      destinationSeen.add(destinationKey);
+      return { source, destination };
+    });
+  }
+
+  const filtersInput = plan.filters && typeof plan.filters === 'object' ? plan.filters : {};
+  const sinceDate = parseIsoDate(filtersInput.since, 'Date de début');
+  const untilDate = parseIsoDate(filtersInput.until, 'Date de fin');
+  if (sinceDate && untilDate && sinceDate.getTime() > untilDate.getTime()) {
+    throw new Error('La date de début doit précéder ou égaler la date de fin.');
+  }
+  const minSize = normalizePositiveInteger(filtersInput.minSize, 'Taille minimale');
+  const maxSize = normalizePositiveInteger(filtersInput.maxSize, 'Taille maximale');
+  if (minSize != null && maxSize != null && maxSize <= minSize) {
+    throw new Error('La taille maximale doit être supérieure à la taille minimale.');
+  }
+
+  return {
+    folders,
+    filters: {
+      since: sinceDate ? String(filtersInput.since) : null,
+      until: untilDate ? String(filtersInput.until) : null,
+      minSize,
+      maxSize,
+    },
+  };
+}
+
+function searchCriteria(filters = {}) {
+  const normalized = normalizeMigrationPlan({ filters }).filters;
+  const parts = [];
+  if (normalized.since) parts.push(`SINCE ${imapDate(parseIsoDate(normalized.since, 'Date de début'))}`);
+  if (normalized.until) {
+    const until = parseIsoDate(normalized.until, 'Date de fin');
+    until.setUTCDate(until.getUTCDate() + 1);
+    parts.push(`BEFORE ${imapDate(until)}`);
+  }
+  return parts.join(' ');
+}
+
+function buildCommandArgs(source, destination, mode = 'preview', plan = {}) {
   if (!['login', 'preview', 'copy'].includes(mode)) throw new Error('Mode de migration IMAP invalide.');
   ensureDistinctAccounts(source, destination);
+  const normalizedPlan = normalizeMigrationPlan(plan);
   const args = [
     '--noreleasecheck',
     '--nolog',
@@ -88,8 +398,25 @@ function buildCommandArgs(source, destination, mode = 'preview') {
     '--port2', String(destination.port),
     ...tlsArgs(2, destination),
   ];
-  if (mode === 'login') args.push('--justlogin');
-  else if (mode === 'preview') args.push('--dry');
+  if (mode === 'login') {
+    args.push('--justlogin');
+    return args;
+  }
+
+  if (mode === 'preview') args.push('--dry');
+
+  if (normalizedPlan.folders) {
+    for (const mapping of normalizedPlan.folders) {
+      const sourceFolder = imapUtf7(mapping.source);
+      const destinationFolder = imapUtf7(mapping.destination || mapping.source);
+      args.push('--folder', sourceFolder, '--f1f2', `${sourceFolder}=${destinationFolder}`);
+    }
+  }
+
+  const criteria = searchCriteria(normalizedPlan.filters);
+  if (criteria) args.push('--search', criteria);
+  if (normalizedPlan.filters.maxSize != null) args.push('--maxsize', String(normalizedPlan.filters.maxSize));
+  if (normalizedPlan.filters.minSize != null) args.push('--minsize', String(normalizedPlan.filters.minSize));
   return args;
 }
 
@@ -172,7 +499,7 @@ function exitMessage(code) {
     101: 'Impossible de joindre le serveur source.',
     102: 'Impossible de joindre le serveur destination.',
     113: 'Quota de la destination atteint ; la copie peut être partielle.',
-    121: 'La recherche IMAP a échoué ; la copie peut être partielle.',
+    121: 'La recherche IMAP a échoué : vérifiez que les serveurs acceptent les filtres par dates ; la copie peut être partielle.',
   };
   return messages[Number(code)] || `imapsync a signalé une erreur (code ${Number(code)}).`;
 }
@@ -254,10 +581,11 @@ class ImapMigrationManager {
     this.preview = null;
   }
 
-  _fingerprint(source, destination) {
+  _fingerprint(source, destination, plan = {}) {
     const payload = {
       source: { id: source.id, host: source.host, port: source.port, user: source.user, secure: source.secure },
       destination: { id: destination.id, host: destination.host, port: destination.port, user: destination.user, secure: destination.secure },
+      plan: normalizeMigrationPlan(plan),
       secrets: [source.password, destination.password].map(secret =>
         crypto.createHmac('sha256', this.fingerprintKey).update(secret).digest('hex')),
     };
@@ -286,14 +614,15 @@ class ImapMigrationManager {
     };
   }
 
-  async run({ mode, sourceAccount, destinationAccount, previewToken = '' } = {}) {
+  async run({ mode, sourceAccount, destinationAccount, previewToken = '', plan = {} } = {}) {
     if (this.active) throw new Error('Une migration IMAP est déjà en cours.');
     if (!['login', 'preview', 'copy'].includes(mode)) throw new Error('Mode de migration IMAP invalide.');
 
     const source = accountDescriptor(sourceAccount, 'Source');
     const destination = accountDescriptor(destinationAccount, 'Destination');
     ensureDistinctAccounts(source, destination);
-    const fingerprint = this._fingerprint(source, destination);
+    const normalizedPlan = normalizeMigrationPlan(plan);
+    const fingerprint = this._fingerprint(source, destination, normalizedPlan);
 
     if (mode === 'copy') {
       const preview = this.preview;
@@ -306,7 +635,7 @@ class ImapMigrationManager {
     }
 
     const engine = this.engineResolver();
-    const args = buildCommandArgs(source, destination, mode);
+    const args = buildCommandArgs(source, destination, mode, normalizedPlan);
     const runId = crypto.randomUUID();
     const summary = emptySummary();
     const startedAt = this.now();
@@ -414,9 +743,11 @@ class ImapMigrationManager {
         const elapsedMs = Math.max(0, this.now() - startedAt);
         const cancelled = Boolean(this.active?.runId === runId && this.active.cancelled);
         const exitCode = Number.isInteger(code) ? code : -1;
+        const hasSizeFilter = normalizedPlan.filters.minSize != null || normalizedPlan.filters.maxSize != null;
         const resultSummary = {
           ...summary,
           estimatedBytes: mode === 'preview' ? estimatedBytes(summary) : null,
+          estimateBeforeSizeFilter: mode === 'preview' && hasSizeFilter,
           destinationConfirmed: mode === 'copy' && exitCode === 0 && successfulCopySummary(summary),
         };
 
@@ -494,6 +825,12 @@ module.exports = {
   MAX_LINE_LENGTH,
   PREVIEW_MAX_AGE_MS,
   accountDescriptor,
+  imapUtf7,
+  normalizeFolder,
+  folderRole,
+  proposeFolderMappings,
+  normalizeMigrationPlan,
+  searchCriteria,
   buildCommandArgs,
   emptySummary,
   parseSummaryLine,

@@ -201,11 +201,13 @@ async function closeClientGracefully(client, timeoutMs = IMAP_LOGOUT_TIMEOUT_MS)
 
 
 
-function makeClient(account) {
+function makeClient(account, { requireStartTls = false } = {}) {
+  const secure = account.imap.secure !== false;
   return new ImapFlow({
     host: account.imap.host,
     port: account.imap.port || 993,
-    secure: account.imap.secure !== false,
+    secure,
+    ...(requireStartTls && !secure ? { doSTARTTLS: true } : {}),
     auth: mailAuth.imapAuth(account),
     logger: false,
     qresync: true,
@@ -974,10 +976,10 @@ function cancelSync(accountId = null) {
   return cancelled;
 }
 
-async function listFolders(account, { signal = null } = {}) {
+async function listFolders(account, { signal = null, requireStartTls = false } = {}) {
   if (!account) throw new Error('Compte introuvable');
   throwIfAborted(signal);
-  const client = makeClient(account);
+  const client = makeClient(account, { requireStartTls });
   const abort = () => { interruptClient(client); };
   signal?.addEventListener('abort', abort, { once: true });
   try {
@@ -989,6 +991,9 @@ async function listFolders(account, { signal = null } = {}) {
       path: folder.path,
       name: folder.name,
       specialUse: folder.specialUse || null,
+      delimiter: folder.delimiter || null,
+      flags: folder.flags ? [...folder.flags].map(flag => String(flag)) : [],
+      selectable: !(folder.flags && typeof folder.flags.has === 'function' && folder.flags.has('\\Noselect')),
     }));
   } catch (error) {
     if (signal?.aborted) throw new SyncCancelledError();
