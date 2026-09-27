@@ -412,10 +412,26 @@ function isGoogleCalendarMockConnection(connection = {}) {
     || String(connection?.oauthClientId || '') === MOCK_CLIENT_ID;
 }
 
+function purgePersistedMockConnections(db) {
+  if (!db || typeof db.listCalendarConnections !== 'function' || typeof db.removeCalendarConnection !== 'function') {
+    throw new Error('Stockage calendrier indisponible pour le nettoyage du simulateur');
+  }
+
+  const connections = db.listCalendarConnections() || [];
+  let removedConnections = 0;
+  for (const connection of connections) {
+    if (!isGoogleCalendarMockConnection(connection)) continue;
+    const result = db.removeCalendarConnection(connection.id);
+    if (result?.removed) removedConnections += 1;
+  }
+  return { removedConnections };
+}
+
 module.exports = {
   MOCK_CREDENTIAL_PREFIX,
   MOCK_CLIENT_ID,
   MOCK_EMAIL,
   isGoogleCalendarMockConnection,
+  purgePersistedMockConnections,
   createGoogleCalendarMockService,
 };

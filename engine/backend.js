@@ -354,6 +354,12 @@ function initializeRuntimeState() {
 
   recoverInterruptedRestore();
   db.init(DATA);
+  if (!GOOGLE_CALENDAR_MOCK_ENABLED) {
+    const purgedMock = calendarGoogleMock.purgePersistedMockConnections(db);
+    if (purgedMock.removedConnections) {
+      console.log(`[LibraMail] Données Google Calendar simulées nettoyées : ${purgedMock.removedConnections} connexion(s).`);
+    }
+  }
   mailStore.init(DATA);
   outbox.init(db.db, DATA);
   cleanupOrphanCalendarAttachmentFiles();
