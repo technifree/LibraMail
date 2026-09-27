@@ -857,7 +857,7 @@
   "planner.googleCalendarEnable": "Synchroniser « {name} »",
   "planner.googleCalendarDisabled": "Agenda désactivé ; ses rendez-vous locaux ont été retirés.",
   "planner.googleCalendarEnabled": "Agenda activé. Synchronisez le compte pour importer ses rendez-vous.",
-  "planner.googleReadOnlyEvent": "Ce rendez-vous provient de Google Calendar. Il est en lecture seule dans cette version de LibraMail ; modifiez-le depuis Google Calendar ou Android.",
+  "planner.googleReadOnlyEvent": "Ce rendez-vous provient d’un agenda Google en lecture seule pour ce compte. Vous pouvez le consulter dans LibraMail, mais sa modification ou sa suppression doit être effectuée dans Google Calendar si vos droits le permettent.",
   "planner.internetCalendars": "Calendriers Internet (ICS)",
   "planner.externalSyncing": "Actualisation des calendriers externes…",
   "planner.externalSyncDone": "Calendriers externes actualisés.",
@@ -1117,5 +1117,13 @@
   "planner.googleConnectedSyncing": "Compte Google connecté. Première synchronisation en cours…",
   "planner.googleClientSecret": "Client secret OAuth2 Google",
   "planner.googleClientSecretPlaceholder": "Secret du client « Application de bureau »",
-  "planner.googleClientSecretRequired": "Indiquez le Client secret OAuth2 Google."
+  "planner.googleClientSecretRequired": "Indiquez le Client secret OAuth2 Google.",
+  "planner.dialogUnavailable": "La boîte de dialogue LibraMail n’est pas disponible.",
+  "planner.attachmentRemoveTitle": "Supprimer la pièce jointe ?",
+  "planner.attachmentRemoveAction": "Supprimer",
+  "planner.deleteTitle": "Supprimer ce rendez-vous ?",
+  "planner.deleteNote": "Cette action supprime définitivement le rendez-vous du planning LibraMail.",
+  "planner.googleDeleteNote": "La suppression sera également envoyée à Google Calendar. En cas de modification concurrente, LibraMail annulera la suppression et rechargera la version distante.",
+  "planner.googleDisconnectTitle": "Déconnecter Google Calendar ?",
+  "planner.googleDisconnectNote": "Le refresh token et le Client secret associés seront retirés du coffre-fort système. Les agendas Google distants ne seront pas modifiés."
 }

@@ -4150,8 +4150,19 @@ html[data-theme="light"] #reader-empty.reader-empty-brand .reader-empty-logo-lig
 .planner-all-day { display:flex; align-items:center; gap:8px; width:max-content; color:var(--fg-muted); font-size:11px; cursor:pointer; }
 .planner-all-day input { accent-color:var(--accent); }
 .planner-editor textarea { resize:vertical; min-height:76px; }
-.planner-form-error { min-height:16px; color:var(--danger,#d66f4f); font-size:10.5px; }
-.planner-editor-actions { display:grid; grid-template-columns:auto 1fr auto auto; gap:7px; align-items:center; margin-top:auto; padding-top:4px; }
+.planner-form-error {
+  flex:none; min-height:0; color:var(--danger,#d66f4f); font-size:10.5px;
+  line-height:1.4; overflow-wrap:anywhere;
+}
+.planner-form-error:empty { display:none; }
+.planner-form-error:not(:empty) {
+  padding:8px 10px; border:1px solid color-mix(in srgb,var(--danger) 28%,var(--border));
+  border-radius:8px; background:color-mix(in srgb,var(--danger) 7%,var(--bg-panel));
+}
+.planner-editor-actions {
+  flex:none; display:grid; grid-template-columns:auto 1fr auto auto;
+  gap:7px; align-items:center; margin-top:auto; padding-top:6px;
+}
 .planner-category-legend {
   flex:none; min-height:34px; display:flex; align-items:center; gap:10px;
   padding:6px 12px; border-top:1px solid var(--border);

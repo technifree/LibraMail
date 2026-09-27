@@ -509,6 +509,14 @@
   }
 
 
+  async function plannerConfirm(options = {}) {
+    if (typeof App.confirmAction !== 'function') {
+      App.status(t('planner.dialogUnavailable'), 'error');
+      return false;
+    }
+    return Boolean(await App.confirmAction(options));
+  }
+
   function plannerAttachmentSize(bytes) {
     const value = Math.max(0, Number(bytes) || 0);
     if (value < 1024) return `${value} o`;
@@ -570,7 +578,15 @@
       button.addEventListener('click', async () => {
         const id = Number(button.dataset.plannerAttachmentRemove);
         const item = state.editorAttachments.find(candidate => Number(candidate.id) === id);
-        if (!item || !window.confirm(t('planner.attachmentRemoveConfirm', { name: item.filename }))) return;
+        if (!item) return;
+        const accepted = await plannerConfirm({
+          title: t('planner.attachmentRemoveTitle'),
+          message: t('planner.attachmentRemoveConfirm', { name: item.filename }),
+          confirmLabel: t('planner.attachmentRemoveAction'),
+          icon: 'fa-paperclip',
+          danger: true,
+        });
+        if (!accepted) return;
         try {
           await App.rpc('calendar.attachments.remove', { id });
           state.editorAttachments = state.editorAttachments.filter(candidate => Number(candidate.id) !== id);
@@ -869,7 +885,18 @@
       return;
     }
     const id = Number(document.getElementById('planner-event-id').value || 0);
-    if (!id || !window.confirm(t('planner.deleteConfirm'))) return;
+    if (!id) return;
+    const accepted = await plannerConfirm({
+      title: t('planner.deleteTitle'),
+      message: t('planner.deleteConfirm'),
+      confirmLabel: t('planner.delete'),
+      icon: 'fa-trash',
+      danger: true,
+      note: state.editingRemoteEvent
+        ? t('planner.googleDeleteNote')
+        : t('planner.deleteNote'),
+    });
+    if (!accepted) return;
     try {
       const result = await App.rpc('calendar.remove', { id });
       if (result?.conflict) {
@@ -1433,7 +1460,15 @@
     const connection = state.googleConnections.find(item => Number(item.id) === Number(id));
     if (!connection) return;
     const name = googleConnectionLabel(connection);
-    if (!window.confirm(t('planner.googleDisconnectConfirm', { name }))) return;
+    const accepted = await plannerConfirm({
+      title: t('planner.googleDisconnectTitle'),
+      message: t('planner.googleDisconnectConfirm', { name }),
+      confirmLabel: t('planner.googleDisconnect'),
+      icon: 'fa-link-slash',
+      danger: true,
+      note: t('planner.googleDisconnectNote'),
+    });
+    if (!accepted) return;
     try {
       await App.rpc('calendar.connections.remove', { id });
       await loadGoogleConnections();
@@ -1646,16 +1681,14 @@
     const subscription = state.subscriptions.find(item => Number(item.id) === Number(id));
     if (!subscription) return;
     const name = subscription.name || subscriptionHost(subscription.url);
-    const accepted = App.confirmAction
-      ? await App.confirmAction({
-          title: t('planner.removeSubscriptionTitle', { name }),
-          message: t('planner.removeSubscriptionConfirm', { name }),
-          confirmLabel: t('planner.removeSubscriptionAction'),
-          icon: 'fa-link-slash',
-          danger: true,
-          note: t('planner.removeSubscriptionNote'),
-        })
-      : window.confirm(t('planner.removeSubscriptionConfirm', { name }));
+    const accepted = await plannerConfirm({
+      title: t('planner.removeSubscriptionTitle', { name }),
+      message: t('planner.removeSubscriptionConfirm', { name }),
+      confirmLabel: t('planner.removeSubscriptionAction'),
+      icon: 'fa-link-slash',
+      danger: true,
+      note: t('planner.removeSubscriptionNote'),
+    });
     if (!accepted) return;
     try {
       await App.rpc('calendar.subscriptions.remove', { id });
@@ -1712,8 +1745,13 @@
       }
       await loadEvents();
       const importMessage = t('planner.importDone', { files: importedFiles, created, updated, skipped });
-      App.status(recurringSeries ? `${importMessage} · ${t('planner.recurringSeries', { count: recurringSeries })}` : importMessage, truncated ? 'info' : 'success');
-      if (truncated) window.alert(t('planner.importTruncated'));
+      const recurringMessage = recurringSeries
+        ? `${importMessage} · ${t('planner.recurringSeries', { count: recurringSeries })}`
+        : importMessage;
+      App.status(
+        truncated ? `${recurringMessage} · ${t('planner.importTruncated')}` : recurringMessage,
+        truncated ? 'info' : 'success',
+      );
     } catch (error) {
       App.status(`${t('planner.importError')} : ${error.message}`, 'error');
     } finally {

@@ -857,7 +857,7 @@
   "planner.googleCalendarEnable": "Synchronize “{name}”",
   "planner.googleCalendarDisabled": "Calendar disabled; its local events were removed.",
   "planner.googleCalendarEnabled": "Calendar enabled. Synchronize the account to import its events.",
-  "planner.googleReadOnlyEvent": "This event comes from Google Calendar. It is read-only in this version of LibraMail; edit it in Google Calendar or Android.",
+  "planner.googleReadOnlyEvent": "This event comes from a Google calendar that is read-only for this account. You can view it in LibraMail, but changes or deletion must be made in Google Calendar if your permissions allow it.",
   "planner.internetCalendars": "Internet calendars (ICS)",
   "planner.externalSyncing": "Refreshing external calendars…",
   "planner.externalSyncDone": "External calendars refreshed.",
@@ -1117,5 +1117,13 @@
   "planner.googleConnectedSyncing": "Google account connected. Initial synchronization in progress…",
   "planner.googleClientSecret": "Google OAuth2 Client secret",
   "planner.googleClientSecretPlaceholder": "Desktop app client secret",
-  "planner.googleClientSecretRequired": "Enter the Google OAuth2 Client secret."
+  "planner.googleClientSecretRequired": "Enter the Google OAuth2 Client secret.",
+  "planner.dialogUnavailable": "The LibraMail dialog is unavailable.",
+  "planner.attachmentRemoveTitle": "Delete attachment?",
+  "planner.attachmentRemoveAction": "Delete",
+  "planner.deleteTitle": "Delete this event?",
+  "planner.deleteNote": "This permanently removes the event from the LibraMail planner.",
+  "planner.googleDeleteNote": "Deletion will also be sent to Google Calendar. If the event changed concurrently, LibraMail will cancel the deletion and reload the remote version.",
+  "planner.googleDisconnectTitle": "Disconnect Google Calendar?",
+  "planner.googleDisconnectNote": "The associated refresh token and Client secret will be removed from the system credential vault. Remote Google calendars will not be modified."
 }
