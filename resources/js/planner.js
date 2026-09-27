@@ -22,6 +22,7 @@
     googleOAuthPollTimer: null,
     googleMock: { enabled: false, connected: false, connectionId: null, mock: null },
     editingRemoteEvent: false,
+    editingRemoteWritable: false,
     summaryTimer: null,
     refreshNoticeTimer: null,
   };
@@ -120,6 +121,26 @@
     const account = App.accounts.find(item => String(item.id) === String(accountId));
     return account?.displayName || account?.email || t('planner.localCalendar');
   }
+  function googleWritableRole(role = '') {
+    return ['owner', 'writer', 'writerWithoutPrivateAccess'].includes(String(role || ''));
+  }
+  function googleCalendarById(id) {
+    const numericId = Number(id);
+    for (const calendars of Object.values(state.googleCalendars || {})) {
+      const found = (calendars || []).find(calendar => Number(calendar.id) === numericId);
+      if (found) return found;
+    }
+    return null;
+  }
+  function writableGoogleCalendars() {
+    return state.googleConnections.flatMap(connection => (state.googleCalendars[connection.id] || [])
+      .filter(calendar => calendar.selected && googleWritableRole(calendar.accessRole))
+      .map(calendar => ({ ...calendar, connectionLabel: googleConnectionLabel(connection) })));
+  }
+  function googleTargetId(value = document.getElementById('planner-account')?.value || '') {
+    const match = String(value || '').match(/^google:(\d+)$/);
+    return match ? Number(match[1]) : null;
+  }
   function sortedEvents(events) {
     return [...events].sort((a, b) => Number(b.allDay) - Number(a.allDay) || Number(a.startAt) - Number(b.startAt) || String(a.title).localeCompare(String(b.title), locale()));
   }
@@ -135,10 +156,14 @@
     }
     const editor = document.getElementById('planner-account');
     if (editor) {
+      const current = editor.value || '';
+      const google = writableGoogleCalendars();
       editor.innerHTML = [
         `<option value="">${esc(t('planner.localCalendar'))}</option>`,
         ...App.accounts.map(account => `<option value="${esc(account.id)}">${esc(account.displayName || account.email)}</option>`),
+        google.length ? `<optgroup label="${esc(t('planner.googleCalendar'))}">${google.map(calendar => `<option value="google:${Number(calendar.id)}">${esc(calendar.name || calendar.remoteId)} · ${esc(calendar.connectionLabel)}</option>`).join('')}</optgroup>` : '',
       ].join('');
+      if ([...editor.options].some(option => option.value === current)) editor.value = current;
     }
   }
 
@@ -632,25 +657,55 @@
     document.getElementById('planner-end-time').value = timeValue(end);
   }
 
-  function setRemoteEditorReadonly(readonly) {
-    state.editingRemoteEvent = Boolean(readonly);
+  function renderGoogleEditorNotice({ remote = false, writable = false } = {}) {
+    const notice = document.getElementById('planner-remote-readonly');
+    if (!notice) return;
+    notice.classList.toggle('hidden', !remote);
+    notice.classList.toggle('writable', remote && writable);
+    const text = notice.querySelector('span');
+    if (text) text.textContent = t(writable ? 'planner.googleWritableEvent' : 'planner.googleReadOnlyEvent');
+  }
+
+  function syncEditorTargetMode({ clearPending = false } = {}) {
+    if (state.editingRemoteEvent) return;
+    const remoteCalendarId = googleTargetId();
+    const remote = Boolean(remoteCalendarId);
+    const attachments = document.querySelector('#planner-editor .planner-attachments-section');
+    const attach = document.getElementById('btn-planner-attachment-add');
+    attachments?.classList.toggle('hidden', remote);
+    attach?.classList.toggle('hidden', remote);
+    renderGoogleEditorNotice({ remote, writable: remote });
+    if (remote && clearPending && state.pendingAttachments.length) resetPlannerAttachments();
+  }
+
+  function setRemoteEditorMode(event = null) {
+    const remote = Boolean(event?.remoteCalendarId);
+    const writable = remote && googleWritableRole(event?.remoteCalendarAccessRole);
+    const readOnly = remote && !writable;
+    state.editingRemoteEvent = remote;
+    state.editingRemoteWritable = writable;
     const editor = document.getElementById('planner-editor');
-    editor?.classList.toggle('remote-readonly', state.editingRemoteEvent);
-    document.getElementById('planner-remote-readonly')?.classList.toggle('hidden', !state.editingRemoteEvent);
+    editor?.classList.toggle('remote-readonly', readOnly);
+    editor?.classList.toggle('remote-writable', writable);
+    renderGoogleEditorNotice({ remote, writable });
     [
-      'planner-title', 'planner-account', 'planner-category', 'planner-all-day',
+      'planner-title', 'planner-category', 'planner-all-day',
       'planner-start-date', 'planner-start-time', 'planner-end-date', 'planner-end-time',
       'planner-location', 'planner-notes',
     ].forEach(id => {
       const element = document.getElementById(id);
-      if (element) element.disabled = state.editingRemoteEvent;
+      if (element) element.disabled = readOnly;
     });
+    const account = document.getElementById('planner-account');
+    if (account) account.disabled = remote;
     const save = document.getElementById('btn-planner-save');
     const remove = document.getElementById('btn-planner-delete');
     const attach = document.getElementById('btn-planner-attachment-add');
-    save?.classList.toggle('hidden', state.editingRemoteEvent);
-    remove?.classList.toggle('hidden', state.editingRemoteEvent || !document.getElementById('planner-event-id')?.value);
-    attach?.classList.toggle('hidden', state.editingRemoteEvent);
+    const attachments = document.querySelector('#planner-editor .planner-attachments-section');
+    save?.classList.toggle('hidden', readOnly);
+    remove?.classList.toggle('hidden', readOnly || !document.getElementById('planner-event-id')?.value);
+    attach?.classList.toggle('hidden', remote);
+    attachments?.classList.toggle('hidden', remote);
   }
 
   function openNewEvent(date = state.selected, startMinutes = null) {
@@ -672,7 +727,8 @@
     document.getElementById('planner-notes').value = '';
     resetPlannerAttachments();
     document.getElementById('planner-form-error').textContent = '';
-    setRemoteEditorReadonly(false);
+    setRemoteEditorMode(null);
+    syncEditorTargetMode();
     document.getElementById('btn-planner-delete').classList.add('hidden');
     setEditorAllDay(false);
     syncEndConstraints(false);
@@ -687,7 +743,7 @@
     document.getElementById('planner-event-id').value = String(event.id);
     document.getElementById('planner-editor-title').textContent = t('planner.editEvent');
     document.getElementById('planner-title').value = event.title || '';
-    document.getElementById('planner-account').value = event.accountId || '';
+    document.getElementById('planner-account').value = event.remoteCalendarId ? `google:${Number(event.remoteCalendarId)}` : (event.accountId || '');
     populateCategorySelect(event.categoryId || '');
     document.getElementById('planner-all-day').checked = Boolean(event.allDay);
     document.getElementById('planner-start-date').value = dateKey(start);
@@ -701,7 +757,7 @@
     renderPlannerAttachments();
     loadPlannerAttachments(event.id);
     document.getElementById('planner-form-error').textContent = '';
-    setRemoteEditorReadonly(Boolean(event.remoteCalendarId));
+    setRemoteEditorMode(event);
     if (!event.remoteCalendarId) document.getElementById('btn-planner-delete').classList.remove('hidden');
     setEditorAllDay(Boolean(event.allDay));
     syncEndConstraints(false);
@@ -746,12 +802,15 @@
     }
     if (!Number.isFinite(startAt) || !Number.isFinite(endAt)) throw new Error(t('planner.invalidDate'));
     if (endAt <= startAt) throw new Error(t('planner.invalidRange'));
-    const accountId = document.getElementById('planner-account').value || '';
-    const accountColor = accountId ? App.accountColor(accountId) : '';
+    const accountValue = document.getElementById('planner-account').value || '';
+    const remoteCalendarId = googleTargetId(accountValue);
+    const remoteCalendar = remoteCalendarId ? googleCalendarById(remoteCalendarId) : null;
+    const accountId = remoteCalendarId ? '' : accountValue;
+    const targetColor = remoteCalendar?.color || (accountId ? App.accountColor(accountId) : '');
     return {
-      title, startAt, endAt, allDay, accountId,
+      title, startAt, endAt, allDay, accountId, remoteCalendarId,
       categoryId: Number(document.getElementById('planner-category')?.value || 0) || null,
-      color: /^#[0-9a-fA-F]{6}$/.test(String(accountColor || '')) ? accountColor : '',
+      color: /^#[0-9a-fA-F]{6}$/.test(String(targetColor || '')) ? targetColor : '',
       location: document.getElementById('planner-location').value.trim(),
       notes: document.getElementById('planner-notes').value.trim(),
     };
@@ -760,7 +819,7 @@
   async function saveEvent() {
     const errorElement = document.getElementById('planner-form-error');
     errorElement.textContent = '';
-    if (state.editingRemoteEvent) {
+    if (state.editingRemoteEvent && !state.editingRemoteWritable) {
       errorElement.textContent = t('planner.googleReadOnlyEvent');
       return;
     }
@@ -769,6 +828,16 @@
     try {
       const id = Number(document.getElementById('planner-event-id').value || 0) || null;
       const saved = await App.rpc('calendar.save', { id, event: editorPayload() });
+      if (saved?.googleConflict) {
+        await loadEvents();
+        if (saved.googleRemoved) {
+          closeEditor();
+          App.status(t('planner.googleConflictRemoved'), 'info');
+        } else {
+          errorElement.textContent = t('planner.googleConflictUpdate');
+        }
+        return;
+      }
       document.getElementById('planner-event-id').value = String(saved.id);
       if (state.pendingAttachments.length) {
         try {
@@ -795,14 +864,26 @@
   }
 
   async function deleteEvent() {
-    if (state.editingRemoteEvent) {
+    if (state.editingRemoteEvent && !state.editingRemoteWritable) {
       App.status(t('planner.googleReadOnlyEvent'), 'info');
       return;
     }
     const id = Number(document.getElementById('planner-event-id').value || 0);
     if (!id || !window.confirm(t('planner.deleteConfirm'))) return;
     try {
-      await App.rpc('calendar.remove', { id });
+      const result = await App.rpc('calendar.remove', { id });
+      if (result?.conflict) {
+        await loadEvents();
+        if (result.googleRemoved) {
+          closeEditor();
+          App.status(t('planner.googleConflictRemoved'), 'info');
+          return;
+        }
+        const latest = state.events.find(item => Number(item.id) === id);
+        if (latest) openEditor(latest);
+        App.status(t('planner.googleConflictDelete'), 'info');
+        return;
+      }
       closeEditor();
       await loadEvents();
       App.status(t('planner.deleted'), 'success');
@@ -1061,6 +1142,7 @@
         clientId.value = state.googleConnections[0].oauthClientId;
       }
       renderGoogleConnections();
+      populateAccountSelects();
     } catch (error) {
       googleStatus(`${t('error')} : ${error.message}`, 'error');
     }
@@ -1120,6 +1202,7 @@
     const connect = document.getElementById('btn-planner-google-mock-connect');
     const advance = document.getElementById('btn-planner-google-mock-advance');
     const expire = document.getElementById('btn-planner-google-mock-expire');
+    const conflict = document.getElementById('btn-planner-google-mock-conflict');
     const reset = document.getElementById('btn-planner-google-mock-reset');
     if (!box) return;
     const enabled = Boolean(state.googleMock?.enabled);
@@ -1129,6 +1212,7 @@
     if (connect) connect.disabled = connected;
     if (advance) advance.disabled = !connected;
     if (expire) expire.disabled = !connected;
+    if (conflict) conflict.disabled = !connected;
     if (reset) reset.disabled = !connected;
     if (status) {
       const revision = Number(state.googleMock?.mock?.revision) || 1;
@@ -1162,9 +1246,11 @@
           ? t('planner.googleMockExpiredDone')
           : action === 'advance'
             ? t('planner.googleMockAdvanced', { revision })
-            : action === 'reset'
-              ? t('planner.googleMockResetDone')
-              : t('planner.googleMockConnected', { revision });
+            : action === 'conflict'
+              ? t('planner.googleMockConflictDone', { revision })
+              : action === 'reset'
+                ? t('planner.googleMockResetDone')
+                : t('planner.googleMockConnected', { revision });
       }
     } catch (error) {
       if (status) status.textContent = `${t('error')} : ${error.message}`;
@@ -1659,7 +1745,7 @@
     state.anchor = startOfDay(state.selected || new Date());
     document.getElementById('planner-modal')?.classList.add('open');
     closeEditor();
-    await Promise.all([loadCategories(), loadEvents()]);
+    await Promise.all([loadCategories(), loadGoogleConnections(), loadEvents()]);
   }
 
   function wire() {
@@ -1678,6 +1764,7 @@
     document.getElementById('btn-planner-google-mock-connect')?.addEventListener('click', event => runGoogleMockAction('connect', event.currentTarget));
     document.getElementById('btn-planner-google-mock-advance')?.addEventListener('click', event => runGoogleMockAction('advance', event.currentTarget));
     document.getElementById('btn-planner-google-mock-expire')?.addEventListener('click', event => runGoogleMockAction('expireSyncToken', event.currentTarget));
+    document.getElementById('btn-planner-google-mock-conflict')?.addEventListener('click', event => runGoogleMockAction('conflict', event.currentTarget));
     document.getElementById('btn-planner-google-mock-reset')?.addEventListener('click', event => runGoogleMockAction('reset', event.currentTarget));
     document.getElementById('btn-close-planner-subscriptions')?.addEventListener('click', closeSubscriptions);
     document.getElementById('btn-close-planner-subscriptions-footer')?.addEventListener('click', closeSubscriptions);
@@ -1691,6 +1778,7 @@
     document.getElementById('btn-planner-save')?.addEventListener('click', saveEvent);
     document.getElementById('btn-planner-delete')?.addEventListener('click', deleteEvent);
     document.getElementById('btn-planner-attachment-add')?.addEventListener('click', selectPlannerAttachments);
+    document.getElementById('planner-account')?.addEventListener('change', () => syncEditorTargetMode({ clearPending: true }));
     document.getElementById('planner-all-day')?.addEventListener('change', event => setEditorAllDay(event.target.checked));
     document.getElementById('planner-start-date')?.addEventListener('change', () => syncEndConstraints(true));
     document.getElementById('planner-start-time')?.addEventListener('change', () => syncEndConstraints(true));

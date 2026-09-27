@@ -27,6 +27,7 @@ const calendarGoogle = require('./lib/calendar_google');
 const calendarGoogleSync = require('./lib/calendar_google_sync');
 const calendarGoogleOAuth = require('./lib/calendar_google_oauth');
 const calendarGoogleMock = require('./lib/calendar_google_mock');
+const calendarGoogleWrite = require('./lib/calendar_google_write');
 const credentialStore = require('./lib/credential_store');
 const mailStore = require('./lib/mail_store');
 const masterPassword = require('./lib/master_password');
@@ -602,6 +603,13 @@ function googleCalendarClientForConnection(connection) {
   }
   return calendarGoogle.createGoogleCalendarClient({
     getAccessToken: options => googleCalendarAccessToken(connection, options || {}),
+  });
+}
+
+function googleCalendarWriteEngine() {
+  return calendarGoogleWrite.createGoogleCalendarWriteEngine({
+    db,
+    clientForConnection: googleCalendarClientForConnection,
   });
 }
 
@@ -3550,21 +3558,56 @@ const methods = {
   'calendar.get': async ({ id }) => db.getCalendarEvent(id),
   'calendar.save': async ({ id = null, event } = {}) => {
     const numericId = Number(id) || null;
+    const requestedRemoteCalendarId = Number(event?.remoteCalendarId) || null;
+    const writeEngine = googleCalendarWriteEngine();
+
     if (numericId) {
       const existing = db.getCalendarEvent(numericId);
-      if (existing?.remoteCalendarId) {
-        throw new Error('Ce rendez-vous Google est en lecture seule dans cette version de LibraMail');
+      if (!existing) throw new Error('Rendez-vous introuvable');
+      if (existing.remoteCalendarId) {
+        const result = await writeEngine.updateEvent(numericId, event || {});
+        if (result.conflict) {
+          broadcast('calendar.changed', { action: 'google-write-conflict', id: numericId });
+          return { ...(result.event || { id: numericId }), googleConflict: true, googleRemoved: Boolean(result.removed) };
+        }
+        broadcast('calendar.changed', { action: 'google-updated', id: result.event.id });
+        broadcast('calendar.google.changed', { action: 'event-updated', remoteCalendarId: existing.remoteCalendarId });
+        return result.event;
       }
+      if (requestedRemoteCalendarId) {
+        throw new Error('Le déplacement d’un rendez-vous local vers Google Calendar n’est pas encore pris en charge');
+      }
+      const saved = db.saveCalendarEvent(event || {}, numericId);
+      broadcast('calendar.changed', { action: 'updated', id: saved.id });
+      return saved;
     }
-    const saved = db.saveCalendarEvent(event || {}, numericId);
-    broadcast('calendar.changed', { action: numericId ? 'updated' : 'created', id: saved.id });
+
+    if (requestedRemoteCalendarId) {
+      const result = await writeEngine.createEvent(requestedRemoteCalendarId, event || {});
+      broadcast('calendar.changed', { action: 'google-created', id: result.event.id });
+      broadcast('calendar.google.changed', { action: 'event-created', remoteCalendarId: requestedRemoteCalendarId });
+      return result.event;
+    }
+
+    const saved = db.saveCalendarEvent(event || {}, null);
+    broadcast('calendar.changed', { action: 'created', id: saved.id });
     return saved;
   },
   'calendar.remove': async ({ id } = {}) => {
     const numericId = Number(id);
     const existing = db.getCalendarEvent(numericId);
     if (existing?.remoteCalendarId) {
-      throw new Error('Ce rendez-vous Google est en lecture seule dans cette version de LibraMail');
+      const result = await googleCalendarWriteEngine().deleteEvent(numericId);
+      if (result.conflict) {
+        broadcast('calendar.changed', { action: 'google-delete-conflict', id: numericId });
+        return { removed: false, conflict: true, event: result.event || null, googleRemoved: Boolean(result.removed) };
+      }
+      if (result.removed) {
+        cleanupCalendarEventAttachmentDirectory(numericId);
+        broadcast('calendar.changed', { action: 'google-removed', id: numericId });
+        broadcast('calendar.google.changed', { action: 'event-removed', remoteCalendarId: existing.remoteCalendarId });
+      }
+      return { removed: Boolean(result.removed) };
     }
     const removed = db.removeCalendarEvent(numericId);
     if (removed) {
@@ -3618,6 +3661,13 @@ const methods = {
     if (!connection) throw new Error('Connectez d’abord le compte Google simulé');
     googleCalendarMockService.expireSyncTokens();
     return { result: await syncGoogleCalendarConnection(connection.id), mock: googleCalendarMockService.status() };
+  },
+  'calendar.google.mock.conflict': async () => {
+    if (!GOOGLE_CALENDAR_MOCK_ENABLED || !googleCalendarMockService) throw new Error('Le simulateur Google Calendar n’est pas activé');
+    const connection = googleCalendarMockConnection();
+    if (!connection) throw new Error('Connectez d’abord le compte Google simulé');
+    const conflict = googleCalendarMockService.simulateConflict();
+    return { conflict, mock: googleCalendarMockService.status() };
   },
   'calendar.google.mock.reset': async () => {
     if (!GOOGLE_CALENDAR_MOCK_ENABLED || !googleCalendarMockService) throw new Error('Le simulateur Google Calendar n’est pas activé');
@@ -3712,6 +3762,8 @@ const methods = {
   'calendar.attachments.list': async ({ eventId } = {}) =>
     db.listCalendarAttachments(eventId).map(publicCalendarAttachment),
   'calendar.attachments.addPaths': async ({ eventId, paths = [] } = {}) => {
+    const event = db.getCalendarEvent(eventId);
+    if (event?.remoteCalendarId) throw new Error('Les pièces jointes LibraMail ne sont pas synchronisées avec Google Calendar');
     const attachments = copyCalendarAttachmentFiles(eventId, paths);
     broadcast('calendar.changed', { action: 'attachments-updated', id: Number(eventId) });
     return { attachments };
@@ -3720,6 +3772,8 @@ const methods = {
     openCalendarAttachment(id),
   'calendar.attachments.remove': async ({ id } = {}) => {
     const row = db.getCalendarAttachment(id);
+    const event = row ? db.getCalendarEvent(row.eventId) : null;
+    if (event?.remoteCalendarId) throw new Error('Les pièces jointes LibraMail ne sont pas synchronisées avec Google Calendar');
     const removed = removeCalendarAttachmentFile(id);
     if (removed && row) {
       broadcast('calendar.changed', { action: 'attachments-updated', id: Number(row.eventId) });

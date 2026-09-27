@@ -2364,6 +2364,9 @@ function calendarRow(row) {
     subscriptionName: row.subscription_name || '',
     remoteCalendarId: Number(row.remote_calendar_id) || null,
     remoteCalendarName: row.remote_calendar_name || '',
+    remoteCalendarAccessRole: row.remote_calendar_access_role || '',
+    remoteCalendarRemoteId: row.remote_calendar_remote_id || '',
+    remoteCalendarConnectionId: Number(row.remote_calendar_connection_id) || null,
     remoteEventId: row.remote_event_id || '',
     remoteEtag: row.remote_etag || '',
     remoteUpdatedAt: Number(row.remote_updated_at) || 0,
@@ -2565,6 +2568,9 @@ function listCalendarEvents({ from = null, to = null, accountId = null, limit = 
   return db.prepare(`
     SELECT ce.*, COALESCE(cs.name, '') AS subscription_name,
            COALESCE(rc.name, '') AS remote_calendar_name,
+           COALESCE(rc.access_role, '') AS remote_calendar_access_role,
+           COALESCE(rc.remote_id, '') AS remote_calendar_remote_id,
+           rc.connection_id AS remote_calendar_connection_id,
            COALESCE(cc.name, '') AS category_name,
            COALESCE(cc.color, '') AS category_color,
            COALESCE(cc.icon, '') AS category_icon,
@@ -2586,6 +2592,9 @@ function getCalendarEvent(id) {
   return calendarEventWithCategoryRow(db.prepare(`
     SELECT ce.*, COALESCE(cs.name, '') AS subscription_name,
            COALESCE(rc.name, '') AS remote_calendar_name,
+           COALESCE(rc.access_role, '') AS remote_calendar_access_role,
+           COALESCE(rc.remote_id, '') AS remote_calendar_remote_id,
+           rc.connection_id AS remote_calendar_connection_id,
            COALESCE(cc.name, '') AS category_name,
            COALESCE(cc.color, '') AS category_color,
            COALESCE(cc.icon, '') AS category_icon,
@@ -2999,6 +3008,9 @@ function getCalendarEventByRemote(remoteCalendarId, remoteEventId) {
   if (!(calendarId > 0) || !eventId) return null;
   const row = db.prepare(`
     SELECT ce.*, COALESCE(rc.name, '') AS remote_calendar_name,
+           COALESCE(rc.access_role, '') AS remote_calendar_access_role,
+           COALESCE(rc.remote_id, '') AS remote_calendar_remote_id,
+           rc.connection_id AS remote_calendar_connection_id,
            COALESCE(cc.name, '') AS category_name,
            COALESCE(cc.color, '') AS category_color,
            COALESCE(cc.icon, '') AS category_icon,

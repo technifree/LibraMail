@@ -49,6 +49,33 @@ const mockModule = require('../engine/lib/calendar_google_mock');
   assert.strictEqual(recovered.fullSync, true);
   assert(recovered.items.length >= 3);
 
+
+  mock.reset();
+  const writeClient = mock.client();
+  const inserted = await writeClient.insertEvent(primaryId, {
+    title: 'Écriture simulée',
+    startAt: new Date('2026-10-05T10:00:00+02:00').getTime(),
+    endAt: new Date('2026-10-05T11:00:00+02:00').getTime(),
+  });
+  assert(inserted.id && inserted.etag);
+  const patched = await writeClient.patchEvent(primaryId, inserted.id, {
+    title: 'Écriture simulée modifiée',
+    startAt: new Date('2026-10-05T10:00:00+02:00').getTime(),
+    endAt: new Date('2026-10-05T11:30:00+02:00').getTime(),
+  }, { etag: inserted.etag });
+  assert.strictEqual(patched.summary, 'Écriture simulée modifiée');
+  await assert.rejects(
+    () => writeClient.patchEvent(primaryId, inserted.id, {
+      title: 'Conflit', startAt: Date.now() + 60_000, endAt: Date.now() + 120_000,
+    }, { etag: inserted.etag }),
+    error => error instanceof calendarGoogle.GoogleCalendarApiError && error.status === 412 && error.conflict,
+  );
+  await writeClient.deleteEvent(primaryId, inserted.id, { etag: patched.etag });
+  await assert.rejects(() => writeClient.getEvent(primaryId, inserted.id), /introuvable/i);
+  const conflictScenario = mock.simulateConflict(primaryId);
+  assert(conflictScenario.eventId);
+  assert.strictEqual(mock.status().lastConflictEventId, conflictScenario.eventId);
+
   mock.reset();
   assert.strictEqual(mock.status().revision, 1);
   assert.strictEqual(mock.status().pendingExpiredTokens, 0);
@@ -66,9 +93,11 @@ const mockModule = require('../engine/lib/calendar_google_mock');
   assert(backend.includes("'calendar.google.mock.advance'"));
   assert(backend.includes("'calendar.google.mock.expireSyncToken'"));
   assert(backend.includes("'calendar.google.mock.reset'"));
+  assert(backend.includes("'calendar.google.mock.conflict'"));
   assert(planner.includes("App.rpc('calendar.google.mock.status')"));
   assert(html.includes('id="planner-google-mock"'));
   assert(html.includes('class="planner-google-mock hidden"'));
+  assert(html.includes('id="btn-planner-google-mock-conflict"'));
 
   console.log('[LibraMail] Test simulateur Google Calendar 0.6.0 : OK');
 })().catch(error => {

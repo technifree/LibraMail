@@ -34,14 +34,19 @@ assert(planner.includes("App.rpc('calendar.google.syncAll'"));
 assert(planner.includes("App.rpc('calendar.connections.remove'"));
 assert(planner.includes("App.rpc('calendar.remoteCalendars.select'"));
 assert(planner.includes("event.remoteCalendarName || event.subscriptionName"));
-assert(planner.includes("setRemoteEditorReadonly(Boolean(event.remoteCalendarId))"));
+assert(planner.includes('function setRemoteEditorMode(event = null)'));
+assert(planner.includes('googleWritableRole'));
+assert(planner.includes('planner.googleWritableEvent'));
+assert(planner.includes('planner.googleConflictUpdate'));
 assert(planner.includes("document.getElementById('btn-planner-refresh')?.addEventListener('click', syncAllExternalCalendars)"));
 assert(planner.includes("event === 'calendar.google.changed'"));
 assert(planner.includes("event === 'calendar.google.oauth.changed'"));
 
 assert(backend.includes("'calendar.remoteCalendars.select': async"));
-assert((backend.match(/existing\?\.remoteCalendarId/g) || []).length >= 2);
-assert(backend.includes("lecture seule dans cette version de LibraMail"));
+assert(backend.includes("const calendarGoogleWrite = require('./lib/calendar_google_write')"));
+assert(backend.includes('googleCalendarWriteEngine().deleteEvent'));
+assert(backend.includes('writeEngine.createEvent'));
+assert(backend.includes('writeEngine.updateEvent'));
 assert(dbSource.includes('function setCalendarRemoteCalendarSelected'));
 assert(dbSource.includes("DELETE FROM calendar_events WHERE remote_calendar_id=?"));
 assert(dbSource.includes('setCalendarRemoteCalendarSelected,'));
@@ -52,6 +57,9 @@ for (const messages of [fr, en]) {
     'planner.googleConnect',
     'planner.googleClientId',
     'planner.googleReadOnlyEvent',
+    'planner.googleWritableEvent',
+    'planner.googleConflictUpdate',
+    'planner.googleConflictDelete',
     'planner.internetCalendars',
     'planner.externalSyncDone',
   ].forEach(key => assert.strictEqual(typeof messages[key], 'string', `clé absente: ${key}`));

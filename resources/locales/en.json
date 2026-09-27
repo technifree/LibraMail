@@ -821,7 +821,7 @@
   "planner.recurringSeries": "{count} recurring series",
   "planner.importTruncated": "The calendar contains a very large number of events. Import was limited to 20,000 occurrences.",
   "planner.googleCalendar": "Google Calendar",
-  "planner.googleReadOnlyHint": "Secure read-only synchronization for now.",
+  "planner.googleReadOnlyHint": "Two-way sync is enabled for calendars with write permission; read-only calendars remain protected.",
   "planner.googleClientId": "Google OAuth2 Client ID",
   "planner.googleClientIdPlaceholder": "…apps.googleusercontent.com",
   "planner.googleAccountHint": "Google account (optional)",
@@ -1107,5 +1107,11 @@
   "planner.googleMockRunning": "Running simulated scenario…",
   "planner.googleMockAdvanced": "Simulated remote changes applied — revision {revision}.",
   "planner.googleMockExpiredDone": "Expired syncToken simulated: full resynchronization completed.",
-  "planner.googleMockResetDone": "Simulation reset and synchronized again."
+  "planner.googleMockResetDone": "Simulation reset and synchronized again.",
+  "planner.googleWritableEvent": "This event is synced with Google Calendar. Changes and deletion will be sent to Google.",
+  "planner.googleConflictUpdate": "This event changed in Google since your last sync. The remote version was refreshed in the background; review your edits and click Save again to apply them.",
+  "planner.googleConflictDelete": "This event changed in Google since your last sync. Deletion was cancelled and the remote version was refreshed. Review it and delete again if needed.",
+  "planner.googleConflictRemoved": "This event no longer exists in Google Calendar; its local copy was removed.",
+  "planner.googleMockConflict": "Create ETag conflict",
+  "planner.googleMockConflictDone": "Remote ETag conflict simulated — revision {revision}. Edit the affected event now without syncing first."
 }

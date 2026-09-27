@@ -3923,6 +3923,12 @@ html[data-theme="light"] #reader-empty.reader-empty-brand .reader-empty-logo-lig
   font-size:9.5px; line-height:1.4;
 }
 .planner-remote-readonly i { color:var(--accent); margin-top:1px; }
+.planner-remote-readonly.writable {
+  border-style:solid;
+  background:color-mix(in srgb,var(--accent) 11%,var(--bg-panel-2));
+  color:var(--fg);
+}
+.planner-editor.remote-writable .planner-remote-readonly { margin-bottom:9px; }
 .planner-editor.remote-readonly .field,
 .planner-editor.remote-readonly .planner-all-day,
 .planner-editor.remote-readonly .planner-date-grid { opacity:.78; }

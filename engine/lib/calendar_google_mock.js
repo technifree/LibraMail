@@ -53,6 +53,8 @@ function createGoogleCalendarMockService({ now = () => Date.now() } = {}) {
   let snapshots = new Map();
   let deltas = new Map();
   let expireNext = new Set();
+  let localCounter = 0;
+  let lastConflictEventId = '';
 
   function reset() {
     base = startOfToday(now());
@@ -147,6 +149,8 @@ function createGoogleCalendarMockService({ now = () => Date.now() } = {}) {
     ]);
     deltas = new Map();
     expireNext = new Set();
+    localCounter = 0;
+    lastConflictEventId = '';
     return status();
   }
 
@@ -229,6 +233,7 @@ function createGoogleCalendarMockService({ now = () => Date.now() } = {}) {
       readableCalendars: calendars.filter(item => item.readable).length,
       pendingExpiredTokens: expireNext.size,
       email: MOCK_EMAIL,
+      lastConflictEventId,
     };
   }
 
@@ -275,12 +280,131 @@ function createGoogleCalendarMockService({ now = () => Date.now() } = {}) {
     };
   }
 
+  function calendarDefinition(calendarId) {
+    const item = calendars.find(calendar => calendar.remoteId === String(calendarId || ''));
+    if (!item) throw new GoogleCalendarApiError('Agenda simulé introuvable', { status: 404, reason: 'notFound' });
+    return item;
+  }
+
+  function assertWritable(calendarId) {
+    const item = calendarDefinition(calendarId);
+    if (!item.writable) {
+      throw new GoogleCalendarApiError('Agenda simulé en lecture seule', { status: 403, reason: 'forbidden' });
+    }
+    return item;
+  }
+
+  function rawFromNormalized(item) {
+    if (!item) return null;
+    const dateOnly = value => {
+      const date = new Date(Number(value));
+      return `${String(date.getFullYear()).padStart(4, '0')}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    };
+    const start = item.allDay
+      ? { date: dateOnly(item.startAt) }
+      : { dateTime: new Date(item.startAt).toISOString() };
+    const end = item.allDay
+      ? { date: dateOnly(item.endAt) }
+      : { dateTime: new Date(item.endAt).toISOString() };
+    return {
+      id: item.remoteEventId,
+      etag: item.remoteEtag,
+      updated: new Date(Math.max(1, Number(item.remoteUpdatedAt) || Date.now())).toISOString(),
+      status: item.deleted ? 'cancelled' : 'confirmed',
+      summary: item.title || '',
+      description: item.notes || '',
+      location: item.location || '',
+      start,
+      end,
+    };
+  }
+
+  function normalizedFromLocal(eventInput, remoteEventId, rev) {
+    const startAt = Number(eventInput?.startAt);
+    let endAt = Number(eventInput?.endAt);
+    const allDay = Boolean(eventInput?.allDay);
+    if (!Number.isFinite(startAt) || startAt <= 0) throw new Error('Date de début simulée invalide');
+    if (!Number.isFinite(endAt) || endAt <= startAt) endAt = startAt + (allDay ? 86400000 : 3600000);
+    return {
+      remoteEventId: String(remoteEventId || ''),
+      remoteEtag: `"mock-${String(remoteEventId || 'event')}-r${rev}"`,
+      remoteUpdatedAt: Date.now() + rev,
+      deleted: false,
+      status: 'confirmed',
+      title: String(eventInput?.title || '').trim() || 'Événement simulé',
+      startAt,
+      endAt,
+      allDay,
+      location: String(eventInput?.location || ''),
+      notes: String(eventInput?.notes || ''),
+    };
+  }
+
+  async function getEvent(calendarId, eventId) {
+    calendarDefinition(calendarId);
+    const item = snapshots.get(String(calendarId || ''))?.get(String(eventId || '')) || null;
+    if (!item) throw new GoogleCalendarApiError('Rendez-vous simulé introuvable', { status: 404, reason: 'notFound' });
+    return rawFromNormalized(item);
+  }
+
+  async function insertEvent(calendarId, eventInput) {
+    assertWritable(calendarId);
+    revision += 1;
+    localCounter += 1;
+    const eventId = `mock-libramail-${revision}-${localCounter}`;
+    const item = normalizedFromLocal(eventInput, eventId, revision);
+    upsert(String(calendarId), item, revision);
+    return rawFromNormalized(snapshots.get(String(calendarId)).get(eventId));
+  }
+
+  async function patchEvent(calendarId, eventId, eventInput, { etag = '' } = {}) {
+    assertWritable(calendarId);
+    const snapshot = snapshots.get(String(calendarId));
+    const current = snapshot?.get(String(eventId || '')) || null;
+    if (!current) throw new GoogleCalendarApiError('Rendez-vous simulé introuvable', { status: 404, reason: 'notFound' });
+    if (etag && String(etag) !== String(current.remoteEtag || '')) {
+      throw new GoogleCalendarApiError('Precondition Failed', { status: 412, reason: 'conditionNotMet' });
+    }
+    revision += 1;
+    const item = normalizedFromLocal(eventInput, current.remoteEventId, revision);
+    upsert(String(calendarId), item, revision);
+    return rawFromNormalized(snapshot.get(current.remoteEventId));
+  }
+
+  async function deleteEvent(calendarId, eventId, { etag = '' } = {}) {
+    assertWritable(calendarId);
+    const snapshot = snapshots.get(String(calendarId));
+    const current = snapshot?.get(String(eventId || '')) || null;
+    if (!current) throw new GoogleCalendarApiError('Rendez-vous simulé introuvable', { status: 404, reason: 'notFound' });
+    if (etag && String(etag) !== String(current.remoteEtag || '')) {
+      throw new GoogleCalendarApiError('Precondition Failed', { status: 412, reason: 'conditionNotMet' });
+    }
+    revision += 1;
+    remove(String(calendarId), current.remoteEventId, revision);
+    return null;
+  }
+
+  function simulateConflict(calendarId = 'mock-primary@example.invalid') {
+    assertWritable(calendarId);
+    const snapshot = snapshots.get(String(calendarId));
+    const current = [...(snapshot?.values() || [])][0];
+    if (!current) throw new Error('Aucun rendez-vous simulé disponible pour créer un conflit');
+    revision += 1;
+    lastConflictEventId = current.remoteEventId;
+    upsert(String(calendarId), {
+      ...current,
+      title: `Modification externe non synchronisée – conflit ${revision}`,
+      notes: `Le simulateur a modifié ce rendez-vous hors de LibraMail à la révision ${revision}.`,
+    }, revision);
+    return { calendarId: String(calendarId), eventId: lastConflictEventId, revision };
+  }
+
   function client() {
-    return { listCalendars, listEventChanges };
+    return { listCalendars, listEventChanges, getEvent, insertEvent, patchEvent, deleteEvent };
   }
 
   reset();
-  return { client, reset, advance, expireSyncTokens, status };
+  return { client, reset, advance, expireSyncTokens, simulateConflict, status };
 }
 
 function isGoogleCalendarMockConnection(connection = {}) {

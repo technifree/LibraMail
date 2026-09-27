@@ -821,7 +821,7 @@
   "planner.recurringSeries": "{count} série(s) récurrente(s)",
   "planner.importTruncated": "Le calendrier contient un très grand nombre de rendez-vous. L’import a été limité à 20 000 occurrences.",
   "planner.googleCalendar": "Google Calendar",
-  "planner.googleReadOnlyHint": "Synchronisation sécurisée en lecture seule pour le moment.",
+  "planner.googleReadOnlyHint": "Synchronisation bidirectionnelle pour les agendas autorisant l’écriture ; les agendas en lecture restent protégés.",
   "planner.googleClientId": "Client ID OAuth2 Google",
   "planner.googleClientIdPlaceholder": "…apps.googleusercontent.com",
   "planner.googleAccountHint": "Compte Google (facultatif)",
@@ -1107,5 +1107,11 @@
   "planner.googleMockRunning": "Exécution du scénario simulé…",
   "planner.googleMockAdvanced": "Changements distants simulés appliqués — révision {revision}.",
   "planner.googleMockExpiredDone": "syncToken expiré simulé : resynchronisation complète terminée.",
-  "planner.googleMockResetDone": "Simulation réinitialisée et resynchronisée."
+  "planner.googleMockResetDone": "Simulation réinitialisée et resynchronisée.",
+  "planner.googleWritableEvent": "Ce rendez-vous est synchronisé avec Google Calendar. Les modifications et suppressions seront envoyées à Google.",
+  "planner.googleConflictUpdate": "Ce rendez-vous a été modifié sur Google depuis votre dernière synchronisation. La version distante a été rechargée en arrière-plan ; vérifiez vos changements puis cliquez de nouveau sur Enregistrer pour les appliquer.",
+  "planner.googleConflictDelete": "Ce rendez-vous a été modifié sur Google depuis votre dernière synchronisation. La suppression a été annulée et la version distante a été rechargée. Vérifiez-la puis supprimez de nouveau si nécessaire.",
+  "planner.googleConflictRemoved": "Le rendez-vous n’existe plus dans Google Calendar ; sa copie locale a été retirée.",
+  "planner.googleMockConflict": "Créer un conflit ETag",
+  "planner.googleMockConflictDone": "Conflit ETag simulé à distance — révision {revision}. Modifiez maintenant le rendez-vous concerné sans synchroniser d’abord."
 }
