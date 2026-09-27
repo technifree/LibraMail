@@ -507,6 +507,47 @@ function init(dataDir) {
   );
   CREATE INDEX IF NOT EXISTS idx_calendar_subscriptions_enabled ON calendar_subscriptions(enabled, last_sync_at);
 
+  -- LibraMail 0.6.0 — connexions de calendriers authentifiés. Aucun jeton
+  -- OAuth n'est stocké ici : credential_key référence uniquement le coffre
+  -- système géré par credential_store.
+  CREATE TABLE IF NOT EXISTS calendar_connections (
+    id INTEGER PRIMARY KEY,
+    provider TEXT NOT NULL,
+    credential_key TEXT NOT NULL UNIQUE,
+    email TEXT NOT NULL DEFAULT '',
+    display_name TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_sync_at INTEGER NOT NULL DEFAULT 0,
+    last_status TEXT NOT NULL DEFAULT '',
+    last_error TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_calendar_connections_enabled
+    ON calendar_connections(enabled, provider, id);
+
+  CREATE TABLE IF NOT EXISTS calendar_remote_calendars (
+    id INTEGER PRIMARY KEY,
+    connection_id INTEGER NOT NULL REFERENCES calendar_connections(id) ON DELETE CASCADE,
+    remote_id TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    time_zone TEXT NOT NULL DEFAULT '',
+    color TEXT NOT NULL DEFAULT '',
+    access_role TEXT NOT NULL DEFAULT '',
+    primary_flag INTEGER NOT NULL DEFAULT 0,
+    selected INTEGER NOT NULL DEFAULT 1,
+    sync_token TEXT NOT NULL DEFAULT '',
+    last_sync_at INTEGER NOT NULL DEFAULT 0,
+    last_status TEXT NOT NULL DEFAULT '',
+    last_error TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(connection_id, remote_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_calendar_remote_calendars_connection
+    ON calendar_remote_calendars(connection_id, selected, name COLLATE NOCASE);
+
   CREATE TABLE IF NOT EXISTS calendar_categories (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL COLLATE NOCASE,
@@ -568,9 +609,17 @@ function init(dataDir) {
   ensureColumn('calendar_subscriptions', 'refresh_minutes', 'INTEGER NOT NULL DEFAULT 30');
   ensureColumn('calendar_events', 'subscription_id', 'INTEGER');
   ensureColumn('calendar_events', 'category_id', 'INTEGER REFERENCES calendar_categories(id) ON DELETE SET NULL');
+  ensureColumn('calendar_events', 'remote_calendar_id', 'INTEGER REFERENCES calendar_remote_calendars(id) ON DELETE CASCADE');
+  ensureColumn('calendar_events', 'remote_event_id', 'TEXT');
+  ensureColumn('calendar_events', 'remote_etag', 'TEXT');
+  ensureColumn('calendar_events', 'remote_updated_at', 'INTEGER NOT NULL DEFAULT 0');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_calendar_events_import_key ON calendar_events(import_key)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_calendar_events_category ON calendar_events(category_id, start_at)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_calendar_events_subscription ON calendar_events(subscription_id, start_at)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_calendar_events_remote_calendar ON calendar_events(remote_calendar_id, start_at)');
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_calendar_events_remote_unique
+    ON calendar_events(remote_calendar_id, remote_event_id)
+    WHERE remote_calendar_id IS NOT NULL AND remote_event_id IS NOT NULL AND remote_event_id <> ''`);
 
   // LibraMail 0.4.4 — hiérarchie des dossiers locaux.
   ensureColumn(
@@ -2311,6 +2360,11 @@ function calendarRow(row) {
     importKey: row.import_key || '',
     subscriptionId: Number(row.subscription_id) || null,
     subscriptionName: row.subscription_name || '',
+    remoteCalendarId: Number(row.remote_calendar_id) || null,
+    remoteCalendarName: row.remote_calendar_name || '',
+    remoteEventId: row.remote_event_id || '',
+    remoteEtag: row.remote_etag || '',
+    remoteUpdatedAt: Number(row.remote_updated_at) || 0,
     createdAt: Number(row.created_at) || 0,
     updatedAt: Number(row.updated_at) || 0,
   };
@@ -2508,6 +2562,7 @@ function listCalendarEvents({ from = null, to = null, accountId = null, limit = 
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   return db.prepare(`
     SELECT ce.*, COALESCE(cs.name, '') AS subscription_name,
+           COALESCE(rc.name, '') AS remote_calendar_name,
            COALESCE(cc.name, '') AS category_name,
            COALESCE(cc.color, '') AS category_color,
            COALESCE(cc.icon, '') AS category_icon,
@@ -2517,6 +2572,7 @@ function listCalendarEvents({ from = null, to = null, accountId = null, limit = 
              WHERE cea.event_id = ce.id) AS attachment_count
       FROM calendar_events ce
       LEFT JOIN calendar_subscriptions cs ON cs.id = ce.subscription_id
+      LEFT JOIN calendar_remote_calendars rc ON rc.id = ce.remote_calendar_id
       LEFT JOIN calendar_categories cc ON cc.id = ce.category_id
     ${where}
     ORDER BY ce.start_at ASC, ce.all_day DESC, ce.title COLLATE NOCASE ASC
@@ -2527,6 +2583,7 @@ function listCalendarEvents({ from = null, to = null, accountId = null, limit = 
 function getCalendarEvent(id) {
   return calendarEventWithCategoryRow(db.prepare(`
     SELECT ce.*, COALESCE(cs.name, '') AS subscription_name,
+           COALESCE(rc.name, '') AS remote_calendar_name,
            COALESCE(cc.name, '') AS category_name,
            COALESCE(cc.color, '') AS category_color,
            COALESCE(cc.icon, '') AS category_icon,
@@ -2536,6 +2593,7 @@ function getCalendarEvent(id) {
              WHERE cea.event_id = ce.id) AS attachment_count
       FROM calendar_events ce
       LEFT JOIN calendar_subscriptions cs ON cs.id = ce.subscription_id
+      LEFT JOIN calendar_remote_calendars rc ON rc.id = ce.remote_calendar_id
       LEFT JOIN calendar_categories cc ON cc.id = ce.category_id
      WHERE ce.id=?
   `).get(Number(id)));
@@ -2636,6 +2694,215 @@ function markCalendarMailImport(messageId, attachmentIndex, eventCount = 0) {
       imported_at=excluded.imported_at, event_count=excluded.event_count
   `).run(Number(messageId), Number(attachmentIndex), importedAt, Math.max(0, Number(eventCount) || 0));
   return getCalendarMailImport(messageId, attachmentIndex);
+}
+
+function calendarConnectionRow(row) {
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    provider: String(row.provider || ''),
+    credentialKey: String(row.credential_key || ''),
+    email: String(row.email || ''),
+    displayName: String(row.display_name || ''),
+    enabled: Boolean(row.enabled),
+    lastSyncAt: Number(row.last_sync_at) || 0,
+    lastStatus: String(row.last_status || ''),
+    lastError: String(row.last_error || ''),
+    createdAt: Number(row.created_at) || 0,
+    updatedAt: Number(row.updated_at) || 0,
+  };
+}
+
+function normalizeCalendarConnection(input = {}) {
+  const provider = String(input.provider || '').trim().toLowerCase();
+  if (!/^[a-z0-9_-]{2,40}$/.test(provider)) throw new Error('Fournisseur de calendrier invalide');
+  const credentialKey = String(input.credentialKey || '').trim();
+  if (!/^[A-Za-z0-9._:-]{3,160}$/.test(credentialKey)) throw new Error('Clé de coffre calendrier invalide');
+  return {
+    provider,
+    credentialKey,
+    email: String(input.email || '').trim().slice(0, 320),
+    displayName: String(input.displayName || '').trim().slice(0, 240),
+    enabled: input.enabled === false ? 0 : 1,
+  };
+}
+
+function listCalendarConnections({ enabledOnly = false } = {}) {
+  const where = enabledOnly ? 'WHERE enabled=1' : '';
+  return db.prepare(`SELECT * FROM calendar_connections ${where} ORDER BY display_name COLLATE NOCASE, email COLLATE NOCASE, id`)
+    .all().map(calendarConnectionRow);
+}
+
+function getCalendarConnection(id) {
+  return calendarConnectionRow(db.prepare('SELECT * FROM calendar_connections WHERE id=?').get(Number(id)));
+}
+
+function saveCalendarConnection(input = {}, id = null) {
+  const item = normalizeCalendarConnection(input);
+  const now = Date.now();
+  const numericId = Number(id || input.id || 0);
+  if (numericId > 0) {
+    const result = db.prepare(`UPDATE calendar_connections
+      SET provider=?,credential_key=?,email=?,display_name=?,enabled=?,updated_at=? WHERE id=?`).run(
+      item.provider, item.credentialKey, item.email, item.displayName, item.enabled, now, numericId,
+    );
+    if (!result.changes) throw new Error('Connexion calendrier introuvable');
+    return getCalendarConnection(numericId);
+  }
+  const result = db.prepare(`INSERT INTO calendar_connections
+    (provider,credential_key,email,display_name,enabled,last_sync_at,last_status,last_error,created_at,updated_at)
+    VALUES (?,?,?,?,?,0,'','',?,?)`).run(
+    item.provider, item.credentialKey, item.email, item.displayName, item.enabled, now, now,
+  );
+  return getCalendarConnection(result.lastInsertRowid);
+}
+
+function updateCalendarConnectionSync(id, patch = {}) {
+  const current = getCalendarConnection(id);
+  if (!current) throw new Error('Connexion calendrier introuvable');
+  const values = {
+    lastSyncAt: patch.lastSyncAt === undefined ? current.lastSyncAt : Math.max(0, Number(patch.lastSyncAt) || 0),
+    lastStatus: patch.lastStatus === undefined ? current.lastStatus : String(patch.lastStatus || '').slice(0, 80),
+    lastError: patch.lastError === undefined ? current.lastError : String(patch.lastError || '').slice(0, 2000),
+  };
+  db.prepare(`UPDATE calendar_connections
+    SET last_sync_at=?,last_status=?,last_error=?,updated_at=? WHERE id=?`).run(
+    values.lastSyncAt, values.lastStatus, values.lastError, Date.now(), Number(id),
+  );
+  return getCalendarConnection(id);
+}
+
+function removeCalendarConnection(id) {
+  const numericId = Number(id);
+  if (!(numericId > 0)) return { removed: false };
+  const result = db.prepare('DELETE FROM calendar_connections WHERE id=?').run(numericId);
+  return { removed: result.changes > 0 };
+}
+
+function calendarRemoteCalendarRow(row) {
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    connectionId: Number(row.connection_id),
+    remoteId: String(row.remote_id || ''),
+    name: String(row.name || ''),
+    description: String(row.description || ''),
+    timeZone: String(row.time_zone || ''),
+    color: String(row.color || ''),
+    accessRole: String(row.access_role || ''),
+    primary: Boolean(row.primary_flag),
+    selected: Boolean(row.selected),
+    syncToken: String(row.sync_token || ''),
+    lastSyncAt: Number(row.last_sync_at) || 0,
+    lastStatus: String(row.last_status || ''),
+    lastError: String(row.last_error || ''),
+    createdAt: Number(row.created_at) || 0,
+    updatedAt: Number(row.updated_at) || 0,
+  };
+}
+
+function normalizeCalendarRemoteCalendar(input = {}) {
+  const connectionId = Number(input.connectionId);
+  if (!(connectionId > 0) || !getCalendarConnection(connectionId)) {
+    throw new Error('Connexion calendrier introuvable');
+  }
+  const remoteId = String(input.remoteId || '').trim();
+  if (!remoteId || remoteId.length > 2000 || /[\r\n]/.test(remoteId)) {
+    throw new Error('Identifiant d’agenda distant invalide');
+  }
+  const rawColor = String(input.color || '').trim();
+  return {
+    connectionId,
+    remoteId,
+    name: String(input.name || '').trim().slice(0, 240),
+    description: String(input.description || '').trim().slice(0, 2000),
+    timeZone: String(input.timeZone || '').trim().slice(0, 120),
+    color: /^#[0-9a-fA-F]{6}$/.test(rawColor) ? rawColor.toUpperCase() : '',
+    accessRole: String(input.accessRole || '').trim().slice(0, 80),
+    primary: input.primary ? 1 : 0,
+    selected: input.selected === false ? 0 : 1,
+  };
+}
+
+function listCalendarRemoteCalendars({ connectionId = null, selectedOnly = false } = {}) {
+  const clauses = [];
+  const params = [];
+  if (Number(connectionId) > 0) {
+    clauses.push('connection_id=?');
+    params.push(Number(connectionId));
+  }
+  if (selectedOnly) clauses.push('selected=1');
+  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+  return db.prepare(`SELECT * FROM calendar_remote_calendars ${where}
+    ORDER BY primary_flag DESC, name COLLATE NOCASE, id`).all(...params).map(calendarRemoteCalendarRow);
+}
+
+function getCalendarRemoteCalendar(id) {
+  return calendarRemoteCalendarRow(
+    db.prepare('SELECT * FROM calendar_remote_calendars WHERE id=?').get(Number(id)),
+  );
+}
+
+function saveCalendarRemoteCalendar(input = {}, id = null) {
+  const item = normalizeCalendarRemoteCalendar(input);
+  const now = Date.now();
+  const numericId = Number(id || input.id || 0);
+  if (numericId > 0) {
+    const result = db.prepare(`UPDATE calendar_remote_calendars
+      SET connection_id=?,remote_id=?,name=?,description=?,time_zone=?,color=?,
+          access_role=?,primary_flag=?,selected=?,updated_at=? WHERE id=?`).run(
+      item.connectionId, item.remoteId, item.name, item.description, item.timeZone, item.color,
+      item.accessRole, item.primary, item.selected, now, numericId,
+    );
+    if (!result.changes) throw new Error('Agenda distant introuvable');
+    return getCalendarRemoteCalendar(numericId);
+  }
+  const result = db.prepare(`INSERT INTO calendar_remote_calendars
+    (connection_id,remote_id,name,description,time_zone,color,access_role,primary_flag,selected,
+     sync_token,last_sync_at,last_status,last_error,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,'',0,'','',?,?)`).run(
+    item.connectionId, item.remoteId, item.name, item.description, item.timeZone, item.color,
+    item.accessRole, item.primary, item.selected, now, now,
+  );
+  return getCalendarRemoteCalendar(result.lastInsertRowid);
+}
+
+function updateCalendarRemoteCalendarSync(id, patch = {}) {
+  const current = getCalendarRemoteCalendar(id);
+  if (!current) throw new Error('Agenda distant introuvable');
+  const values = {
+    syncToken: patch.syncToken === undefined ? current.syncToken : String(patch.syncToken || '').slice(0, 20000),
+    lastSyncAt: patch.lastSyncAt === undefined ? current.lastSyncAt : Math.max(0, Number(patch.lastSyncAt) || 0),
+    lastStatus: patch.lastStatus === undefined ? current.lastStatus : String(patch.lastStatus || '').slice(0, 80),
+    lastError: patch.lastError === undefined ? current.lastError : String(patch.lastError || '').slice(0, 2000),
+  };
+  db.prepare(`UPDATE calendar_remote_calendars
+    SET sync_token=?,last_sync_at=?,last_status=?,last_error=?,updated_at=? WHERE id=?`).run(
+    values.syncToken, values.lastSyncAt, values.lastStatus, values.lastError, Date.now(), Number(id),
+  );
+  return getCalendarRemoteCalendar(id);
+}
+
+function removeCalendarRemoteCalendar(id) {
+  return db.prepare('DELETE FROM calendar_remote_calendars WHERE id=?').run(Number(id)).changes > 0;
+}
+
+function setCalendarEventRemoteState(id, patch = {}) {
+  const numericId = Number(id);
+  if (!(numericId > 0) || !getCalendarEvent(numericId)) throw new Error('Rendez-vous introuvable');
+  const remoteCalendarId = Number(patch.remoteCalendarId) > 0 ? Number(patch.remoteCalendarId) : null;
+  if (remoteCalendarId && !getCalendarRemoteCalendar(remoteCalendarId)) {
+    throw new Error('Agenda distant introuvable');
+  }
+  const remoteEventId = String(patch.remoteEventId || '').trim().slice(0, 2000) || null;
+  const remoteEtag = String(patch.remoteEtag || '').trim().slice(0, 2000) || null;
+  const remoteUpdatedAt = Math.max(0, Number(patch.remoteUpdatedAt) || 0);
+  db.prepare(`UPDATE calendar_events
+    SET remote_calendar_id=?,remote_event_id=?,remote_etag=?,remote_updated_at=?,updated_at=?
+    WHERE id=?`).run(
+    remoteCalendarId, remoteEventId, remoteEtag, remoteUpdatedAt, Date.now(), numericId,
+  );
+  return getCalendarEvent(numericId);
 }
 
 function calendarSubscriptionRow(row) {
@@ -2979,6 +3246,17 @@ module.exports = {
   getCalendarAttachment,
   addCalendarAttachments,
   removeCalendarAttachment,
+  listCalendarConnections,
+  getCalendarConnection,
+  saveCalendarConnection,
+  updateCalendarConnectionSync,
+  removeCalendarConnection,
+  listCalendarRemoteCalendars,
+  getCalendarRemoteCalendar,
+  saveCalendarRemoteCalendar,
+  updateCalendarRemoteCalendarSync,
+  removeCalendarRemoteCalendar,
+  setCalendarEventRemoteState,
   listCalendarSubscriptions,
   getCalendarSubscription,
   saveCalendarSubscription,
