@@ -2905,6 +2905,188 @@ function setCalendarEventRemoteState(id, patch = {}) {
   return getCalendarEvent(numericId);
 }
 
+function getCalendarRemoteCalendarByRemoteId(connectionId, remoteId) {
+  const connection = Number(connectionId);
+  const remote = String(remoteId || '').trim();
+  if (!(connection > 0) || !remote) return null;
+  return calendarRemoteCalendarRow(
+    db.prepare('SELECT * FROM calendar_remote_calendars WHERE connection_id=? AND remote_id=?').get(connection, remote),
+  );
+}
+
+function syncCalendarRemoteCalendars(connectionId, items = []) {
+  const connection = Number(connectionId);
+  if (!(connection > 0) || !getCalendarConnection(connection)) {
+    throw new Error('Connexion calendrier introuvable');
+  }
+  const rows = Array.isArray(items) ? items : [];
+  const existing = listCalendarRemoteCalendars({ connectionId: connection });
+  const existingByRemoteId = new Map(existing.map(item => [item.remoteId, item]));
+  const seen = new Set();
+  let created = 0;
+  let updated = 0;
+  let removed = 0;
+
+  const tx = db.transaction(() => {
+    for (const input of rows) {
+      const remoteId = String(input?.remoteId || '').trim();
+      if (!remoteId || seen.has(remoteId)) continue;
+      seen.add(remoteId);
+      const current = existingByRemoteId.get(remoteId) || null;
+      const saved = saveCalendarRemoteCalendar({
+        ...input,
+        connectionId: connection,
+        // Une sélection explicite dans LibraMail doit survivre aux changements
+        // de visibilité dans l'interface Google.
+        selected: current ? current.selected : input?.selected !== false,
+      }, current?.id || null);
+      if (current) updated += 1;
+      else created += 1;
+
+      // Les événements distants utilisent pour l'instant la couleur de leur
+      // agenda. Une modification de couleur doit donc être visible sans attendre
+      // une modification distante de chaque événement.
+      if (saved.color) {
+        db.prepare(`UPDATE calendar_events SET color=?, updated_at=?
+          WHERE remote_calendar_id=? AND color<>?`).run(saved.color, Date.now(), saved.id, saved.color);
+      }
+    }
+
+    for (const current of existing) {
+      if (seen.has(current.remoteId)) continue;
+      removed += db.prepare('DELETE FROM calendar_remote_calendars WHERE id=?').run(current.id).changes;
+    }
+  });
+  tx();
+
+  return {
+    created,
+    updated,
+    removed,
+    calendars: listCalendarRemoteCalendars({ connectionId: connection }),
+  };
+}
+
+function getCalendarEventByRemote(remoteCalendarId, remoteEventId) {
+  const calendarId = Number(remoteCalendarId);
+  const eventId = String(remoteEventId || '').trim();
+  if (!(calendarId > 0) || !eventId) return null;
+  const row = db.prepare(`
+    SELECT ce.*, COALESCE(rc.name, '') AS remote_calendar_name,
+           COALESCE(cc.name, '') AS category_name,
+           COALESCE(cc.color, '') AS category_color,
+           COALESCE(cc.icon, '') AS category_icon,
+           cc.active AS category_active,
+           (SELECT COUNT(*) FROM calendar_event_attachments cea WHERE cea.event_id=ce.id) AS attachment_count
+      FROM calendar_events ce
+      LEFT JOIN calendar_remote_calendars rc ON rc.id=ce.remote_calendar_id
+      LEFT JOIN calendar_categories cc ON cc.id=ce.category_id
+     WHERE ce.remote_calendar_id=? AND ce.remote_event_id=?
+  `).get(calendarId, eventId);
+  return calendarEventWithCategoryRow(row);
+}
+
+function syncCalendarRemoteEvents(remoteCalendarId, items = [], { fullSync = false } = {}) {
+  const calendarId = Number(remoteCalendarId);
+  const remoteCalendar = getCalendarRemoteCalendar(calendarId);
+  if (!(calendarId > 0) || !remoteCalendar) throw new Error('Agenda distant introuvable');
+
+  const rows = Array.isArray(items) ? items : [];
+  const existingRows = db.prepare(`SELECT id, remote_event_id, remote_etag, remote_updated_at
+    FROM calendar_events WHERE remote_calendar_id=?`).all(calendarId);
+  const existing = new Map(existingRows.map(row => [String(row.remote_event_id || ''), row]));
+  const seen = new Set();
+  const removedEventIds = [];
+  let created = 0;
+  let updated = 0;
+  let removed = 0;
+  let unchanged = 0;
+  let skipped = 0;
+  const now = Date.now();
+
+  const insert = db.prepare(`INSERT INTO calendar_events
+    (title,start_at,end_at,all_day,location,notes,account_id,color,import_key,subscription_id,category_id,
+     remote_calendar_id,remote_event_id,remote_etag,remote_updated_at,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,NULL,?,NULL,NULL,NULL,?,?,?,?,?,?)`);
+  const update = db.prepare(`UPDATE calendar_events
+    SET title=?,start_at=?,end_at=?,all_day=?,location=?,notes=?,color=?,
+        remote_etag=?,remote_updated_at=?,updated_at=?
+    WHERE id=?`);
+  const removeAttachments = db.prepare('DELETE FROM calendar_event_attachments WHERE event_id=?');
+  const removeEvent = db.prepare('DELETE FROM calendar_events WHERE id=?');
+
+  db.transaction(() => {
+    for (const input of rows) {
+      const remoteEventId = String(input?.remoteEventId || '').trim();
+      if (!remoteEventId || remoteEventId.length > 2000 || /[\r\n]/.test(remoteEventId)) {
+        skipped += 1;
+        continue;
+      }
+      seen.add(remoteEventId);
+      const current = existing.get(remoteEventId) || null;
+
+      if (input?.deleted) {
+        if (current) {
+          removeAttachments.run(current.id);
+          removed += removeEvent.run(current.id).changes;
+          removedEventIds.push(Number(current.id));
+          existing.delete(remoteEventId);
+        }
+        continue;
+      }
+
+      let event;
+      try {
+        event = normalizeCalendarEvent({
+          title: input?.title,
+          startAt: input?.startAt,
+          endAt: input?.endAt,
+          allDay: input?.allDay,
+          location: input?.location,
+          notes: input?.notes,
+          color: remoteCalendar.color,
+        });
+      } catch {
+        skipped += 1;
+        continue;
+      }
+
+      const remoteEtag = String(input?.remoteEtag || '').trim().slice(0, 2000) || null;
+      const remoteUpdatedAt = Math.max(0, Number(input?.remoteUpdatedAt) || 0);
+      if (current) {
+        if (String(current.remote_etag || '') === String(remoteEtag || '')
+            && Number(current.remote_updated_at || 0) === remoteUpdatedAt) {
+          unchanged += 1;
+          continue;
+        }
+        update.run(
+          event.title, event.startAt, event.endAt, event.allDay, event.location, event.notes,
+          event.color, remoteEtag, remoteUpdatedAt, now, current.id,
+        );
+        updated += 1;
+      } else {
+        insert.run(
+          event.title, event.startAt, event.endAt, event.allDay, event.location, event.notes,
+          event.color, calendarId, remoteEventId, remoteEtag, remoteUpdatedAt, now, now,
+        );
+        created += 1;
+      }
+    }
+
+    if (fullSync) {
+      for (const current of existing.values()) {
+        const remoteEventId = String(current.remote_event_id || '');
+        if (!remoteEventId || seen.has(remoteEventId)) continue;
+        removeAttachments.run(current.id);
+        removed += removeEvent.run(current.id).changes;
+        removedEventIds.push(Number(current.id));
+      }
+    }
+  })();
+
+  return { created, updated, removed, unchanged, skipped, removedEventIds };
+}
+
 function calendarSubscriptionRow(row) {
   if (!row) return null;
   return {
@@ -3253,9 +3435,13 @@ module.exports = {
   removeCalendarConnection,
   listCalendarRemoteCalendars,
   getCalendarRemoteCalendar,
+  getCalendarRemoteCalendarByRemoteId,
   saveCalendarRemoteCalendar,
+  syncCalendarRemoteCalendars,
   updateCalendarRemoteCalendarSync,
   removeCalendarRemoteCalendar,
+  getCalendarEventByRemote,
+  syncCalendarRemoteEvents,
   setCalendarEventRemoteState,
   listCalendarSubscriptions,
   getCalendarSubscription,

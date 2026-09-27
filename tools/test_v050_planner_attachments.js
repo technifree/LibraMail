@@ -56,7 +56,11 @@ assert(css.includes('.planner-attachment-row'));
 
 // LibraMail 0.5.0 - indicateur trombone dans les rendez-vous
 assert(db.includes('attachmentCount: Math.max(0, Number(row.attachment_count) || 0)'));
-assert((db.match(/calendar_event_attachments cea/g) || []).length === 2);
+// La 0.5.0 avait exactement deux requêtes enrichies avec le compteur de pièces
+// jointes. Les vues supplémentaires ajoutées ensuite peuvent légitimement
+// réutiliser la même sous-requête ; le garde-fou doit garantir au moins les
+// deux usages historiques, sans imposer un nombre maximal.
+assert((db.match(/calendar_event_attachments cea/g) || []).length >= 2);
 assert(planner.includes('function eventAttachmentIcon(event)'));
 assert((planner.match(/eventAttachmentIcon\(event\)/g) || []).length >= 6);
 assert(css.includes('LibraMail 0.5.0 - indicateur pièces jointes des rendez-vous'));
