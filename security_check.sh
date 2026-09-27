@@ -34,6 +34,17 @@ if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   check_list "L'index Git" "$(git ls-files)"
   check_list "Les changements préparés" "$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null || true)"
 
+  # Détection volontairement conservatrice de secrets à forte signature.
+  # On évite les mots génériques ("password", "token", etc.) pour ne pas
+  # bloquer le code et les tests légitimes. security_check.sh lui-même est
+  # exclu afin que les signatures ci-dessous ne s'auto-déclenchent pas.
+  secret_patterns='-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----|GOCSPX-[A-Za-z0-9_-]{20,}|ya29\.[A-Za-z0-9._-]{20,}|1//[A-Za-z0-9._-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}'
+  secret_hits="$(git grep -I -n -E "$secret_patterns" -- . ':!security_check.sh' ':!tools/test_v060_release_hardening.js' 2>/dev/null || true)"
+  if [[ -n "$secret_hits" ]]; then
+    printf '%s\n' "$secret_hits" >&2
+    fail "Des signatures de secrets potentiels sont présentes dans les sources suivies."
+  fi
+
   ignored_tracked="$(git ls-files -ci --exclude-standard 2>/dev/null || true)"
   if [[ -n "$ignored_tracked" ]]; then
     printf '%s\n' "$ignored_tracked" >&2

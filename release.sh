@@ -72,8 +72,9 @@ Public packages contain no account, password or message data.
 Les paquets publics ne contiennent aucun compte, mot de passe ou message.
 EOF
 
-./security_check.sh
-python3 tools/check_version.py
+# Préflight complet AVANT de créer le commit/tag : sécurité, cohérence de
+# version, syntaxe, JSON et toute la suite de tests avec le runtime local.
+./github.sh check
 
 git add VERSION README.md CHANGELOG.md neutralino.config.json \
   resources/index.html resources/js/app.js engine/backend.js \

@@ -14,7 +14,7 @@ param(
     [switch]$EmbedResources,
     [switch]$Offline,
     [switch]$KeepWork,
-    [string]$NodeVersion = '24.18.0'
+    [string]$NodeVersion = '22.23.1'
 )
 
 Set-StrictMode -Version Latest

@@ -25,7 +25,7 @@ FRESH_NPM=0
 EMBED_RESOURCES=0
 KEEP_WORK=0
 OFFLINE=0
-NODE_VERSION="${LIBRAMAIL_NODE_VERSION:-24.18.0}"
+NODE_VERSION="${LIBRAMAIL_NODE_VERSION:-22.23.1}"
 
 usage() {
   cat <<'USAGE'
@@ -39,7 +39,7 @@ Options :
                           Node.js embarqué, au lieu de recopier node_modules.
   --embed-resources       Intègre les ressources Neutralino dans l'exécutable.
   --node-version VERSION  Version officielle de Node.js à embarquer.
-                          Valeur par défaut : 24.18.0
+                          Valeur par défaut : 22.23.1
   --offline               Interdit tout téléchargement. Les fichiers Node.js
                           doivent déjà être présents dans le cache du projet.
   --keep-work             Conserve le dossier .build-linux-work pour diagnostic.
