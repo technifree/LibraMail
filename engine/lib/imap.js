@@ -14,6 +14,24 @@ const mailStore = require('./mail_store');
 const clients = new Map();
 const syncClients = new Map();
 
+// LibraMail 0.6.0 — grosses boîtes IMAP.
+// Les sources MIME sont téléchargées par plages d'UID bornées afin qu'une
+// coupure réseau ne fasse jamais perdre plusieurs milliers de messages de
+// progression. Chaque lot terminé devient un checkpoint persistant.
+const IMAP_FETCH_BATCH_SIZE = 200;
+const IMAP_FOLDER_RETRY_LIMIT = 1;
+
+function isTransientImapError(error) {
+  const code = String(error?.code || error?.errno || '').toUpperCase();
+  if ([
+    'NOCONNECTION', 'ECONNRESET', 'ECONNABORTED', 'ETIMEDOUT',
+    'EPIPE', 'ENETRESET', 'ENETDOWN', 'ENETUNREACH', 'EHOSTUNREACH',
+  ].includes(code)) return true;
+
+  return /connection.*(?:closed|lost|reset|ended)|socket.*(?:closed|hang up)|network|timed? ?out/i
+    .test(String(error?.message || ''));
+}
+
 // LibraMail 0.4.4 — garde-fou des connexions IDLE persistantes
 const watchRetryTimers = new Map();
 const watchStoppingClients = new WeakSet();
@@ -66,7 +84,10 @@ function syncTimeoutPolicy(source = 'other') {
     case 'startup':
       return { connectMs: 12000, folderMs: 18000, totalMs: 45000 };
     case 'manual':
-      return { connectMs: 20000, folderMs: 45000, totalMs: 180000 };
+      // Une première synchronisation de plusieurs milliers de messages peut
+      // légitimement prendre plusieurs minutes. Les relèves automatiques
+      // gardent leurs budgets courts ; seule l'action manuelle est élargie.
+      return { connectMs: 20000, folderMs: 600000, totalMs: 900000 };
     default:
       return { connectMs: 15000, folderMs: 30000, totalMs: 90000 };
   }
@@ -322,97 +343,161 @@ async function updateChangedFlags(client, account, folder, lastUid, state, signa
 async function storeNewMessages(client, account, folder, dataDir, firstUid, lastUid,
                                 initialLastUid, uidValidity, state, onProgress,
                                 role, signal) {
-  if (lastUid < firstUid) return { added: [], maxUid: initialLastUid };
+  if (lastUid < firstUid) return { added: [], maxUid: initialLastUid, degraded: 0 };
+
   const added = [];
   let maxUid = initialLastUid;
+  let processed = 0;
+  let degradedMessages = 0;
   const estimated = Math.max(0, lastUid - firstUid + 1);
+  const accountLabel = account.displayName || account.email || account.id || 'compte';
 
-  for await (const message of client.fetch(`${firstUid}:${lastUid}`, {
-    uid: true, envelope: true, flags: true, size: true, source: true,
-  }, { uid: true })) {
+  for (let batchFirstUid = firstUid; batchFirstUid <= lastUid; batchFirstUid += IMAP_FETCH_BATCH_SIZE) {
     throwIfAborted(signal);
-    if (message.uid <= initialLastUid) continue;
+    const batchLastUid = Math.min(lastUid, batchFirstUid + IMAP_FETCH_BATCH_SIZE - 1);
 
-    const parsed = await simpleParser(message.source, { skipImageLinks: true });
-    throwIfAborted(signal);
-    const text = (parsed.text || '').replace(/\s+/g, ' ').trim();
-    const envelope = message.envelope || {};
-    const from = (envelope.from && envelope.from[0]) || {};
-    const row = {
-      account_id: account.id,
-      folder,
-      folder_role: role,
-      uid: message.uid,
-      message_id: envelope.messageId || parsed.messageId || null,
-      subject: envelope.subject || parsed.subject || '(sans objet)',
-      from_name: from.name || '',
-      from_addr: from.address || '',
-      to_addr: (envelope.to || []).map(address => address.address).join(', '),
-      date: (envelope.date ? new Date(envelope.date) : new Date()).getTime(),
-      snippet: mailStore.protectSnippet(account.id, text.slice(0, 160)),
-      seen: message.flags.has('\\Seen') ? 1 : 0,
-      flagged: message.flags.has('\\Flagged') ? 1 : 0,
-      answered: message.flags.has('\\Answered') ? 1 : 0,
-      has_attach: (parsed.attachments || []).length > 0 ? 1 : 0,
-      size: message.size || 0,
-      eml_path: '',
-      is_spam: role === 'junk' ? 1 : 0,
-      thread_key: '',
-      in_reply_to: null,
-      references_json: '[]',
-    };
+    // Si le FETCH de ce lot tombe, le checkpoint reste celui du lot précédent.
+    // Une reconnexion peut donc reprendre exactement à partir de cette plage.
+    for await (const message of client.fetch(`${batchFirstUid}:${batchLastUid}`, {
+      uid: true, envelope: true, flags: true, size: true, source: true,
+    }, { uid: true })) {
+      throwIfAborted(signal);
+      if (message.uid <= initialLastUid) continue;
 
-    const thread = buildThreadKey(parsed, row, account);
-    row.thread_key = thread.threadKey;
-    row.in_reply_to = thread.inReplyTo;
-    row.references_json = JSON.stringify(thread.references);
+      let parsed;
+      let mimeDegraded = false;
+      try {
+        parsed = await simpleParser(message.source, { skipImageLinks: true });
+      } catch (error) {
+        // Un MIME atypique ne doit pas bloquer les milliers de messages suivants.
+        // On conserve tout de même le MIME brut chiffré et les métadonnées IMAP.
+        // Les erreurs de base/stockage, elles, ne sont PAS masquées plus bas.
+        mimeDegraded = true;
+        degradedMessages++;
+        parsed = {
+          text: '',
+          attachments: [],
+          messageId: null,
+          subject: null,
+          references: [],
+          inReplyTo: null,
+          headers: new Map(),
+        };
+        console.warn(
+          `[LibraMail][IMAP][MIME] ${accountLabel} · ${folder}`
+          + ` · UID ${Number(message.uid) || '?'} · analyse MIME dégradée`
+          + (error?.message ? ` : ${error.message}` : '')
+        );
+      }
 
-    if (role === 'inbox') {
-      const decision = db.spamRuleDecision(row.from_addr);
-      if (decision?.action === 'allow' || db.isTrustedEmail(row.from_addr)) {
-        row.is_spam = 0;
-      } else if (decision?.action === 'block') {
-        row.is_spam = 1;
-      } else {
-        const score = spam.classify(`${row.subject} ${row.from_addr} ${text}`);
-        if (score > 0.92) row.is_spam = 1;
+      throwIfAborted(signal);
+      const text = (parsed.text || '').replace(/\s+/g, ' ').trim();
+      const envelope = message.envelope || {};
+      const from = (envelope.from && envelope.from[0]) || {};
+      const flags = message.flags instanceof Set ? message.flags : new Set(message.flags || []);
+      const row = {
+        account_id: account.id,
+        folder,
+        folder_role: role,
+        uid: message.uid,
+        message_id: envelope.messageId || parsed.messageId || null,
+        subject: envelope.subject || parsed.subject || '(sans objet)',
+        from_name: from.name || '',
+        from_addr: from.address || '',
+        to_addr: (envelope.to || []).map(address => address.address).join(', '),
+        date: (envelope.date ? new Date(envelope.date) : new Date()).getTime(),
+        snippet: mailStore.protectSnippet(account.id, text.slice(0, 160)),
+        seen: flags.has('\\Seen') ? 1 : 0,
+        flagged: flags.has('\\Flagged') ? 1 : 0,
+        answered: flags.has('\\Answered') ? 1 : 0,
+        has_attach: (parsed.attachments || []).length > 0 ? 1 : 0,
+        size: message.size || 0,
+        eml_path: '',
+        is_spam: role === 'junk' ? 1 : 0,
+        thread_key: '',
+        in_reply_to: null,
+        references_json: '[]',
+      };
+
+      const thread = buildThreadKey(parsed, row, account);
+      row.thread_key = thread.threadKey;
+      row.in_reply_to = thread.inReplyTo;
+      row.references_json = JSON.stringify(thread.references);
+
+      if (role === 'inbox') {
+        const decision = db.spamRuleDecision(row.from_addr);
+        if (decision?.action === 'allow' || db.isTrustedEmail(row.from_addr)) {
+          row.is_spam = 0;
+        } else if (decision?.action === 'block') {
+          row.is_spam = 1;
+        } else {
+          const score = spam.classify(`${row.subject} ${row.from_addr} ${text}`);
+          if (score > 0.92) row.is_spam = 1;
+        }
+      }
+
+      db.recordSenderSeen({
+        email: row.from_addr,
+        name: row.from_name,
+        subject: row.subject,
+        date: row.date,
+        isSpam: row.is_spam || role === 'junk',
+      });
+
+      // Ces opérations restent fail-secure. Une erreur SQLite ou de stockage
+      // chiffré interrompt le lot : on ne checkpoint jamais un mail non stocké.
+      const { id } = db.upsertMessage(row);
+      const descriptor = mailStore.storeMessage({ ...row, id }, message.source);
+      db.setMessageStorage(id, descriptor);
+      db.indexBody(id, row, text, {
+        secureTokens: mailStore.searchTokens(text),
+      });
+
+      added.push(id);
+      processed++;
+      maxUid = Math.max(maxUid, Number(message.uid) || 0);
+
+      if (processed % 10 === 0) await yieldToEventLoop(signal);
+
+      if (onProgress && (processed === 1 || processed % 25 === 0)) {
+        onProgress({
+          folder,
+          role,
+          phase: 'download',
+          count: processed,
+          total: estimated,
+          batchFirstUid,
+          batchLastUid,
+          degraded: degradedMessages,
+          mimeDegraded,
+        });
       }
     }
 
-    db.recordSenderSeen({
-      email: row.from_addr,
-      name: row.from_name,
-      subject: row.subject,
-      date: row.date,
-      isSpam: row.is_spam || role === 'junk',
+    // La commande FETCH du lot s'est terminée sans erreur : même si certains
+    // UID de cette plage avaient été supprimés côté serveur, cette tranche est
+    // maintenant entièrement traitée et peut devenir le nouveau checkpoint.
+    maxUid = Math.max(maxUid, batchLastUid);
+    db.setSyncState(account.id, folder, uidValidity, maxUid, {
+      highestModseq: state?.highest_modseq || null,
+      messageCount: db.countFolderMessages(account.id, folder),
     });
 
-    const { id } = db.upsertMessage(row);
-    const descriptor = mailStore.storeMessage({ ...row, id }, message.source);
-    db.setMessageStorage(id, descriptor);
-    db.indexBody(id, row, text, {
-      secureTokens: mailStore.searchTokens(text),
-    });
-    added.push(id);
-    maxUid = Math.max(maxUid, Number(message.uid) || 0);
-
-    if (added.length % 10 === 0) {
-      await yieldToEventLoop(signal);
-    }
-
-    // Un arrêt ne doit pas obliger à retraiter les milliers de messages déjà
-    // enregistrés lors de la prochaine relève.
-    if (added.length % 25 === 0) {
-      db.setSyncState(account.id, folder, uidValidity, maxUid, {
-        highestModseq: state?.highest_modseq || null,
-        messageCount: db.countFolderMessages(account.id, folder),
+    if (onProgress) {
+      onProgress({
+        folder,
+        role,
+        phase: 'checkpoint',
+        count: processed,
+        total: estimated,
+        lastUid: maxUid,
+        degraded: degradedMessages,
       });
     }
-    if (onProgress && (added.length === 1 || added.length % 25 === 0)) {
-      onProgress({ folder, role, phase: 'download', count: added.length, total: estimated });
-    }
+    await yieldToEventLoop(signal);
   }
-  return { added, maxUid };
+
+  return { added, maxUid, degraded: degradedMessages };
 }
 
 async function reconcileFolder(client, account, folder, state, serverCount, addedCount, signal, onProgress, role) {
@@ -474,6 +559,7 @@ async function syncFolderWithClient(client, account, folder, dataDir, onProgress
     );
 
     let addedIds = [];
+    let degradedMessages = 0;
     let maxUid = lastUid;
     if (lastServerUid > lastUid) {
       const downloaded = await storeNewMessages(
@@ -481,6 +567,7 @@ async function syncFolderWithClient(client, account, folder, dataDir, onProgress
         lastUid, uidValidity, state, onProgress, role, signal
       );
       addedIds = downloaded.added;
+      degradedMessages = Number(downloaded.degraded) || 0;
       maxUid = downloaded.maxUid;
     } else if (onProgress) {
       onProgress({ folder, role, phase: 'up-to-date', count: 0, total: 0 });
@@ -508,6 +595,7 @@ async function syncFolderWithClient(client, account, folder, dataDir, onProgress
       removed: reconciliation.removed,
       checked: true,
       serverCount,
+      degraded: degradedMessages,
     };
   } finally {
     lock.release();
@@ -525,6 +613,7 @@ async function syncFolders(account, jobs, dataDir, onProgress,
   const folderTimings = [];
   const connectTimings = [];
   const results = [];
+  const folderRetryCounts = new Map();
 
   let client = null;
 
@@ -717,8 +806,33 @@ async function syncFolders(account, jobs, dataDir, onProgress,
           if (!automaticSource && !continueOnError) throw error;
         } else {
           if (isSyncCancelled(error)) throw new SyncCancelledError();
-          if (!continueOnError) throw error;
 
+          const retryKey = `${role}\u0000${folder}`;
+          const retryCount = Number(folderRetryCounts.get(retryKey)) || 0;
+          if (isTransientImapError(error)
+              && retryCount < IMAP_FOLDER_RETRY_LIMIT
+              && remainingMs() > policy.connectMs + 1000) {
+            folderRetryCounts.set(retryKey, retryCount + 1);
+
+            console.warn(
+              `[LibraMail][IMAP][RETRY] ${label} · ${source}`
+              + ` · ${role} · reconnexion après ${error?.code || error?.message || 'coupure réseau'}`
+            );
+
+            if (syncClients.get(account.id) === activeClient) {
+              syncClients.delete(account.id);
+            }
+            if (client === activeClient) client = null;
+            interruptClient(activeClient);
+
+            // Rejouer le même job. syncFolderWithClient relira sync_state et
+            // repartira au checkpoint du dernier lot terminé.
+            await yieldToEventLoop(signal);
+            index -= 1;
+            continue;
+          }
+
+          if (!continueOnError) throw error;
           results.push({
             folder,
             role,
