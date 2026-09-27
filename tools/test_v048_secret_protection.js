@@ -59,8 +59,7 @@ try {
   assert(credentialSource.includes('function transformSnapshot('));
 
   assert(mailStoreSource.includes('MASTER_SECRET,'));
-  assert(backend.includes('const SECURITY_SERVICE_SECRETS = [mailStore.MASTER_SECRET];'));
-  assert(backend.includes("'security.enable': async ({ password = '' } = {}) => {"));
+  // Depuis la 0.6.0, le mot de passe principal protège plusieurs secrets de\n  // service. Le garde-fou historique doit vérifier la présence du secret\n  // maître sans imposer que le tableau ne contienne qu'une seule entrée.\n  assert(backend.includes('const SECURITY_SERVICE_SECRETS = ['));\n  assert(backend.includes('mailStore.MASTER_SECRET,'));\n  assert(backend.includes('credentialStore.CALENDAR_OAUTH_SERVICE_SECRET,'));\n  assert(backend.includes("'security.enable': async ({ password = '' } = {}) => {"));
   assert(backend.includes("'security.changePassword': async ({ currentPassword = '', newPassword = '' } = {}) => {"));
   assert(backend.includes("'security.disable': async ({ password = '' } = {}) => {"));
   assert(backend.includes('credentialStore.ensureProtectedSecrets('));

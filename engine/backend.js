@@ -360,7 +360,10 @@ function closeRuntimeStateForLock() {
   startupSyncTriggered = false;
 }
 
-const SECURITY_SERVICE_SECRETS = [mailStore.MASTER_SECRET];
+const SECURITY_SERVICE_SECRETS = [
+  mailStore.MASTER_SECRET,
+  credentialStore.CALENDAR_OAUTH_SERVICE_SECRET,
+];
 
 function securityAccountIds({ fromDisk = false } = {}) {
   const source = fromDisk

@@ -4,6 +4,10 @@ const masterPassword = require('./master_password');
 
 const SERVICE = 'LibraMail';
 const OAUTH_REFRESH_KIND = 'oauth2-refresh'; // LibraMail 0.5.1 — jeton OAuth2 de renouvellement
+// LibraMail 0.6.0 — les connexions calendrier ne dépendent pas forcément d'un
+// compte mail. Leurs refresh tokens sont regroupés dans une entrée de service
+// dédiée afin de rester couverts par la migration du mot de passe principal.
+const CALENDAR_OAUTH_SERVICE_SECRET = 'calendar-oauth-refresh-tokens';
 
 // LibraMail 0.4.8 — secrets du trousseau protégés par le coffre principal.
 // Les entrées restent dans le keyring de l'OS mais, lorsque la protection est
@@ -182,6 +186,79 @@ function removeServiceSecret(name) {
   catch { return false; }
 }
 
+function calendarOAuthConnectionKey(connectionId) {
+  const key = String(connectionId || '').trim();
+  if (!key || key.length > 160 || !/^[A-Za-z0-9._:-]+$/.test(key)) {
+    throw new Error('Identifiant de connexion calendrier invalide');
+  }
+  return key;
+}
+
+function parseCalendarOAuthRefreshBundle(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return {};
+  let parsed;
+  try { parsed = JSON.parse(text); }
+  catch { throw new Error('Coffre OAuth2 calendrier illisible'); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Coffre OAuth2 calendrier invalide');
+  }
+
+  const result = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    const normalizedKey = calendarOAuthConnectionKey(key);
+    const token = String(value || '');
+    if (!token || token.length > 20000 || /[\r\n]/.test(token)) {
+      throw new Error('Refresh token OAuth2 calendrier invalide');
+    }
+    result[normalizedKey] = token;
+  }
+  return result;
+}
+
+function serializeCalendarOAuthRefreshBundle(bundle = {}) {
+  return JSON.stringify(parseCalendarOAuthRefreshBundle(JSON.stringify(bundle || {})));
+}
+
+function calendarOAuthIo(options = {}) {
+  return {
+    readSecret: typeof options.readSecret === 'function' ? options.readSecret : readServiceSecret,
+    writeSecret: typeof options.writeSecret === 'function' ? options.writeSecret : writeServiceSecret,
+    removeSecret: typeof options.removeSecret === 'function' ? options.removeSecret : removeServiceSecret,
+  };
+}
+
+function readCalendarOAuthRefreshToken(connectionId, options = {}) {
+  const key = calendarOAuthConnectionKey(connectionId);
+  const { readSecret } = calendarOAuthIo(options);
+  const bundle = parseCalendarOAuthRefreshBundle(readSecret(CALENDAR_OAUTH_SERVICE_SECRET));
+  return bundle[key] || null;
+}
+
+function writeCalendarOAuthRefreshToken(connectionId, refreshToken, options = {}) {
+  const key = calendarOAuthConnectionKey(connectionId);
+  const token = String(refreshToken || '').trim();
+  if (!token || token.length > 20000 || /[\r\n]/.test(token)) {
+    throw new Error('Refresh token OAuth2 calendrier invalide');
+  }
+  const { readSecret, writeSecret } = calendarOAuthIo(options);
+  const bundle = parseCalendarOAuthRefreshBundle(readSecret(CALENDAR_OAUTH_SERVICE_SECRET));
+  bundle[key] = token;
+  writeSecret(CALENDAR_OAUTH_SERVICE_SECRET, serializeCalendarOAuthRefreshBundle(bundle));
+  return true;
+}
+
+function removeCalendarOAuthRefreshToken(connectionId, options = {}) {
+  const key = calendarOAuthConnectionKey(connectionId);
+  const { readSecret, writeSecret, removeSecret } = calendarOAuthIo(options);
+  const bundle = parseCalendarOAuthRefreshBundle(readSecret(CALENDAR_OAUTH_SERVICE_SECRET));
+  if (!Object.prototype.hasOwnProperty.call(bundle, key)) return false;
+  delete bundle[key];
+  if (!Object.keys(bundle).length) return Boolean(removeSecret(CALENDAR_OAUTH_SERVICE_SECRET));
+  writeSecret(CALENDAR_OAUTH_SERVICE_SECRET, serializeCalendarOAuthRefreshBundle(bundle));
+  return true;
+}
+
 function secretDescriptors(accountIds = [], serviceNames = []) {
   const descriptors = [];
   const ids = [...new Set((Array.isArray(accountIds) ? accountIds : [])
@@ -314,6 +391,9 @@ module.exports = {
   read, write, storePair, storeIncoming, removePair, hydrate, migrateLegacy, serialize,
   readOAuthRefreshToken, writeOAuthRefreshToken, removeOAuthRefreshToken, OAUTH_REFRESH_KIND,
   readServiceSecret, writeServiceSecret, removeServiceSecret,
+  CALENDAR_OAUTH_SERVICE_SECRET,
+  readCalendarOAuthRefreshToken, writeCalendarOAuthRefreshToken, removeCalendarOAuthRefreshToken,
+  parseCalendarOAuthRefreshBundle, serializeCalendarOAuthRefreshBundle,
   accountSecretContext, serviceSecretContext, isProtectedValue,
   encodeForStorage, decodeForStorage,
   snapshotSecrets, restoreSnapshot, transformSnapshot,
