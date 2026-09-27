@@ -657,26 +657,70 @@ async function syncGoogleCalendarConnection(connectionId) {
   if (!connection) throw new Error('Connexion calendrier introuvable');
   if (connection.provider !== 'google') throw new Error('Cette connexion calendrier n’est pas Google');
   const client = googleCalendarClientForConnection(connection);
-  const engine = calendarGoogleSync.createGoogleCalendarSyncEngine({ db, client });
-  const result = await engine.syncConnection(connection.id);
-  if (result.removed) cleanupOrphanCalendarAttachmentFiles();
-  broadcast('calendar.changed', {
-    action: 'google-synced',
+  const startedAt = Date.now();
+  const label = String(connection.displayName || connection.email || 'Google Calendar').slice(0, 320);
+  broadcast('calendar.google.sync.started', {
     connectionId: connection.id,
-    created: result.created,
-    updated: result.updated,
-    removed: result.removed,
+    label,
+    phase: 'discovery',
+    elapsedMs: 0,
   });
-  broadcast('calendar.google.changed', {
-    action: 'synced',
-    connectionId: connection.id,
-    status: result.connection?.lastStatus || '',
-    created: result.created,
-    updated: result.updated,
-    removed: result.removed,
-    failedCalendars: result.failedCalendars,
+  const engine = calendarGoogleSync.createGoogleCalendarSyncEngine({
+    db,
+    client,
+    onProgress: progress => broadcast('calendar.google.sync.progress', {
+      connectionId: connection.id,
+      label,
+      elapsedMs: Date.now() - startedAt,
+      ...progress,
+    }),
   });
-  return result;
+  try {
+    const result = await engine.syncConnection(connection.id);
+    if (result.removed) cleanupOrphanCalendarAttachmentFiles();
+    const durationMs = Date.now() - startedAt;
+    broadcast('calendar.changed', {
+      action: 'google-synced',
+      connectionId: connection.id,
+      created: result.created,
+      updated: result.updated,
+      removed: result.removed,
+    });
+    broadcast('calendar.google.changed', {
+      action: 'synced',
+      connectionId: connection.id,
+      status: result.connection?.lastStatus || '',
+      created: result.created,
+      updated: result.updated,
+      removed: result.removed,
+      failedCalendars: result.failedCalendars,
+    });
+    broadcast('calendar.google.sync.done', {
+      connectionId: connection.id,
+      label,
+      durationMs,
+      calendars: Number(result.calendars) || 0,
+      syncedCalendars: Number(result.syncedCalendars) || 0,
+      failedCalendars: Number(result.failedCalendars) || 0,
+      created: Number(result.created) || 0,
+      updated: Number(result.updated) || 0,
+      removed: Number(result.removed) || 0,
+      fullSyncs: Number(result.fullSyncs) || 0,
+      fullSyncResets: Number(result.fullSyncResets) || 0,
+      diagnostics: result.diagnostics || null,
+    });
+    return result;
+  } catch (error) {
+    broadcast('calendar.google.sync.error', {
+      connectionId: connection.id,
+      label,
+      durationMs: Date.now() - startedAt,
+      phase: String(error?.syncPhase || 'sync'),
+      category: syncDiagnosticCategory(error),
+      error: sanitizeSyncDiagnosticError(error),
+    });
+    throw error;
+  }
 }
 
 function updateGoogleCalendarConnectionIdentity(connectionId, loginHint = '') {
@@ -945,6 +989,39 @@ function isLocalImportedMessage(message) {
   return /^Local\/Imported(?:\/|$)/i.test(String(message?.folder || ''));
 }
 
+function sanitizeSyncDiagnosticError(error, account = null) {
+  let message = String(error?.message || error || 'Erreur de synchronisation');
+  const secrets = [
+    account?.imap?.pass,
+    account?.pop3?.pass,
+    account?.smtp?.pass,
+    account?.accessToken,
+    account?.oauth2?.accessToken,
+    account?.oauth2?.refreshToken,
+  ].map(value => String(value || '')).filter(Boolean);
+  for (const secret of secrets) message = message.split(secret).join('********');
+  return message
+    .replace(/PASS\s+\S+/gi, 'PASS ********')
+    .replace(/Bearer\s+[A-Za-z0-9._~+\/-]+/gi, 'Bearer ********')
+    .replace(/(access_token|refresh_token|client_secret)=([^&\s]+)/gi, '$1=********')
+    .replace(/[\r\n\t]+/g, ' ')
+    .trim()
+    .slice(0, 1200);
+}
+
+function syncDiagnosticCategory(error) {
+  const code = String(error?.code || '').toUpperCase();
+  const message = String(error?.message || error || '').toLowerCase();
+  if (code === 'SYNC_TIMEOUT' || /timed?\s*out|délai|timeout/.test(message)) return 'timeout';
+  if (/auth|login|credential|mot de passe|password|invalid credentials|authentication/.test(message)) return 'authentication';
+  if (/certificate|certificat|tls|ssl|self[- ]signed/.test(message)) return 'tls';
+  if (/enotfound|eai_again|dns|name or service not known/.test(`${code} ${message}`)) return 'dns';
+  if (/econnrefused|connection refused|connexion refusée/.test(`${code} ${message}`)) return 'connection';
+  if (/econnreset|epipe|network|socket|réseau|connection closed|disconnected/.test(`${code} ${message}`)) return 'network';
+  if (/sqlite|database|disk|storage|chiffr|encrypt|decrypt|index/.test(message)) return 'storage';
+  return 'server';
+}
+
 async function syncRole(account, folder, role, source, signal = null) {
   if (!folder) return { folder: '', role, added: 0, skipped: true };
   if (account?.receiveProtocol === 'pop3') return { folder, role, added: 0, skipped: true, local: true };
@@ -982,6 +1059,11 @@ function forceCancelSync(accountId, runId) {
     accountId,
     runId,
     source: meta.source,
+    protocol: meta.protocol || 'imap',
+    elapsedMs: Math.max(0, Date.now() - (Number(meta.startedAt) || Date.now())),
+    phase: meta.lastPhase || 'operation',
+    folder: meta.lastFolder || '',
+    role: meta.lastRole || '',
     ...result,
   });
   clearSyncRun(accountId, runId);
@@ -1137,8 +1219,12 @@ async function syncAccount(account, source = 'manual') {
   const meta = {
     runId,
     source,
+    protocol: account.receiveProtocol === 'pop3' ? 'pop3' : 'imap',
     controller,
     startedAt: Date.now(),
+    lastPhase: 'starting',
+    lastFolder: '',
+    lastRole: '',
     cancelRequestedAt: 0,
     cancelTimer: null,
     forceResolve,
@@ -1150,12 +1236,25 @@ async function syncAccount(account, source = 'manual') {
   const isCurrentRun = () => activeSyncMeta.get(account.id)?.runId === runId;
   const emit = (event, data = {}) => {
     if (!isCurrentRun()) return false;
-    broadcast(event, { accountId: account.id, runId, source, ...data });
+    if (event === 'sync.progress') {
+      meta.lastPhase = String(data.phase || meta.lastPhase || 'operation');
+      meta.lastFolder = String(data.folder || meta.lastFolder || '');
+      meta.lastRole = String(data.role || meta.lastRole || '');
+    }
+    const elapsedMs = Math.max(0, Date.now() - meta.startedAt);
+    broadcast(event, {
+      accountId: account.id,
+      runId,
+      source,
+      protocol: meta.protocol,
+      elapsedMs,
+      ...data,
+    });
     return true;
   };
 
   const operationTask = (async () => {
-    emit('sync.started', { folder: source === 'idle' ? 'inbox' : 'all' });
+    emit('sync.started', { folder: source === 'idle' ? 'inbox' : 'all', phase: 'starting' });
     try {
       if (account.receiveProtocol === 'pop3') {
         const result = await pop3.syncAccount(
@@ -1195,7 +1294,11 @@ async function syncAccount(account, source = 'manual') {
         { signal: controller.signal, continueOnError: true, source }
       );
 
-      const errors = results.filter(result => result.error)
+      const safeFolders = results.map(result => ({
+        ...result,
+        ...(result.error ? { error: sanitizeSyncDiagnosticError(result.error, account) } : {}),
+      }));
+      const errors = safeFolders.filter(result => result.error)
         .map(({ role, folder, error }) => ({ role, folder, error }));
       const inboxError = errors.find(error => error.role === 'inbox');
       if (inboxError) throw new Error(inboxError.error);
@@ -1204,17 +1307,36 @@ async function syncAccount(account, source = 'manual') {
       const changed = results.reduce((total, result) => total + (Number(result.changed) || 0), 0);
       const removed = results.reduce((total, result) => total + (Number(result.removed) || 0), 0);
       const added = Number(results.find(result => result.role === 'inbox')?.added) || 0;
-      const result = { added, indexed, changed, removed, folders: results, errors };
+      const result = {
+        added, indexed, changed, removed, folders: safeFolders, errors,
+        diagnostics: results.diagnostics || null,
+      };
       emit('sync.done', result);
       if (added > 0) emit('mail.new', { added });
       return result;
     } catch (error) {
       if (controller.signal.aborted || imap.isSyncCancelled?.(error) || error?.code === 'SYNC_CANCELLED') {
-        const result = { cancelled: true, added: 0, indexed: 0, changed: 0, removed: 0 };
+        const result = {
+          cancelled: true,
+          added: 0,
+          indexed: 0,
+          changed: 0,
+          removed: 0,
+          phase: meta.lastPhase,
+          folder: meta.lastFolder,
+          role: meta.lastRole,
+        };
         emit('sync.cancelled', result);
         return result;
       }
-      emit('sync.error', { error: error.message });
+      emit('sync.error', {
+        error: sanitizeSyncDiagnosticError(error, account),
+        category: syncDiagnosticCategory(error),
+        phase: String(error?.phase || meta.lastPhase || 'operation'),
+        folder: meta.lastFolder,
+        role: String(error?.role || meta.lastRole || ''),
+        timeoutMs: Number(error?.timeoutMs) || 0,
+      });
       throw error;
     } finally {
       if (isCurrentRun()) clearSyncRun(account.id, runId);
@@ -1268,7 +1390,14 @@ function startWatch(account) {
   imap.watchInbox(account, () => {
     syncAccount(account, 'idle').catch(() => {});
   }).catch(error =>
-    broadcast('sync.error', { accountId: account.id, source: 'idle', error: error.message })
+    broadcast('sync.error', {
+      accountId: account.id,
+      source: 'idle',
+      protocol: 'imap',
+      phase: 'idle-watch',
+      category: syncDiagnosticCategory(error),
+      error: sanitizeSyncDiagnosticError(error, account),
+    })
   );
 }
 

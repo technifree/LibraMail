@@ -31,6 +31,7 @@ const App = (() => {
   let pendingLabelDeleteId = null;
   let activitySequence = 0;
   let activityEntries = [];
+  const activeGoogleSyncActivities = new Map();
   let unseenActivityCount = 0;
   let manualSyncPending = false;
   const activeSyncActivities = new Map();
@@ -572,6 +573,46 @@ const App = (() => {
     });
   }
 
+  function syncDuration(ms) {
+    const value = Math.max(0, Number(ms) || 0);
+    if (value < 1000) return `${Math.round(value)} ms`;
+    if (value < 60_000) return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)} s`;
+    const minutes = Math.floor(value / 60_000);
+    const seconds = Math.round((value % 60_000) / 1000);
+    return `${minutes} min ${seconds} s`;
+  }
+
+  function syncRoleLabel(role = '') {
+    const normalized = ['inbox', 'sent', 'trash', 'junk'].includes(String(role)) ? String(role) : 'other';
+    return t(`activity.role.${normalized}`);
+  }
+
+  function syncDiagnosticSuffix(data = {}) {
+    const diagnostics = data.diagnostics || null;
+    const durationMs = Number(data.durationMs ?? data.elapsedMs ?? diagnostics?.totalMs) || 0;
+    const parts = [];
+    if (durationMs > 0) parts.push(t('activity.diagnosticDuration', { duration: syncDuration(durationMs) }));
+    if (diagnostics?.protocol === 'imap') {
+      const connectMs = Number(diagnostics.connectMs) || 0;
+      if (connectMs > 0) parts.push(t('activity.diagnosticConnect', { duration: syncDuration(connectMs) }));
+      const slowest = [...(diagnostics.folders || [])].sort((a, b) => Number(b.ms) - Number(a.ms))[0];
+      if (slowest?.ms) parts.push(t('activity.diagnosticSlowest', {
+        folder: syncRoleLabel(slowest.role), duration: syncDuration(slowest.ms),
+      }));
+      if (Number(diagnostics.connections) > 1) parts.push(t('activity.diagnosticReconnects', {
+        count: Number(diagnostics.connections) - 1,
+      }));
+    } else if (diagnostics?.protocol === 'pop3') {
+      if (Number(diagnostics.connectMs) > 0) parts.push(t('activity.diagnosticConnect', {
+        duration: syncDuration(diagnostics.connectMs),
+      }));
+      if (Number(diagnostics.downloadMs) > 0) parts.push(t('activity.diagnosticDownload', {
+        duration: syncDuration(diagnostics.downloadMs),
+      }));
+    }
+    return parts.join(' · ');
+  }
+
   function renderActivity() {
     const listElement = document.getElementById('activity-list');
     const emptyElement = document.getElementById('activity-empty');
@@ -646,7 +687,10 @@ const App = (() => {
         updateActivity(previousId, {
           state: 'cancelled',
           title: t('activity.syncCancelled', { account: accountLabel(data.accountId) }),
-          detail: t('activity.syncCancelledDetail', { source: syncSourceLabel(data.source) }),
+          detail: [
+        t('activity.syncCancelledDetail', { source: syncSourceLabel(data.source) }),
+        syncDiagnosticSuffix(data),
+      ].filter(Boolean).join(' · '),
         });
       }
       activeSyncActivities.delete(key);
@@ -677,19 +721,30 @@ const App = (() => {
     const count = Number(data.count) || 0;
     const total = Number(data.total) || 0;
     let detailKey = 'activity.syncProgress';
-    if (data.phase === 'up-to-date') detailKey = 'activity.syncUpToDate';
+    if (data.phase === 'connecting') detailKey = 'activity.syncConnecting';
+    else if (data.phase === 'connected') detailKey = 'activity.syncConnected';
+    else if (data.phase === 'folder-start') detailKey = 'activity.syncFolderStart';
+    else if (data.phase === 'folder-done') detailKey = 'activity.syncFolderDone';
+    else if (data.phase === 'checkpoint') detailKey = 'activity.syncCheckpoint';
+    else if (data.phase === 'retry') detailKey = 'activity.syncRetry';
+    else if (data.phase === 'timeout') detailKey = 'activity.syncTimeout';
+    else if (data.phase === 'listing') detailKey = 'activity.syncListing';
+    else if (data.phase === 'deleting') detailKey = 'activity.syncDeleting';
+    else if (data.phase === 'summary') detailKey = 'activity.syncFinalizing';
+    else if (data.phase === 'up-to-date') detailKey = 'activity.syncUpToDate';
     else if (data.phase === 'changes') detailKey = 'activity.syncChanges';
     else if (data.phase === 'checking') detailKey = 'activity.syncChecking';
     else if (data.phase === 'download' && total > 0) detailKey = 'activity.syncDownload';
-    updateActivity(id, {
-      state: 'running',
-      detail: t(detailKey, {
-        folder,
-        count,
-        total,
-        source: syncSourceLabel(data.source),
-      }),
+    const detail = t(detailKey, {
+      folder,
+      role: syncRoleLabel(data.role),
+      count,
+      total,
+      attempt: Number(data.attempt) || 1,
+      duration: syncDuration(data.phaseMs),
+      source: syncSourceLabel(data.source),
     });
+    updateActivity(id, { state: 'running', detail });
   }
 
   function finishSyncActivity(data, failed = false) {
@@ -704,19 +759,25 @@ const App = (() => {
     }
     if (!id) return;
     const account = accountLabel(data.accountId);
+    const diagnostics = syncDiagnosticSuffix(data);
     updateActivity(id, failed ? {
       state: 'error',
       title: t('activity.syncFailed', { account }),
-      detail: data.error || t('error'),
+      detail: [
+        data.error || t('error'),
+        data.category ? t(`activity.errorCategory.${data.category}`) : '',
+        data.phase ? t('activity.diagnosticPhase', { phase: data.phase }) : '',
+        diagnostics,
+      ].filter(Boolean).join(' · '),
     } : {
       state: 'success',
       title: t('activity.syncDone', { account }),
-      detail: t('activity.syncResult', {
+      detail: [t('activity.syncResult', {
         added: Number(data.added) || 0,
         changed: Number(data.changed) || 0,
         removed: Number(data.removed) || 0,
         source: syncSourceLabel(data.source),
-      }),
+      }), diagnostics].filter(Boolean).join(' · '),
     });
     activeSyncActivities.delete(key);
     if (!data.runId || activeSyncRunIds.get(key) === data.runId) activeSyncRunIds.delete(key);
@@ -738,11 +799,71 @@ const App = (() => {
     updateActivity(id, {
       state: 'cancelled',
       title: t('activity.syncCancelled', { account }),
-      detail: t('activity.syncCancelledDetail', { source: syncSourceLabel(data.source) }),
+      detail: [
+        t('activity.syncCancelledDetail', { source: syncSourceLabel(data.source) }),
+        syncDiagnosticSuffix(data),
+      ].filter(Boolean).join(' · '),
     });
     activeSyncActivities.delete(key);
     if (!data.runId || activeSyncRunIds.get(key) === data.runId) activeSyncRunIds.delete(key);
     renderActivity();
+  }
+
+  function beginGoogleSyncActivity(data = {}) {
+    const key = `google-${Number(data.connectionId) || 0}`;
+    const currentId = activeGoogleSyncActivities.get(key);
+    const title = t('activity.googleSyncStarted', { account: data.label || t('planner.googleCalendar') });
+    const detail = t('activity.googlePhase.discovery-start');
+    if (currentId) return updateActivity(currentId, { state: 'running', title, detail });
+    const entry = addActivity({ kind: 'calendar', state: 'running', title, detail });
+    activeGoogleSyncActivities.set(key, entry.id);
+    return entry;
+  }
+
+  function updateGoogleSyncActivity(data = {}) {
+    const key = `google-${Number(data.connectionId) || 0}`;
+    let id = activeGoogleSyncActivities.get(key);
+    if (!id) id = beginGoogleSyncActivity(data)?.id;
+    if (!id) return;
+    const phase = String(data.phase || 'sync');
+    const translationKey = `activity.googlePhase.${phase}`;
+    updateActivity(id, {
+      state: 'running',
+      detail: t(translationKey, {
+        current: Number(data.calendarIndex) || 0,
+        total: Number(data.calendarTotal) || Number(data.readableCalendars) || 0,
+        duration: syncDuration(data.phaseMs),
+      }),
+    });
+  }
+
+  function finishGoogleSyncActivity(data = {}, failed = false) {
+    const key = `google-${Number(data.connectionId) || 0}`;
+    let id = activeGoogleSyncActivities.get(key);
+    if (!id) id = beginGoogleSyncActivity(data)?.id;
+    if (!id) return;
+    const duration = syncDuration(data.durationMs || data.diagnostics?.totalMs);
+    updateActivity(id, failed ? {
+      state: 'error',
+      title: t('activity.googleSyncFailed', { account: data.label || t('planner.googleCalendar') }),
+      detail: [
+        data.error || t('error'),
+        data.category ? t(`activity.errorCategory.${data.category}`) : '',
+        t('activity.diagnosticDuration', { duration }),
+      ].filter(Boolean).join(' · '),
+    } : {
+      state: 'success',
+      title: t('activity.googleSyncDone', { account: data.label || t('planner.googleCalendar') }),
+      detail: t('activity.googleSyncResult', {
+        created: Number(data.created) || 0,
+        updated: Number(data.updated) || 0,
+        removed: Number(data.removed) || 0,
+        synced: Number(data.syncedCalendars) || 0,
+        failed: Number(data.failedCalendars) || 0,
+        duration,
+      }),
+    });
+    activeGoogleSyncActivities.delete(key);
   }
 
   async function stopSync(accountId = null) {
@@ -1007,6 +1128,14 @@ const App = (() => {
         account: accountLabel(data.accountId),
         error: data.error || t('error'),
       }), 'error');
+    } else if (event === 'calendar.google.sync.started') {
+      beginGoogleSyncActivity(data);
+    } else if (event === 'calendar.google.sync.progress') {
+      updateGoogleSyncActivity(data);
+    } else if (event === 'calendar.google.sync.done') {
+      finishGoogleSyncActivity(data, false);
+    } else if (event === 'calendar.google.sync.error') {
+      finishGoogleSyncActivity(data, true);
     } else if (event === 'folder.empty.started') {
       beginMaintenanceActivity(data);
       setCleanupProgress({ kind: data.kind, total: data.count, state: 'busy', indeterminate: true });

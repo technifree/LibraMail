@@ -171,6 +171,13 @@ async function verify(account) {
 async function syncAccount(account, dataDir, onProgress, { signal = null, clientFactory = null } = {}) {
   void dataDir; // le magasin chiffré connaît déjà le dossier data
   throwIfAborted(signal);
+  const startedAt = Date.now();
+  let connectMs = 0;
+  let downloadStartedAt = 0;
+  let downloadMs = 0;
+  let deleteStartedAt = 0;
+  let deleteMs = 0;
+  onProgress?.({ folder: 'INBOX', role: 'inbox', phase: 'connecting', count: 0, total: 0 });
   const client = await makeClient(account, clientFactory);
   const deletePolicy = String(account.pop3?.deletePolicy || 'keep');
   const deleteAfterDays = Math.max(1, Number(account.pop3?.deleteAfterDays) || 7);
@@ -183,7 +190,13 @@ async function syncAccount(account, dataDir, onProgress, { signal = null, client
   const pendingDeletes = new Set();
   let quitSucceeded = false;
   try {
+    const connectStartedAt = Date.now();
     const uidRows = await client.UIDL();
+    connectMs = Date.now() - connectStartedAt;
+    onProgress?.({
+      folder: 'INBOX', role: 'inbox', phase: 'connected', count: 0, total: 0,
+      phaseMs: connectMs,
+    });
     throwIfAborted(signal);
     if (!Array.isArray(uidRows)) throw new Error('Le serveur POP3 ne fournit pas UIDL; synchronisation sûre impossible.');
     const server = uidRows
@@ -193,6 +206,11 @@ async function syncAccount(account, dataDir, onProgress, { signal = null, client
     const state = new Map(stateRows.map(item => [String(item.uidl), item]));
     const newItems = server.filter(item => !state.has(item.uidl));
     let added = 0;
+    onProgress?.({
+      folder: 'INBOX', role: 'inbox', phase: 'listing', count: newItems.length,
+      total: server.length,
+    });
+    downloadStartedAt = Date.now();
 
     for (const item of newItems) {
       throwIfAborted(signal);
@@ -203,6 +221,15 @@ async function syncAccount(account, dataDir, onProgress, { signal = null, client
       db.setPop3State(account.id, item.uidl, { messageId: stored.id, downloadedAt: Date.now() });
       state.set(item.uidl, db.getPop3StateByUidl(account.id, item.uidl));
       added++;
+    }
+
+    downloadMs = Date.now() - downloadStartedAt;
+    if (effectiveDeletePolicy !== 'keep') {
+      deleteStartedAt = Date.now();
+      onProgress?.({
+        folder: 'INBOX', role: 'inbox', phase: 'deleting', count: 0,
+        total: server.length,
+      });
     }
 
     if (effectiveDeletePolicy === 'immediate') {
@@ -227,10 +254,18 @@ async function syncAccount(account, dataDir, onProgress, { signal = null, client
       }
     }
 
+    if (deleteStartedAt) deleteMs = Date.now() - deleteStartedAt;
     await client.QUIT();
     quitSucceeded = true;
     for (const uidl of pendingDeletes) db.markPop3ServerDeleted(account.id, uidl);
     onProgress?.({ folder: 'INBOX', role: 'inbox', phase: 'up-to-date', count: added, total: newItems.length });
+    const totalMs = Date.now() - startedAt;
+    const diagnostics = {
+      protocol: 'pop3', totalMs, connectMs, downloadMs, deleteMs,
+      serverCount: server.length, newCount: newItems.length,
+      deletedFromServer: pendingDeletes.size,
+    };
+    onProgress?.({ folder: 'INBOX', role: 'inbox', phase: 'summary', count: added, total: newItems.length, diagnostics });
     return {
       added,
       indexed: added,
@@ -239,6 +274,7 @@ async function syncAccount(account, dataDir, onProgress, { signal = null, client
       deletedFromServer: pendingDeletes.size,
       folders: [{ folder: 'INBOX', role: 'inbox', added, changed: 0, removed: 0 }],
       errors: warnings,
+      diagnostics,
     };
   } catch (error) {
     if (signal?.aborted) throw new SyncCancelledError();

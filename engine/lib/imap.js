@@ -644,6 +644,11 @@ async function syncFolders(account, jobs, dataDir, onProgress,
 
     const startedAt = Date.now();
     const budget = Math.max(1, Math.min(policy.connectMs, remaining));
+    const attempt = connectTimings.length + 1;
+    onProgress?.({
+      folder: '', role: '', phase: 'connecting', count: 0, total: 0,
+      attempt, timeoutMs: budget,
+    });
 
     try {
       await runWithSyncTimeout(
@@ -656,7 +661,12 @@ async function syncFolders(account, jobs, dataDir, onProgress,
         () => interruptClient(nextClient)
       );
 
-      connectTimings.push(Date.now() - startedAt);
+      const connectMs = Date.now() - startedAt;
+      connectTimings.push(connectMs);
+      onProgress?.({
+        folder: '', role: '', phase: 'connected', count: 0, total: 0,
+        attempt, phaseMs: connectMs,
+      });
       throwIfAborted(signal);
       return nextClient;
     } catch (error) {
@@ -725,6 +735,10 @@ async function syncFolders(account, jobs, dataDir, onProgress,
 
       const folderStartedAt = Date.now();
       const folderBudget = Math.max(1, Math.min(policy.folderMs, remainingMs()));
+      onProgress?.({
+        folder, role, phase: 'folder-start', count: 0, total: 0,
+        timeoutMs: folderBudget,
+      });
       const folderController = new AbortController();
       let currentPhase = 'open';
 
@@ -759,11 +773,19 @@ async function syncFolders(account, jobs, dataDir, onProgress,
         );
 
         results.push(result);
+        const folderMs = Date.now() - folderStartedAt;
         folderTimings.push({
           role,
-          ms: Date.now() - folderStartedAt,
+          ms: folderMs,
           phase: currentPhase,
           timeout: false,
+        });
+        onProgress?.({
+          folder, role, phase: 'folder-done', phaseMs: folderMs,
+          added: Number(result.added) || 0,
+          changed: Number(result.changed) || 0,
+          removed: Number(result.removed) || 0,
+          degraded: Number(result.degraded) || 0,
         });
       } catch (error) {
         const elapsed = Date.now() - folderStartedAt;
@@ -800,6 +822,11 @@ async function syncFolders(account, jobs, dataDir, onProgress,
             timeout: true,
             phase: error.phase || currentPhase,
           });
+          onProgress?.({
+            folder, role, phase: 'timeout', phaseMs: elapsed,
+            diagnosticPhase: error.phase || currentPhase,
+            timeoutMs: Number(error.timeoutMs) || folderBudget,
+          });
 
           // Les relèves automatiques privilégient la disponibilité : après un
           // dossier bloqué, on repart sur une connexion neuve pour le suivant.
@@ -818,6 +845,11 @@ async function syncFolders(account, jobs, dataDir, onProgress,
               `[LibraMail][IMAP][RETRY] ${label} · ${source}`
               + ` · ${role} · reconnexion après ${error?.code || error?.message || 'coupure réseau'}`
             );
+            onProgress?.({
+              folder, role, phase: 'retry',
+              attempt: retryCount + 1,
+              phaseMs: elapsed,
+            });
 
             if (syncClients.get(account.id) === activeClient) {
               syncClients.delete(account.id);
@@ -870,6 +902,28 @@ async function syncFolders(account, jobs, dataDir, onProgress,
       );
     }
 
+    const diagnostics = {
+      protocol: 'imap',
+      totalMs,
+      connectMs: connectTimings.reduce((sum, value) => sum + value, 0),
+      connections: connectTimings.length,
+      folders: folderTimings.map(item => ({
+        role: item.role,
+        ms: Number(item.ms) || 0,
+        phase: String(item.phase || ''),
+        timeout: Boolean(item.timeout),
+      })),
+      timedOutFolders: folderTimings.filter(item => item.timeout).length,
+    };
+    Object.defineProperty(results, 'diagnostics', {
+      value: diagnostics,
+      configurable: true,
+      enumerable: false,
+    });
+    onProgress?.({
+      folder: '', role: '', phase: 'summary', count: 0, total: 0,
+      diagnostics,
+    });
     return results;
   } catch (error) {
     if (signal?.aborted || isSyncCancelled(error)) throw new SyncCancelledError();

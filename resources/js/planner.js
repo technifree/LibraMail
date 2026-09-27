@@ -1884,6 +1884,32 @@
         loadGoogleConnections();
         loadGoogleMockStatus();
       }
+    } else if (event === 'calendar.google.sync.started') {
+      if (document.getElementById('planner-subscriptions-modal')?.classList.contains('open')) {
+        googleStatus(t('planner.googleSyncDiagnosticDiscovery'), 'info');
+      }
+    } else if (event === 'calendar.google.sync.progress') {
+      if (document.getElementById('planner-subscriptions-modal')?.classList.contains('open')) {
+        const phase = String(data.phase || '');
+        if (phase === 'calendar-start' || phase === 'calendar-done') {
+          googleStatus(t('planner.googleSyncDiagnosticCalendar', {
+            current: Number(data.calendarIndex) || 0,
+            total: Number(data.calendarTotal) || 0,
+          }), 'info');
+        } else if (phase === 'full-resync') {
+          googleStatus(t('planner.googleSyncDiagnosticResync'), 'info');
+        }
+      }
+    } else if (event === 'calendar.google.sync.done') {
+      if (document.getElementById('planner-subscriptions-modal')?.classList.contains('open')) {
+        googleStatus(t('planner.googleSyncDiagnosticDone', {
+          duration: `${((Number(data.durationMs) || 0) / 1000).toFixed(1)} s`,
+        }), 'success');
+      }
+    } else if (event === 'calendar.google.sync.error') {
+      if (document.getElementById('planner-subscriptions-modal')?.classList.contains('open')) {
+        googleStatus(`${t('error')} : ${data.error || t('error')}`, 'error');
+      }
     } else if (event === 'calendar.google.oauth.changed') {
       handleGoogleOAuthFlow(data);
     }

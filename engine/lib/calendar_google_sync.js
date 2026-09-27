@@ -14,13 +14,18 @@ function isReadableCalendar(calendar = {}) {
   return READABLE_ROLES.has(String(calendar.accessRole || ''));
 }
 
-function createGoogleCalendarSyncEngine({ db, client, now = () => Date.now() } = {}) {
+function createGoogleCalendarSyncEngine({ db, client, now = () => Date.now(), onProgress = null } = {}) {
   if (!db || typeof db.getCalendarConnection !== 'function') {
     throw new Error('Stockage calendrier requis');
   }
   if (!client || typeof client.listCalendars !== 'function' || typeof client.listEventChanges !== 'function') {
     throw new Error('Client Google Calendar requis');
   }
+
+  const progress = data => {
+    if (typeof onProgress !== 'function') return;
+    try { onProgress(data || {}); } catch {}
+  };
 
   async function syncRemoteCalendar(remoteCalendar) {
     const startedAt = Math.max(0, Number(now()) || Date.now());
@@ -49,6 +54,7 @@ function createGoogleCalendarSyncEngine({ db, client, now = () => Date.now() } =
       // si la resynchronisation complète échoue à son tour.
       syncToken = '';
       fullSyncReset = true;
+      progress({ phase: 'full-resync', calendarId: remoteCalendar.id });
       db.updateCalendarRemoteCalendarSync(remoteCalendar.id, {
         syncToken: '',
         lastStatus: 'resync',
@@ -96,7 +102,10 @@ function createGoogleCalendarSyncEngine({ db, client, now = () => Date.now() } =
     if (connection.provider !== 'google') throw new Error('Cette connexion calendrier n’est pas Google');
     if (!connection.enabled) throw new Error('Cette connexion calendrier est désactivée');
 
+    const syncStartedAt = Math.max(0, Number(now()) || Date.now());
     let discovered;
+    const discoveryStartedAt = Math.max(0, Number(now()) || Date.now());
+    progress({ phase: 'discovery-start', elapsedMs: 0 });
     try {
       discovered = await client.listCalendars();
     } catch (error) {
@@ -108,7 +117,14 @@ function createGoogleCalendarSyncEngine({ db, client, now = () => Date.now() } =
       throw error;
     }
 
+    const discoveryFinishedAt = Math.max(discoveryStartedAt, Number(now()) || Date.now());
+    const discoveryMs = discoveryFinishedAt - discoveryStartedAt;
     const readable = (discovered?.items || []).filter(isReadableCalendar);
+    progress({
+      phase: 'discovery-done', phaseMs: discoveryMs,
+      discoveredCalendars: (discovered?.items || []).length,
+      readableCalendars: readable.length,
+    });
     const discovery = db.syncCalendarRemoteCalendars(connection.id, readable);
     const calendars = db.listCalendarRemoteCalendars({
       connectionId: connection.id,
@@ -117,6 +133,7 @@ function createGoogleCalendarSyncEngine({ db, client, now = () => Date.now() } =
 
     const results = [];
     const errors = [];
+    const calendarTimings = [];
     let created = 0;
     let updated = 0;
     let removed = 0;
@@ -125,7 +142,13 @@ function createGoogleCalendarSyncEngine({ db, client, now = () => Date.now() } =
     let fullSyncs = 0;
     let fullSyncResets = 0;
 
-    for (const remoteCalendar of calendars) {
+    for (let calendarIndex = 0; calendarIndex < calendars.length; calendarIndex++) {
+      const remoteCalendar = calendars[calendarIndex];
+      const calendarStartedAt = Math.max(0, Number(now()) || Date.now());
+      progress({
+        phase: 'calendar-start', calendarIndex: calendarIndex + 1,
+        calendarTotal: calendars.length,
+      });
       try {
         const result = await syncRemoteCalendar(remoteCalendar);
         results.push(result);
@@ -136,7 +159,23 @@ function createGoogleCalendarSyncEngine({ db, client, now = () => Date.now() } =
         skipped += result.skipped || 0;
         if (result.fullSync) fullSyncs += 1;
         if (result.fullSyncReset) fullSyncResets += 1;
+        const calendarMs = Math.max(0, (Number(now()) || Date.now()) - calendarStartedAt);
+        calendarTimings.push({ ms: calendarMs, ok: true, fullSync: Boolean(result.fullSync) });
+        progress({
+          phase: 'calendar-done', calendarIndex: calendarIndex + 1,
+          calendarTotal: calendars.length, phaseMs: calendarMs,
+          created: Number(result.created) || 0,
+          updated: Number(result.updated) || 0,
+          removed: Number(result.removed) || 0,
+          fullSync: Boolean(result.fullSync),
+        });
       } catch (error) {
+        const calendarMs = Math.max(0, (Number(now()) || Date.now()) - calendarStartedAt);
+        calendarTimings.push({ ms: calendarMs, ok: false, fullSync: false });
+        progress({
+          phase: 'calendar-error', calendarIndex: calendarIndex + 1,
+          calendarTotal: calendars.length, phaseMs: calendarMs,
+        });
         errors.push({
           calendarId: remoteCalendar.id,
           remoteId: remoteCalendar.remoteId,
@@ -160,6 +199,19 @@ function createGoogleCalendarSyncEngine({ db, client, now = () => Date.now() } =
       lastError,
     });
 
+    const totalMs = Math.max(0, finishedAt - syncStartedAt);
+    const diagnostics = {
+      protocol: 'google-calendar',
+      totalMs,
+      discoveryMs,
+      calendars: calendarTimings.map(item => ({
+        ms: Number(item.ms) || 0,
+        ok: Boolean(item.ok),
+        fullSync: Boolean(item.fullSync),
+      })),
+    };
+    progress({ phase: 'summary', diagnostics });
+
     return {
       connection: savedConnection,
       discovery,
@@ -175,6 +227,7 @@ function createGoogleCalendarSyncEngine({ db, client, now = () => Date.now() } =
       fullSyncResets,
       errors,
       results,
+      diagnostics,
     };
   }
 
