@@ -826,7 +826,7 @@
   "planner.googleClientIdPlaceholder": "…apps.googleusercontent.com",
   "planner.googleAccountHint": "Compte Google (facultatif)",
   "planner.googleAccountHintPlaceholder": "nom@gmail.com",
-  "planner.googleClientIdHelp": "Utilisez un Client ID OAuth2 de type « Application de bureau ». Le Client ID n’est pas un secret ; les jetons restent dans le coffre-fort système.",
+  "planner.googleClientIdHelp": "Utilisez les identifiants OAuth2 d’un client « Application de bureau ». Le Client ID n’est pas secret ; le Client secret et les jetons sont conservés dans le coffre-fort système et ne sont pas enregistrés dans SQLite ni dans les sauvegardes.",
   "planner.googleConnect": "Connecter Google",
   "planner.googleCancelConnection": "Annuler",
   "planner.googleConnecting": "Ouverture de Google dans le navigateur…",
@@ -1114,5 +1114,8 @@
   "planner.googleConflictRemoved": "Le rendez-vous n’existe plus dans Google Calendar ; sa copie locale a été retirée.",
   "planner.googleMockConflict": "Créer un conflit ETag",
   "planner.googleMockConflictDone": "Conflit ETag simulé à distance — révision {revision}. Modifiez maintenant le rendez-vous concerné sans synchroniser d’abord.",
-  "planner.googleConnectedSyncing": "Compte Google connecté. Première synchronisation en cours…"
+  "planner.googleConnectedSyncing": "Compte Google connecté. Première synchronisation en cours…",
+  "planner.googleClientSecret": "Client secret OAuth2 Google",
+  "planner.googleClientSecretPlaceholder": "Secret du client « Application de bureau »",
+  "planner.googleClientSecretRequired": "Indiquez le Client secret OAuth2 Google."
 }

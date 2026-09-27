@@ -3856,7 +3856,7 @@ html[data-theme="light"] #reader-empty.reader-empty-brand .reader-empty-logo-lig
   color:var(--fg-strong); font-size:15px;
 }
 .planner-google-connect {
-  display:grid; grid-template-columns:minmax(0,1.6fr) minmax(180px,.9fr) auto;
+  display:grid; grid-template-columns:minmax(0,1.35fr) minmax(150px,.78fr) minmax(160px,.82fr) auto;
   gap:8px; align-items:end; padding:10px;
   border:1px solid var(--border); border-radius:10px; background:var(--bg-panel-2);
 }

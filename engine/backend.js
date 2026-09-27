@@ -381,6 +381,7 @@ function closeRuntimeStateForLock() {
 const SECURITY_SERVICE_SECRETS = [
   mailStore.MASTER_SECRET,
   credentialStore.CALENDAR_OAUTH_SERVICE_SECRET,
+  credentialStore.CALENDAR_OAUTH_CLIENT_SECRET_SERVICE_SECRET,
 ];
 
 function securityAccountIds({ fromDisk = false } = {}) {
@@ -580,9 +581,11 @@ async function googleCalendarAccessToken(connection, { forceRefresh = false } = 
     if (masterPassword.isLocked()) throw new Error('LibraMail est verrouillé');
     const refreshToken = credentialStore.readCalendarOAuthRefreshToken(credentialKey);
     if (!refreshToken) throw new Error('Refresh token Google Calendar introuvable');
+    const clientSecret = credentialStore.readCalendarOAuthClientSecret(credentialKey) || '';
     const refreshed = await calendarAuth.refreshAccessToken({
       provider: 'google',
       clientId,
+      clientSecret,
       refreshToken,
     });
     if (refreshed.refreshToken && refreshed.refreshToken !== refreshToken) {
@@ -720,6 +723,7 @@ function startInitialGoogleCalendarSync(connectionId, loginHint = '') {
 
 async function completeGoogleCalendarOAuth({
   clientId,
+  clientSecret = '',
   loginHint = '',
   code,
   codeVerifier,
@@ -732,6 +736,7 @@ async function completeGoogleCalendarOAuth({
   const tokens = await calendarAuth.exchangeAuthorizationCode({
     provider: 'google',
     clientId,
+    clientSecret,
     code,
     codeVerifier,
     redirectUri,
@@ -747,6 +752,14 @@ async function completeGoogleCalendarOAuth({
   const credentialKey = `google:${crypto.randomUUID()}`;
   let connection = null;
   credentialStore.writeCalendarOAuthRefreshToken(credentialKey, tokens.refreshToken);
+  if (String(clientSecret || '').trim()) {
+    try {
+      credentialStore.writeCalendarOAuthClientSecret(credentialKey, clientSecret);
+    } catch (error) {
+      credentialStore.removeCalendarOAuthRefreshToken(credentialKey);
+      throw error;
+    }
+  }
   try {
     connection = db.saveCalendarConnection({
       provider: 'google',
@@ -758,6 +771,7 @@ async function completeGoogleCalendarOAuth({
     });
   } catch (error) {
     credentialStore.removeCalendarOAuthRefreshToken(credentialKey);
+    try { credentialStore.removeCalendarOAuthClientSecret(credentialKey); } catch {}
     throw error;
   }
 
@@ -3712,8 +3726,8 @@ const methods = {
     return result;
   },
 
-  'calendar.google.oauth.begin': async ({ clientId = '', loginHint = '' } = {}) => {
-    const flow = await googleCalendarOAuthManager.begin({ clientId, loginHint });
+  'calendar.google.oauth.begin': async ({ clientId = '', clientSecret = '', loginHint = '' } = {}) => {
+    const flow = await googleCalendarOAuthManager.begin({ clientId, clientSecret, loginHint });
     try {
       await openExternalWithSystem(flow.authUrl);
     } catch (error) {
@@ -3764,7 +3778,15 @@ const methods = {
     let credentialRemoved = true;
     if (result.removed && connection.credentialKey && !calendarGoogleMock.isGoogleCalendarMockConnection(connection)) {
       try {
-        credentialRemoved = credentialStore.removeCalendarOAuthRefreshToken(connection.credentialKey);
+        credentialStore.removeCalendarOAuthRefreshToken(connection.credentialKey);
+      } catch {
+        credentialRemoved = false;
+      }
+      try {
+        const storedClientSecret = credentialStore.readCalendarOAuthClientSecret(connection.credentialKey);
+        if (storedClientSecret) {
+          credentialStore.removeCalendarOAuthClientSecret(connection.credentialKey);
+        }
       } catch {
         credentialRemoved = false;
       }

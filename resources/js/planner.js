@@ -1315,16 +1315,22 @@
 
   async function connectGoogle() {
     const clientId = document.getElementById('planner-google-client-id')?.value.trim() || '';
+    const clientSecret = document.getElementById('planner-google-client-secret')?.value.trim() || '';
     const loginHint = document.getElementById('planner-google-login-hint')?.value.trim() || '';
     if (!clientId) {
       googleStatus(t('planner.googleClientIdRequired'), 'error');
       document.getElementById('planner-google-client-id')?.focus();
       return;
     }
+    if (!clientSecret) {
+      googleStatus(t('planner.googleClientSecretRequired'), 'error');
+      document.getElementById('planner-google-client-secret')?.focus();
+      return;
+    }
     setGoogleOAuthBusy(true);
     googleStatus(t('planner.googleConnecting'), 'info');
     try {
-      const flow = await App.rpc('calendar.google.oauth.begin', { clientId, loginHint });
+      const flow = await App.rpc('calendar.google.oauth.begin', { clientId, clientSecret, loginHint });
       state.googleOAuthFlowId = String(flow?.id || '');
       googleStatus(t('planner.googleWaiting'), 'info');
       startGoogleOAuthPolling(state.googleOAuthFlowId);

@@ -103,6 +103,7 @@ function createGoogleOAuthFlowManager({
     // Les secrets de session n'ont plus de raison de rester en mémoire.
     flow.oauthState = '';
     flow.codeVerifier = '';
+    flow.clientSecret = '';
     notify(flow);
     expireLater(flow);
     return publicFlow(flow);
@@ -166,6 +167,7 @@ function createGoogleOAuthFlowManager({
     Promise.resolve().then(() => onCode({
       flowId: flow.id,
       clientId: flow.clientId,
+      clientSecret: flow.clientSecret,
       loginHint: flow.loginHint,
       code,
       codeVerifier,
@@ -178,10 +180,14 @@ function createGoogleOAuthFlowManager({
     });
   }
 
-  async function begin({ clientId, loginHint = '' } = {}) {
+  async function begin({ clientId, clientSecret = '', loginHint = '' } = {}) {
     const normalizedClientId = String(clientId || '').trim();
     if (!normalizedClientId || normalizedClientId.length > 1000 || /[\r\n]/.test(normalizedClientId)) {
       throw new Error('Client ID Google OAuth2 invalide');
+    }
+    const normalizedSecret = String(clientSecret || '').trim();
+    if (normalizedSecret.length > 4000 || /[\r\n]/.test(normalizedSecret)) {
+      throw new Error('Client secret Google OAuth2 invalide');
     }
     const normalizedHint = String(loginHint || '').trim().slice(0, 320);
     if (/[\r\n]/.test(normalizedHint)) throw new Error('Compte Google invalide');
@@ -200,6 +206,7 @@ function createGoogleOAuthFlowManager({
       id,
       status: 'starting',
       clientId: normalizedClientId,
+      clientSecret: normalizedSecret,
       loginHint: normalizedHint,
       startedAt,
       finishedAt: 0,
