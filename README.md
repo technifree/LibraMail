@@ -1,6 +1,6 @@
 # LibraMail
 
-[![Version](https://img.shields.io/badge/version-0.5.1-4f8bd8)](https://github.com/technifree/LibraMail/releases)
+[![Version](https://img.shields.io/badge/version-0.6.0-4f8bd8)](https://github.com/technifree/LibraMail/releases)
 [![Verification](https://github.com/technifree/LibraMail/actions/workflows/verify.yml/badge.svg)](https://github.com/technifree/LibraMail/actions/workflows/verify.yml)
 [![Builds](https://github.com/technifree/LibraMail/actions/workflows/build.yml/badge.svg)](https://github.com/technifree/LibraMail/actions/workflows/build.yml)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -206,4 +206,4 @@ Le mode d'emploi détaillé se trouve dans
 
 LibraMail est distribué sous [licence MIT](LICENSE).
 
-_Last documentation update / Dernière mise à jour : 7 September 2026 / 7 septembre 2026._
+_Last documentation update / Dernière mise à jour : 27 September 2026 / 27 septembre 2026._
