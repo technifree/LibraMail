@@ -69,3 +69,5 @@ LibraMail_patch_*/
 github-artifacts/
 listing.txt
 /.runtime/
+
+/.patch-backups/

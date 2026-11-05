@@ -11,6 +11,10 @@ Node.js :
   - runtime interne : .\runtime\node\node.exe
   - aucune installation de Node.js ou npm n'est requise sur le poste cible.
 
+Migration IMAP :
+  - moteur embarqué : .\runtime\imapsync\imapsync.exe
+  - aucune installation d'imapsync n'est requise sur le poste cible.
+
 Certificats TLS :
   - le moteur utilise aussi le magasin de certificats approuvés par Windows ;
   - les certificats racine installés par un antivirus, un proxy d'entreprise ou

@@ -7,20 +7,20 @@ cd "$ROOT"
 usage() {
   cat <<'EOF'
 Usage :
-  ./release.sh X.Y.Z ["Notes françaises"] ["English notes"]
+  ./release.sh X.Y.Z
+
+La section X.Y.Z de CHANGELOG.md doit contenir :
+  ## Français
+  ## English
 
 Exemple :
-  ./release.sh 0.3.3 \
-    "Correction de la synchronisation." \
-    "Synchronisation fixes."
+  ./release.sh 0.6.2
 EOF
 }
 
-[[ $# -ge 1 ]] || { usage >&2; exit 2; }
+[[ $# -eq 1 ]] || { usage >&2; exit 2; }
 
 VERSION="${1#v}"
-NOTES_FR="${2:-Améliorations et corrections de LibraMail.}"
-NOTES_EN="${3:-LibraMail improvements and fixes.}"
 TAG="v$VERSION"
 BRANCH="$(git branch --show-current)"
 [[ -n "$BRANCH" ]] || BRANCH="master"
@@ -48,29 +48,12 @@ git rev-parse "$TAG" >/dev/null 2>&1 && {
   exit 1
 }
 
+# Valider les notes avant toute modification locale et avant le moindre push.
+python3 tools/generate_release_notes.py "$VERSION" --validate-only
 python3 tools/set_version.py "$VERSION"
-./update_readme.sh
-
-cat > .github/release-notes.md <<EOF
-# LibraMail $VERSION
-
-## Français
-
-$NOTES_FR
-
-## English
-
-$NOTES_EN
-
-### Downloads / Téléchargements
-
-- Linux x86_64 portable package
-- Windows x86_64 portable package
-- SHA-256 checksums
-
-Public packages contain no account, password or message data.
-Les paquets publics ne contiennent aucun compte, mot de passe ou message.
-EOF
+# La génération échoue si le CHANGELOG ne fournit pas FR et EN :
+# aucune note générique et aucune traduction improvisée ne sont publiées.
+python3 tools/generate_release_notes.py "$VERSION"
 
 # Préflight complet AVANT de créer le commit/tag : sécurité, cohérence de
 # version, syntaxe, JSON et toute la suite de tests avec le runtime local.
@@ -81,7 +64,11 @@ git add VERSION README.md CHANGELOG.md neutralino.config.json \
   .github/release-notes.md 2>/dev/null || true
 git add -u
 
-git commit -m "Release LibraMail $VERSION"
+if ! git diff --cached --quiet; then
+  git commit -m "Release LibraMail $VERSION"
+else
+  echo "[GitHub] Aucun changement documentaire à valider ; création du tag sur le commit courant."
+fi
 git tag -a "$TAG" -m "LibraMail $VERSION"
 git push origin "$BRANCH"
 git push origin "$TAG"

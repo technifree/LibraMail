@@ -175,6 +175,10 @@ function migrateMessageData() {
          ELSE folder_role
        END;
     CREATE INDEX IF NOT EXISTS idx_msg_thread ON messages(thread_key, date DESC);
+    -- Les conversations emploient cette expression dans les sous-requêtes.
+    -- Sans cet index SQLite rescannait tous les messages pour chaque ligne.
+    CREATE INDEX IF NOT EXISTS idx_msg_conversation_key
+      ON messages(COALESCE(NULLIF(thread_key, ''), 'message:' || id));
     CREATE INDEX IF NOT EXISTS idx_msg_role ON messages(folder_role, is_spam, date DESC);
   `);
 
@@ -890,6 +894,44 @@ function countMessages(filters = {}) {
       COALESCE(SUM(CASE WHEN m.seen=0 THEN 1 ELSE 0 END), 0) AS unread
     FROM messages m ${filter.join}
     WHERE ${filter.where}`).get(filter.params);
+}
+
+// LibraMail 0.6.2 — compteurs du panneau latéral en une seule requête SQL.
+// Aucune lecture de corps, de snippet chiffré, d'avatar ou de liste complète.
+function sidebarCounts() {
+  const rows = db.prepare(`
+    SELECT m.account_id,
+           SUM(CASE WHEN m.folder_role='inbox' AND m.is_spam=0
+                     AND NOT EXISTS (SELECT 1 FROM message_local_folder ml
+                                      WHERE ml.message_id=m.id)
+                    THEN 1 ELSE 0 END) AS inboxTotal,
+           SUM(CASE WHEN m.folder_role='inbox' AND m.is_spam=0 AND m.seen=0
+                     AND NOT EXISTS (SELECT 1 FROM message_local_folder ml
+                                      WHERE ml.message_id=m.id)
+                    THEN 1 ELSE 0 END) AS inboxUnread,
+           SUM(CASE WHEN m.folder_role IN ('inbox', 'junk') AND m.is_spam=1
+                    THEN 1 ELSE 0 END) AS spamTotal,
+           SUM(CASE WHEN m.folder_role='sent'
+                     AND NOT EXISTS (SELECT 1 FROM message_local_folder ml
+                                      WHERE ml.message_id=m.id)
+                    THEN 1 ELSE 0 END) AS sentTotal,
+           SUM(CASE WHEN m.folder_role='trash' THEN 1 ELSE 0 END) AS trashTotal
+      FROM messages m GROUP BY m.account_id
+  `).all();
+  const summary = {
+    unifiedUnread: 0, spamTotal: 0, sentTotal: 0, trashTotal: 0,
+    accounts: {},
+  };
+  for (const row of rows) {
+    const total = Number(row.inboxTotal) || 0;
+    const unread = Number(row.inboxUnread) || 0;
+    summary.unifiedUnread += unread;
+    summary.spamTotal += Number(row.spamTotal) || 0;
+    summary.sentTotal += Number(row.sentTotal) || 0;
+    summary.trashTotal += Number(row.trashTotal) || 0;
+    summary.accounts[row.account_id] = { n: total, unread };
+  }
+  return summary;
 }
 
 // LibraMail 0.4.8 — opération globale de lecture.
@@ -3375,6 +3417,7 @@ module.exports = {
   vacuum,
   listMessages,
   countMessages,
+  sidebarCounts,
   listUnreadMessages,
   setMessagesSeen,
   listConversations,

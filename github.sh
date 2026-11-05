@@ -18,8 +18,11 @@ LibraMail — gestion GitHub
   ./github.sh build
       Compile Linux et Windows sur GitHub Actions et télécharge les artefacts.
 
-  ./github.sh release X.Y.Z ["Notes FR"] ["Notes EN"]
-      Met à jour la version, pousse le tag et publie les deux paquets.
+  ./github.sh notes [X.Y.Z]
+      Génère les notes FR/EN et la page README depuis CHANGELOG.md, sans publier.
+
+  ./github.sh release X.Y.Z
+      Vérifie CHANGELOG.md bilingue, met à jour la page, pousse le tag et publie.
 
   ./github.sh status
       Affiche l'état Git, les derniers workflows et les publications.
@@ -34,9 +37,12 @@ case "$cmd" in
   check)
     ./security_check.sh
     python3 tools/check_version.py
+    python3 tools/generate_release_notes.py --check
     node_files=()
     while IFS= read -r -d '' file; do node_files+=("$file"); done < <(
-      find engine resources/js tools -type f -name '*.js' -print0 2>/dev/null
+      find engine resources/js tools \
+        -type d \( -name node_modules -o -name .git -o -name .cache \) -prune -o \
+        -type f -name '*.js' -print0 2>/dev/null
     )
     if [ -n "$NODE_BIN" ] && [ -x "$NODE_BIN" ]; then
       for file in "${node_files[@]}"; do "$NODE_BIN" --check "$file" >/dev/null; done
@@ -62,6 +68,10 @@ PY
     ;;
   build)
     exec ./build_github.sh
+    ;;
+  notes)
+    [[ $# -le 2 ]] || { usage >&2; exit 2; }
+    python3 tools/generate_release_notes.py "${2:-$(cat VERSION)}"
     ;;
   release)
     shift

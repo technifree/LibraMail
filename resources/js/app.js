@@ -36,6 +36,7 @@ const App = (() => {
   let manualSyncPending = false;
   const activeSyncActivities = new Map();
   const activeSyncRunIds = new Map();
+  const expandedActivityDiagnostics = new Set();
   const activeMaintenanceActivities = new Map();
   let pendingConfirmAction = null;
   let backupBusy = false;
@@ -613,28 +614,178 @@ const App = (() => {
     return parts.join(' · ');
   }
 
+  function syncTraceDetail(data = {}) {
+    const folder = data.folder || 'INBOX';
+    const count = Number(data.count) || 0;
+    const total = Number(data.total) || 0;
+    let detailKey = 'activity.syncProgress';
+    if (data.phase === 'starting') return t('activity.syncSource', { source: syncSourceLabel(data.source) });
+    if (data.phase === 'done') return t('activity.syncResult', {
+      added: Number(data.added) || 0,
+      changed: Number(data.changed) || 0,
+      removed: Number(data.removed) || 0,
+      source: syncSourceLabel(data.source),
+    });
+    if (data.phase === 'error') return [
+      data.error || t('error'),
+      data.category ? t(`activity.errorCategory.${data.category}`) : '',
+      data.phaseName ? t('activity.diagnosticPhase', { phase: data.phaseName }) : '',
+    ].filter(Boolean).join(' · ');
+    if (data.phase === 'cancelled') return t('activity.syncCancelledDetail', { source: syncSourceLabel(data.source) });
+    if (data.phase === 'connecting') detailKey = 'activity.syncConnecting';
+    else if (data.phase === 'connected') detailKey = 'activity.syncConnected';
+    else if (data.phase === 'folder-start') detailKey = 'activity.syncFolderStart';
+    else if (data.phase === 'folder-done') detailKey = 'activity.syncFolderDone';
+    else if (data.phase === 'checkpoint') detailKey = 'activity.syncCheckpoint';
+    else if (data.phase === 'retry') detailKey = 'activity.syncRetry';
+    else if (data.phase === 'timeout') detailKey = 'activity.syncTimeout';
+    else if (data.phase === 'listing') detailKey = 'activity.syncListing';
+    else if (data.phase === 'deleting') detailKey = 'activity.syncDeleting';
+    else if (data.phase === 'summary') detailKey = 'activity.syncFinalizing';
+    else if (data.phase === 'up-to-date') detailKey = 'activity.syncUpToDate';
+    else if (data.phase === 'changes') detailKey = 'activity.syncChanges';
+    else if (data.phase === 'checking') detailKey = 'activity.syncChecking';
+    else if (data.phase === 'download' && total > 0) detailKey = 'activity.syncDownload';
+    return t(detailKey, {
+      folder,
+      role: syncRoleLabel(data.role),
+      count,
+      total,
+      attempt: Number(data.attempt) || 1,
+      duration: syncDuration(data.phaseMs),
+      source: syncSourceLabel(data.source),
+    });
+  }
+
+  function addActivityTrace(id, data = {}) {
+    const entry = activityEntries.find(item => item.id === id);
+    if (!entry || entry.kind !== 'sync') return;
+    const trace = {
+      at: Date.now(),
+      phase: String(data.phase || 'operation'),
+      detail: syncTraceDetail(data),
+    };
+    const previous = entry.trace?.[entry.trace.length - 1];
+    // Les téléchargements peuvent émettre beaucoup d'événements : on remplace
+    // la dernière ligne identique au lieu de remplir le panneau inutilement.
+    if (previous && previous.phase === trace.phase
+        && data.phase === 'download'
+        && String(previous.folder || '') === String(data.folder || '')) {
+      entry.trace[entry.trace.length - 1] = { ...trace, folder: data.folder || '', role: data.role || '' };
+    } else {
+      entry.trace = [...(entry.trace || []), { ...trace, folder: data.folder || '', role: data.role || '' }].slice(-60);
+    }
+  }
+
+  function activityDiagnosticText(entry) {
+    const lines = [
+      `LibraMail - ${entry.title}`,
+      `${t('activity.diagnosticGeneratedAt')}: ${new Date(entry.updatedAt || Date.now()).toLocaleString(I18N.locale || 'fr')}`,
+      entry.detail || '',
+      '',
+      t('activity.diagnosticSteps'),
+      ...(entry.trace || []).map(item => `${activityTime(item.at)}  ${item.detail}`),
+    ];
+    if (entry.diagnostics?.protocol) {
+      lines.push('', `${t('activity.diagnosticProtocol')}: ${String(entry.diagnostics.protocol).toUpperCase()}`);
+      if (Number(entry.diagnostics.totalMs) > 0) lines.push(`${t('activity.diagnosticTotal')}: ${syncDuration(entry.diagnostics.totalMs)}`);
+      if (Number(entry.diagnostics.connectMs) > 0) lines.push(`${t('activity.diagnosticConnection')}: ${syncDuration(entry.diagnostics.connectMs)}`);
+      for (const folder of entry.diagnostics.folders || []) {
+        lines.push(`${syncRoleLabel(folder.role)}: ${syncDuration(folder.ms)}${folder.timeout ? ` - ${t('activity.errorCategory.timeout')}` : ''}`);
+      }
+    }
+    return lines.filter((line, index, all) => line !== '' || (index > 0 && all[index - 1] !== '')).join('\n').trim();
+  }
+
+  async function copyActivityDiagnostic(entryId) {
+    const entry = activityEntries.find(item => item.id === Number(entryId));
+    if (!entry) return;
+    const text = activityDiagnosticText(entry);
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const area = document.createElement('textarea');
+        area.value = text;
+        area.style.position = 'fixed';
+        area.style.opacity = '0';
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand('copy');
+        area.remove();
+      }
+      status(t('activity.diagnosticCopied'), 'success');
+    } catch (error) {
+      status(t('activity.diagnosticCopyFailed'), 'error');
+    }
+  }
+
   function renderActivity() {
     const listElement = document.getElementById('activity-list');
     const emptyElement = document.getElementById('activity-empty');
     if (!listElement || !emptyElement) return;
-    listElement.innerHTML = activityEntries.map(entry => `
-      <div class="activity-entry ${esc(entry.state || 'info')}">
+    listElement.innerHTML = activityEntries.map(entry => {
+      const expandable = entry.kind === 'sync' && ((entry.trace?.length || 0) > 1 || entry.diagnostics);
+      const expanded = expandable && expandedActivityDiagnostics.has(entry.id);
+      const diagnosticRows = (entry.trace || []).map(item => `
+        <div class="activity-diagnostic-row">
+          <time>${esc(activityTime(item.at))}</time>
+          <span>${esc(item.detail)}</span>
+        </div>`).join('');
+      const diagnosticSummary = entry.diagnostics?.protocol ? `
+        <div class="activity-diagnostic-summary">
+          <span>${esc(t('activity.diagnosticProtocol'))}: <strong>${esc(String(entry.diagnostics.protocol).toUpperCase())}</strong></span>
+          ${Number(entry.diagnostics.totalMs) > 0 ? `<span>${esc(t('activity.diagnosticTotal'))}: <strong>${esc(syncDuration(entry.diagnostics.totalMs))}</strong></span>` : ''}
+          ${Number(entry.diagnostics.connectMs) > 0 ? `<span>${esc(t('activity.diagnosticConnection'))}: <strong>${esc(syncDuration(entry.diagnostics.connectMs))}</strong></span>` : ''}
+          ${(entry.diagnostics.folders || []).map(folder => `<span>${esc(syncRoleLabel(folder.role))}: <strong>${esc(syncDuration(folder.ms))}</strong>${folder.timeout ? ` · ${esc(t('activity.errorCategory.timeout'))}` : ''}</span>`).join('')}
+        </div>` : '';
+      return `
+      <div class="activity-entry ${esc(entry.state || 'info')} ${expanded ? 'diagnostic-open' : ''}">
         <span class="activity-entry-icon"><i class="${activityIcon(entry)}"></i></span>
         <span class="activity-entry-main">
           <span class="activity-entry-title">${esc(entry.title)}</span>
           ${entry.detail ? `<span class="activity-entry-detail">${esc(entry.detail)}</span>` : ''}
+          ${expanded ? `<div class="activity-diagnostic">
+            <div class="activity-diagnostic-toolbar">
+              <strong>${esc(t('activity.diagnosticTitle'))}</strong>
+              <button class="activity-copy-diagnostic" type="button" data-copy-diagnostic="${entry.id}" title="${esc(t('activity.diagnosticCopy'))}">
+                <i class="fa-regular fa-copy"></i><span>${esc(t('activity.diagnosticCopy'))}</span>
+              </button>
+            </div>
+            ${diagnosticSummary}
+            ${diagnosticRows || `<div class="activity-diagnostic-empty">${esc(t('activity.diagnosticNoSteps'))}</div>`}
+          </div>` : ''}
         </span>
         ${entry.kind === 'sync' && entry.state === 'running' && entry.accountId ? `
           <button class="activity-stop-entry" type="button"
                   data-stop-sync="${esc(entry.accountId)}" title="${esc(t('activity.stopAccount'))}">
             <i class="fa-solid fa-stop"></i>
           </button>` : ''}
+        ${expandable ? `<button class="activity-detail-toggle" type="button" data-toggle-diagnostic="${entry.id}" title="${esc(t(expanded ? 'activity.diagnosticHide' : 'activity.diagnosticShow'))}">
+          <i class="fa-solid fa-chevron-${expanded ? 'up' : 'down'}"></i>
+        </button>` : '<span class="activity-detail-spacer"></span>'}
         <time class="activity-entry-time">${esc(activityTime(entry.updatedAt || entry.createdAt))}</time>
-      </div>`).join('');
+      </div>`;
+    }).join('');
     listElement.querySelectorAll('[data-stop-sync]').forEach(button => {
       button.onclick = event => {
         event.stopPropagation();
         stopSync(button.dataset.stopSync || null);
+      };
+    });
+    listElement.querySelectorAll('[data-toggle-diagnostic]').forEach(button => {
+      button.onclick = event => {
+        event.stopPropagation();
+        const id = Number(button.dataset.toggleDiagnostic);
+        if (expandedActivityDiagnostics.has(id)) expandedActivityDiagnostics.delete(id);
+        else expandedActivityDiagnostics.add(id);
+        renderActivity();
+      };
+    });
+    listElement.querySelectorAll('[data-copy-diagnostic]').forEach(button => {
+      button.onclick = event => {
+        event.stopPropagation();
+        copyActivityDiagnostic(button.dataset.copyDiagnostic);
       };
     });
     emptyElement.classList.toggle('hidden', activityEntries.length > 0);
@@ -661,6 +812,8 @@ const App = (() => {
       accountId,
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      trace: kind === 'sync' ? [] : null,
+      diagnostics: null,
     };
     activityEntries.unshift(entry);
     activityEntries = activityEntries.slice(0, 80);
@@ -700,8 +853,14 @@ const App = (() => {
     const currentId = activeSyncActivities.get(key);
     const title = t('activity.syncStarted', { account: accountLabel(data.accountId) });
     const detail = t('activity.syncSource', { source: syncSourceLabel(data.source) });
-    if (currentId) return updateActivity(currentId, { state: 'running', title, detail, accountId: data.accountId });
-    return addActivity({ kind: 'sync', state: 'running', title, detail, key, accountId: data.accountId });
+    if (currentId) {
+      const entry = updateActivity(currentId, { state: 'running', title, detail, accountId: data.accountId });
+      addActivityTrace(entry?.id, { ...data, phase: 'starting' });
+      return entry;
+    }
+    const entry = addActivity({ kind: 'sync', state: 'running', title, detail, key, accountId: data.accountId });
+    addActivityTrace(entry?.id, { ...data, phase: 'starting' });
+    return entry;
   }
 
   function updateSyncActivity(data) {
@@ -717,33 +876,8 @@ const App = (() => {
     let id = activeSyncActivities.get(key);
     if (!id) id = beginSyncActivity(data)?.id;
     if (!id) return;
-    const folder = data.folder || 'INBOX';
-    const count = Number(data.count) || 0;
-    const total = Number(data.total) || 0;
-    let detailKey = 'activity.syncProgress';
-    if (data.phase === 'connecting') detailKey = 'activity.syncConnecting';
-    else if (data.phase === 'connected') detailKey = 'activity.syncConnected';
-    else if (data.phase === 'folder-start') detailKey = 'activity.syncFolderStart';
-    else if (data.phase === 'folder-done') detailKey = 'activity.syncFolderDone';
-    else if (data.phase === 'checkpoint') detailKey = 'activity.syncCheckpoint';
-    else if (data.phase === 'retry') detailKey = 'activity.syncRetry';
-    else if (data.phase === 'timeout') detailKey = 'activity.syncTimeout';
-    else if (data.phase === 'listing') detailKey = 'activity.syncListing';
-    else if (data.phase === 'deleting') detailKey = 'activity.syncDeleting';
-    else if (data.phase === 'summary') detailKey = 'activity.syncFinalizing';
-    else if (data.phase === 'up-to-date') detailKey = 'activity.syncUpToDate';
-    else if (data.phase === 'changes') detailKey = 'activity.syncChanges';
-    else if (data.phase === 'checking') detailKey = 'activity.syncChecking';
-    else if (data.phase === 'download' && total > 0) detailKey = 'activity.syncDownload';
-    const detail = t(detailKey, {
-      folder,
-      role: syncRoleLabel(data.role),
-      count,
-      total,
-      attempt: Number(data.attempt) || 1,
-      duration: syncDuration(data.phaseMs),
-      source: syncSourceLabel(data.source),
-    });
+    const detail = syncTraceDetail(data);
+    addActivityTrace(id, data);
     updateActivity(id, { state: 'running', detail });
   }
 
@@ -760,6 +894,7 @@ const App = (() => {
     if (!id) return;
     const account = accountLabel(data.accountId);
     const diagnostics = syncDiagnosticSuffix(data);
+    addActivityTrace(id, { ...data, phase: failed ? 'error' : 'done', phaseName: data.phase });
     updateActivity(id, failed ? {
       state: 'error',
       title: t('activity.syncFailed', { account }),
@@ -769,6 +904,7 @@ const App = (() => {
         data.phase ? t('activity.diagnosticPhase', { phase: data.phase }) : '',
         diagnostics,
       ].filter(Boolean).join(' · '),
+      diagnostics: data.diagnostics || null,
     } : {
       state: 'success',
       title: t('activity.syncDone', { account }),
@@ -778,6 +914,7 @@ const App = (() => {
         removed: Number(data.removed) || 0,
         source: syncSourceLabel(data.source),
       }), diagnostics].filter(Boolean).join(' · '),
+      diagnostics: data.diagnostics || null,
     });
     activeSyncActivities.delete(key);
     if (!data.runId || activeSyncRunIds.get(key) === data.runId) activeSyncRunIds.delete(key);
@@ -796,6 +933,7 @@ const App = (() => {
     }
     if (!id) return;
     const account = accountLabel(data.accountId);
+    addActivityTrace(id, { ...data, phase: 'cancelled' });
     updateActivity(id, {
       state: 'cancelled',
       title: t('activity.syncCancelled', { account }),
@@ -974,6 +1112,10 @@ const App = (() => {
 
   function clearCompletedActivity() {
     activityEntries = activityEntries.filter(entry => entry.state === 'running');
+    const retained = new Set(activityEntries.map(entry => entry.id));
+    for (const id of [...expandedActivityDiagnostics]) {
+      if (!retained.has(id)) expandedActivityDiagnostics.delete(id);
+    }
     unseenActivityCount = 0;
     renderActivity();
   }
@@ -1175,6 +1317,11 @@ const App = (() => {
         folder: maintenanceLabel(data.kind),
         error: data.error || t('error'),
       }), 'error');
+    } else if (event === 'folder.updated') {
+      scheduleSidebarCountsRefresh(180);
+      if (data.kind === 'trash' && view.type === 'trash') {
+        refresh({ preserveListState: true }).catch(() => {});
+      }
     } else if (event === 'retention.done') {
       if (Number(data.count) > 0) addRetentionActivity(data, false);
       refresh();
@@ -1550,7 +1697,7 @@ const App = (() => {
   };
 
   function applyAppVersion() {
-    const rawVersion = String(window.NL_APPVERSION || '0.6.0').replace(/^v/i, '');
+    const rawVersion = String(window.NL_APPVERSION || '0.6.2').replace(/^v/i, '');
     const badge = document.getElementById('app-version');
     if (badge) {
       badge.textContent = `v${rawVersion}`;
@@ -3466,44 +3613,22 @@ const App = (() => {
 
   async function refreshSidebarCounts() {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    const [unified, spamBox, sentBox, trashBox, localFolders, labels] = await Promise.all([
-      rpc('messages.list', { folderRole: 'inbox', spam: 0, excludeLocalFolders: true, limit: 1 }),
-      rpc('messages.list', { folderRoles: ['inbox', 'junk'], spam: 1, limit: 1 }),
-      rpc('messages.list', { folderRole: 'sent', spam: null, excludeLocalFolders: true, limit: 1 }),
-      rpc('messages.list', { folderRole: 'trash', spam: null, limit: 1 }),
-      rpc('localFolders.list'),
-      rpc('labels.list'),
-    ]);
-    // Les dossiers locaux et les étiquettes font partie de l'état courant
-    // de la barre latérale ; leurs compteurs sont rafraîchis ensemble.
-    renderLocalFolders(localFolders);
-    renderLabels(labels);
-    setCount('count-unified', unified.counts.unread);
-    setCount('count-spam', spamBox.counts.n);
-    setCount('count-sent', sentBox.counts.n);
-    setCount('count-trash', trashBox.counts.n);
-    const accountCounts = await Promise.all(accounts.map(async account => {
-      try {
-        const result = await rpc('messages.list', {
-          folderRole: 'inbox', spam: 0, excludeLocalFolders: true, accountId: account.id, limit: 1,
-        });
-        return { account, counts: result.counts || {} };
-      } catch (error) {
-        return { account, counts: null, error };
-      }
-    }));
+    // Une requête agrégée remplace les 6+N requêtes de listes et de compteurs.
+    const summary = await rpc('messages.sidebarSummary');
+    const counts = summary.counts || {};
+    renderLocalFolders(summary.localFolders || []);
+    renderLabels(summary.labels || []);
+    setCount('count-unified', counts.unifiedUnread);
+    setCount('count-spam', counts.spamTotal);
+    setCount('count-sent', counts.sentTotal);
+    setCount('count-trash', counts.trashTotal);
 
-    for (const { account, counts } of accountCounts) {
+    for (const account of accounts) {
       const counter = document.querySelector(`[data-count="${cssEscape(account.id)}"]`);
       if (!counter) continue;
-      if (!counts) {
-        counter.textContent = '—';
-        counter.classList.remove('has-unread');
-        counter.title = t('account.countUnavailable');
-        continue;
-      }
-      const unread = Number(counts.unread) || 0;
-      const total = Number(counts.n) || 0;
+      const accountCounts = counts.accounts?.[account.id] || { n: 0, unread: 0 };
+      const unread = Number(accountCounts.unread) || 0;
+      const total = Number(accountCounts.n) || 0;
       counter.textContent = `${numberFormat(unread)} / ${numberFormat(total)}`;
       counter.classList.toggle('has-unread', unread > 0);
       counter.title = t('account.messageCounts', { unread: numberFormat(unread), total: numberFormat(total) });
@@ -4059,12 +4184,29 @@ const App = (() => {
   }
 
   function scheduleAutoMarkRead(meta, token) {
-    if (meta.seen || config.autoMarkRead === false) return;
+    if (!meta || config.autoMarkRead === false) return;
+    // L'ouverture d'un fil doit aussi marquer les autres messages non lus :
+    // son dernier message peut déjà être lu alors que le fil reste « non lu ».
+    const conversation = currentConversation?.threadKey === meta.thread_key
+      ? currentConversation : null;
+    const unreadThread = conversation?.messages?.some(message => !message.seen);
+    if (meta.seen && !unreadThread) return;
     const seconds = Math.max(0, Math.min(3600, Number(config.markReadDelaySeconds) || 0));
     const run = () => {
       currentReadTimer = null;
-      if (token !== currentMessageToken || Viewer.current?.meta?.id !== meta.id) return;
-      setSeenState(meta, true, { automatic: true }).catch(error => status(error.message));
+      if (token !== currentMessageToken ||
+          Number(Viewer.current?.meta?.id) !== Number(meta.id)) return;
+      const currentThread = currentConversation?.threadKey === meta.thread_key
+        ? currentConversation : null;
+      if (currentThread?.messages?.some(message => !message.seen)) {
+        setSeenState({ ...meta, is_thread: true,
+          thread_key: currentThread.threadKey,
+          thread_count: currentThread.messages.length }, true, { automatic: true })
+          .catch(error => status(error.message, 'error'));
+      } else if (!Viewer.current.meta.seen) {
+        setSeenState(meta, true, { automatic: true })
+          .catch(error => status(error.message, 'error'));
+      }
     };
     if (seconds === 0) run();
     else currentReadTimer = setTimeout(run, seconds * 1000);
@@ -5092,6 +5234,7 @@ const App = (() => {
       closeReaderTabsForItems(deletedItems);
       clearReader();
       await reconcileAfterMessageDeletion(deletedItems);
+      if (errorCount) await refreshVisibleList({ preserveListState: true });
     } else if (action === 'label') {
       await toggleQuickLabelMenu(row, sourceElement);
     } else if (action === 'local-folder') {
@@ -5483,6 +5626,7 @@ const App = (() => {
       danger: true,
     });
     if (!accepted) return;
+    status(t('selection.deleting', { count: selectedCount }), 'busy');
     try {
       const deletedItems = selectionPayload();
       const result = await rpc('messages.batchDelete', { items: deletedItems });
@@ -5494,6 +5638,7 @@ const App = (() => {
       errorCount ? 'error' : 'success');
       clearReader();
       await reconcileAfterMessageDeletion(deletedItems);
+      if (errorCount) await refreshVisibleList({ preserveListState: true });
     } catch (error) {
       status(`${t('error')} : ${error.message}`, 'error');
     }
@@ -8197,7 +8342,7 @@ const App = (() => {
 
   // ---------- Mise à jour et À propos ----------
   function appVersion() {
-    return String(window.NL_APPVERSION || '0.6.0').replace(/^v/i, '');
+    return String(window.NL_APPVERSION || '0.6.2').replace(/^v/i, '');
   }
 
   function compareVersions(a, b) {
@@ -10123,7 +10268,11 @@ const App = (() => {
       syncListControls();
       await refresh();
     }
-    if (key === 'autoMarkRead' || key === 'markReadDelaySeconds') clearReadTimer();
+    if (key === 'autoMarkRead' || key === 'markReadDelaySeconds') {
+      clearReadTimer();
+      // Réappliquer la préférence au message déjà ouvert, notamment pour 0 s.
+      if (Viewer.current?.meta) scheduleAutoMarkRead(Viewer.current.meta, currentMessageToken);
+    }
   }
 
   function syncListControls() {

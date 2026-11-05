@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, '..');
 const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
 const changelog = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8');
 
-assert(changelog.startsWith('# LibraMail 0.6.0 - 2026-09-27'));
+assert(changelog.includes('# LibraMail 0.6.0 - 2026-09-27'));
 assert(changelog.includes('Google Calendar'));
 assert(changelog.includes('POP3'));
 assert(changelog.includes('Node.js 22.23.1'));

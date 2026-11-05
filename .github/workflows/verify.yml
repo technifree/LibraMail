@@ -48,6 +48,9 @@ jobs:
       - name: Check application version
         run: python tools/check_version.py
 
+      - name: Check bilingual publication notes
+        run: python tools/generate_release_notes.py --check
+
       - name: Validate JSON
         shell: bash
         run: |

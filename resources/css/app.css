@@ -6515,3 +6515,78 @@ button.planner-attachment-open:hover strong {
 @media (max-width: 520px) {
   .imap-migration-filter-grid { grid-template-columns: 1fr; }
 }
+
+
+/* LibraMail 0.6.1 — détail repliable des diagnostics de synchronisation */
+.activity-entry {
+  grid-template-columns: 30px minmax(0, 1fr) auto auto auto;
+}
+.activity-detail-toggle,
+.activity-copy-diagnostic {
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  background: var(--bg-hover);
+  cursor: pointer;
+}
+.activity-detail-toggle {
+  width: 26px; height: 26px; border-radius: 7px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.activity-detail-toggle:hover,
+.activity-copy-diagnostic:hover { color: var(--fg-strong); border-color: var(--border-strong); }
+.activity-detail-spacer { width: 26px; }
+.activity-diagnostic {
+  margin-top: 7px; padding: 8px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px; background: var(--bg-hover);
+}
+.activity-diagnostic-toolbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-bottom: 6px;
+}
+.activity-diagnostic-toolbar strong { font-size: 10.5px; color: var(--fg-strong); }
+.activity-copy-diagnostic {
+  min-height: 24px; padding: 0 7px; border-radius: 6px;
+  display: inline-flex; align-items: center; gap: 5px; font-size: 9.5px;
+}
+.activity-diagnostic-row {
+  display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 7px;
+  padding: 3px 0; border-top: 1px solid var(--border-soft);
+  font-size: 9.8px; line-height: 1.35;
+}
+.activity-diagnostic-row:first-of-type { border-top: 0; }
+.activity-diagnostic-row time { color: var(--fg-faint); white-space: nowrap; }
+.activity-diagnostic-row span { color: var(--fg-muted); overflow-wrap: anywhere; }
+.activity-diagnostic-empty { color: var(--fg-faint); font-size: 10px; }
+.activity-entry.diagnostic-open { background: color-mix(in srgb, var(--bg-hover) 45%, transparent); }
+@media (max-width: 680px) {
+  .activity-entry { grid-template-columns: 30px minmax(0, 1fr) auto auto; }
+  .activity-entry-time { display: none; }
+  .activity-copy-diagnostic span { display: none; }
+}
+
+.activity-diagnostic-summary {
+  display: flex; flex-wrap: wrap; gap: 5px 10px;
+  margin: 0 0 6px; padding: 6px 7px;
+  border-radius: 6px; background: var(--bg-panel);
+  color: var(--fg-muted); font-size: 9.8px;
+}
+.activity-diagnostic-summary strong { color: var(--fg-strong); font-weight: 600; }
+
+/* LibraMail 0.6.1 - Migration IMAP: bottom scroll clearance */
+.settings-modal-box > .settings-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scroll-padding-bottom: 36px;
+}
+
+.settings-tab-panel[data-settings-panel="migration"] {
+  padding-bottom: 36px;
+}
+
+.settings-tab-panel[data-settings-panel="migration"] .imap-migration-actions {
+  flex: none;
+  margin-bottom: 4px;
+  scroll-margin-bottom: 36px;
+}

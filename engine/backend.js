@@ -39,7 +39,7 @@ const rpcSecurity = require('./lib/rpc_security');
 const atomicFile = require('./lib/atomic_file');
 
 const PORT = 47800;
-const APP_VERSION = '0.6.0';
+const APP_VERSION = '0.6.2';
 const ROOT = path.resolve(__dirname, '..');
 
 // LibraMail 0.4.8 — séparation programme / données utilisateur.
@@ -1449,6 +1449,31 @@ function serverActionSafe(message, action) {
   if (account) imap.serverAction(account, message.folder, message.uid, action).catch(() => {});
 }
 
+// 0.6.2 : envoyer un seul STORE par groupe de messages, plutôt qu'une
+// nouvelle connexion IMAP par message. La file par dossier préserve l'ordre
+// des changements rapides lu/non-lu, sans bloquer le retour RPC à l'UI.
+const pendingSeenByFolder = new Map();
+function queueServerSeen(messages, seen) {
+  for (const group of groupMessages(messages)) {
+    const first = group[0];
+    const account = getAccount(first.account_id);
+    if (!account || account.receiveProtocol === 'pop3' || isLocalImportedMessage(first)) continue;
+    const uids = group.map(message => Number(message.uid));
+    if (uids.some(uid => !Number.isInteger(uid) || uid <= 0)) continue;
+    const key = `${account.id}\u0000${first.folder}`;
+    const previous = pendingSeenByFolder.get(key) || Promise.resolve();
+    const job = previous.catch(() => {}).then(() =>
+      imap.setSeenUids(account, first.folder, uids, Boolean(seen))
+    );
+    pendingSeenByFolder.set(key, job);
+    job.catch(error => console.warn('[LibraMail] Mise à jour des indicateurs IMAP :',
+      sanitizeSyncDiagnosticError(error, account)))
+      .finally(() => {
+        if (pendingSeenByFolder.get(key) === job) pendingSeenByFolder.delete(key);
+      });
+  }
+}
+
 function resolveSelection(items) {
   const messageIds = new Set();
   for (const item of Array.isArray(items) ? items : []) {
@@ -1757,62 +1782,79 @@ async function moveMessagesToTrash(messages, { source = 'manual', onProgress = n
   const affectedAccounts = new Set();
   const errors = [];
 
-  for (const group of groupMessages(messages)) {
-    const first = group[0];
-    const account = getAccount(first.account_id);
-    if (!account) {
-      errors.push({ accountId: first.account_id, error: 'Compte introuvable' });
-      completed += group.length;
-      if (typeof onProgress === 'function') onProgress({ completed, total });
-      continue;
-    }
+  // Plusieurs dossiers IMAP peuvent être traités en parallèle, sans ouvrir
+  // plus de trois connexions simultanées pour préserver les serveurs.
+  const groups = groupMessages(messages);
+  let nextGroupIndex = 0;
+  await Promise.all(Array.from({ length: Math.min(3, groups.length) }, async () => {
+    while (nextGroupIndex < groups.length) {
+      const group = groups[nextGroupIndex++];
+      const first = group[0];
+      const account = getAccount(first.account_id);
+      if (!account) {
+        errors.push({ accountId: first.account_id, error: 'Compte introuvable' });
+        completed += group.length;
+        if (typeof onProgress === 'function') onProgress({ completed, total });
+        continue;
+      }
 
-    try {
-      if (isLocalImportedMessage(first)) {
-        const ids = group.map(message => message.id);
-        if (first.folder_role === 'trash') localDeletedIds.push(...ids);
-        else {
-          db.moveLocalMessages(ids, 'Local/Imported/Trash', 'trash');
-          localMovedIds.push(...ids);
-        }
-      } else {
-        const folders = await ensureFolderMap(account);
-        if (account.receiveProtocol === 'pop3') {
+      try {
+        if (isLocalImportedMessage(first)) {
           const ids = group.map(message => message.id);
           if (first.folder_role === 'trash') localDeletedIds.push(...ids);
           else {
-            db.moveLocalMessages(ids, folders.trash || 'Local/Trash', 'trash');
+            db.moveLocalMessages(ids, 'Local/Imported/Trash', 'trash');
             localMovedIds.push(...ids);
           }
         } else {
-          const uids = group.map(message => message.uid);
-          if (first.folder_role === 'trash' || !folders.trash || first.folder === folders.trash) {
-            await imap.deleteUids(account, first.folder, uids);
+          const folders = await ensureFolderMap(account);
+          if (account.receiveProtocol === 'pop3') {
+            const ids = group.map(message => message.id);
+            if (first.folder_role === 'trash') localDeletedIds.push(...ids);
+            else {
+              db.moveLocalMessages(ids, folders.trash || 'Local/Trash', 'trash');
+              localMovedIds.push(...ids);
+            }
           } else {
-            await imap.moveUids(account, first.folder, uids, folders.trash);
-            affectedAccounts.add(account.id);
+            const uids = group.map(message => message.uid);
+            if (first.folder_role === 'trash' || !folders.trash || first.folder === folders.trash) {
+              await imap.deleteUids(account, first.folder, uids);
+            } else {
+              await imap.moveUids(account, first.folder, uids, folders.trash);
+              affectedAccounts.add(account.id);
+            }
+            succeededIds.push(...group.map(message => message.id));
           }
-          succeededIds.push(...group.map(message => message.id));
         }
+      } catch (error) {
+        errors.push({ accountId: account.id, folder: first.folder, error: error.message });
+      } finally {
+        completed += group.length;
+        if (typeof onProgress === 'function') onProgress({ completed, total });
       }
-    } catch (error) {
-      errors.push({ accountId: account.id, folder: first.folder, error: error.message });
-    } finally {
-      completed += group.length;
-      if (typeof onProgress === 'function') onProgress({ completed, total });
     }
-  }
+  }));
 
   const removed = db.deleteMessages([...succeededIds, ...localDeletedIds]);
   removeLocalFiles(removed);
 
-  // Une relève ciblée rend immédiatement visibles les messages déplacés dans
-  // la corbeille, au lieu d'attendre le prochain minuteur.
-  for (const accountId of affectedAccounts) {
-    const account = getAccount(accountId);
-    const trash = account?.folderMap?.trash;
-    if (!account || !trash) continue;
-    try { await syncRole(account, trash, 'trash', source); } catch {}
+  // Le déplacement a déjà été confirmé par le serveur. Ne pas bloquer
+  // l'opération utilisateur pendant la relève de la corbeille (parfois >30s).
+  // La relève est déclenchée après le retour de la réponse RPC, et signale la
+  // mise à jour de la corbeille quand elle est réellement terminée.
+  if (affectedAccounts.size) {
+    const accountIds = [...affectedAccounts];
+    setTimeout(() => {
+      for (const accountId of accountIds) {
+        const account = getAccount(accountId);
+        const trash = account?.folderMap?.trash;
+        if (!account || !trash || shuttingDown) continue;
+        syncRole(account, trash, 'trash', source)
+          .then(() => broadcast('folder.updated', { kind: 'trash', accountId }))
+          .catch(error => console.warn('[LibraMail] Relève de corbeille :',
+            sanitizeSyncDiagnosticError(error, account)));
+      }
+    }, 500).unref?.();
   }
 
   return {
@@ -3476,6 +3518,11 @@ const methods = {
     rows: db.listMessages(params),
     counts: db.countMessages(params),
   }),
+  'messages.sidebarSummary': async () => ({
+    counts: db.sidebarCounts(),
+    localFolders: db.listLocalFolders(),
+    labels: db.listLabels(),
+  }),
   'conversations.list': async params => ({
     rows: db.listConversations(params),
     counts: db.countConversations(params),
@@ -3658,14 +3705,13 @@ const methods = {
     const message = db.getMessage(id);
     if (!message) throw new Error('Message introuvable');
     db.setFlag(id, flag, value);
-    serverActionSafe(message, { type: value ? flag : 'un' + flag });
+    if (flag === 'seen') queueServerSeen([message], Boolean(value));
+    else serverActionSafe(message, { type: value ? flag : 'un' + flag });
     return true;
   },
   'conversations.setSeen': async ({ threadKey, value }) => {
     const messages = db.setConversationSeen(threadKey, Boolean(value));
-    for (const message of messages) {
-      serverActionSafe(message, { type: value ? 'seen' : 'unseen' });
-    }
+    queueServerSeen(messages, Boolean(value));
     return { changed: messages.length, seen: Boolean(value) };
   },
   'messages.delete': async ({ id }) => {
@@ -3685,9 +3731,14 @@ const methods = {
   'messages.batchSetFlag': async ({ items, flag, value }) => {
     if (!['seen', 'flagged'].includes(flag)) throw new Error('Drapeau invalide');
     const messages = resolveSelection(items);
-    for (const message of messages) {
-      db.setFlag(message.id, flag, Boolean(value));
-      serverActionSafe(message, { type: value ? flag : 'un' + flag });
+    if (flag === 'seen') {
+      db.setMessagesSeen(messages.map(message => message.id), Boolean(value));
+      queueServerSeen(messages, Boolean(value));
+    } else {
+      for (const message of messages) {
+        db.setFlag(message.id, flag, Boolean(value));
+        serverActionSafe(message, { type: value ? flag : 'un' + flag });
+      }
     }
     return { processed: messages.length, flag, value: Boolean(value) };
   },

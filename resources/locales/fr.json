@@ -436,6 +436,7 @@
   "selection.noLabels": "Aucune étiquette disponible. Créez-en une avec le bouton + du panneau Étiquettes.",
   "selection.notSpamMessage": "Les messages admissibles de la sélection seront retirés des indésirables et utilisés pour corriger l’apprentissage local.",
   "selection.notSpamTitle": "Déclarer la sélection comme légitime",
+  "selection.deleting": "Suppression en cours : {count} élément(s)…",
   "selection.processed": "{count} message(s) traité(s)",
   "selection.removeLabel": "Retirer l’étiquette « {label} »",
   "selection.selectAll": "Tout sélectionner",
@@ -1276,5 +1277,17 @@
   "migrationImap.mirrorConfirmNote": "Cette confirmation ne vaut que pour la simulation courante. Toute modification du plan imposera une nouvelle simulation.",
   "migrationImap.mirrorNoDeletion": "La simulation n’annonce aucune suppression à destination ; aucune confirmation destructive supplémentaire n’est nécessaire.",
   "migrationImap.historyMirror": "Miroir",
-  "migrationImap.historyMirrorNotRestored": "Le plan a été restauré sans réactiver le miroir. Activez-le volontairement puis refaites une simulation si vous souhaitez un nouveau miroir."
+  "migrationImap.historyMirrorNotRestored": "Le plan a été restauré sans réactiver le miroir. Activez-le volontairement puis refaites une simulation si vous souhaitez un nouveau miroir.",
+  "activity.diagnosticTitle": "Diagnostic de la relève",
+  "activity.diagnosticShow": "Afficher le détail du diagnostic",
+  "activity.diagnosticHide": "Masquer le détail du diagnostic",
+  "activity.diagnosticCopy": "Copier le diagnostic",
+  "activity.diagnosticCopied": "Diagnostic copié dans le presse-papiers",
+  "activity.diagnosticCopyFailed": "Impossible de copier le diagnostic",
+  "activity.diagnosticNoSteps": "Aucune étape détaillée disponible.",
+  "activity.diagnosticGeneratedAt": "Généré le",
+  "activity.diagnosticSteps": "Étapes",
+  "activity.diagnosticProtocol": "Protocole",
+  "activity.diagnosticTotal": "Durée totale",
+  "activity.diagnosticConnection": "Connexion"
 }

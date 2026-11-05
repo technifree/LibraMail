@@ -41,6 +41,8 @@ fi
 
 if [ -x "./bin/libramail-linux_x64" ]; then
   ./bin/libramail-linux_x64 --load-dir-res --path=. --neu-dev-extension
+elif [ -x "./bin/neutralino-linux_x64" ]; then
+  ./bin/neutralino-linux_x64 --load-dir-res --path=. --neu-dev-extension
 else
   npx --yes @neutralinojs/neu@latest run
 fi

@@ -10,7 +10,7 @@ Install and authenticate the GitHub CLI:
 gh auth login
 ```
 
-Copy this kit to the root of the LibraMail source tree, then run:
+From the root of the LibreMail source tree:
 
 ```bash
 chmod +x github.sh *.sh
@@ -18,20 +18,67 @@ chmod +x github.sh *.sh
 ./github.sh init
 ```
 
-Defaults:
+Default repository: `technifree/LibraMail` (branch `master`, public). On first setup,
+these settings may be changed with `GITHUB_OWNER`, `REPO_NAME`, `VISIBILITY`.
 
-```text
-Owner       technifree
-Repository  LibraMail
-Branch      master
-Visibility  public
-```
+## Prepare the release without publishing
 
-They can be overridden for the initial setup:
+1. Add the newest entry at the **top** of `CHANGELOG.md`, with this format:
+
+   ```markdown
+   # LibraMail X.Y.Z - YYYY-MM-DD
+
+   ## Français
+
+   ### Améliorations
+   - Description précise des corrections et nouveautés.
+
+   ## English
+
+   ### Improvements
+   - Accurate English description of the changes.
+   ```
+
+2. Update the local version and generate the bilingual README and release notes:
+
+   ```bash
+   python3 tools/set_version.py 0.6.2
+   ./github.sh notes 0.6.2
+   ./github.sh check
+   ```
+
+   `notes` updates `README.md` (both languages and latest-version links) and
+   `.github/release-notes.md`. The generator **does not translate**: both languages
+   must be present in the changelog. If one is missing, it fails before publication.
+
+3. Review the changes and commit your tested sources and publication files:
+
+   ```bash
+   git diff -- README.md CHANGELOG.md .github/release-notes.md
+   git status --short
+   git add README.md CHANGELOG.md .github/release-notes.md VERSION
+   # Also stage and commit your tested application source changes.
+   git commit -m "Prepare LibraMail 0.6.2"
+   ```
+
+   `./github.sh check` validates documentation consistency and runs the tests.
+   All personal data must remain outside Git.
+
+## Publish a release
 
 ```bash
-GITHUB_OWNER=my-account REPO_NAME=LibraMail VISIBILITY=private ./github.sh init
+./github.sh release 0.6.2
 ```
+
+`release` requires a clean Git working tree and an authenticated `gh` session.
+It validates bilingual changelog content *before* changing files, synchronizes
+version markers and notes, executes the full local preflight, then creates the
+commit (if necessary) and tag and pushes them. GitHub Actions builds Linux and
+Windows artifacts and publishes the release with bilingual notes and checksums.
+
+If the tag already exists, the script refuses to overwrite it. The GitHub page
+is not changed by `notes` or `check`: it is changed only when `release` pushes
+and the GitHub Actions workflow completes successfully.
 
 ## Build without publishing
 
@@ -39,54 +86,32 @@ GITHUB_OWNER=my-account REPO_NAME=LibraMail VISIBILITY=private ./github.sh init
 ./github.sh build
 ```
 
-The script starts `.github/workflows/build.yml`, waits for Linux and Windows,
-then downloads both GitHub artifacts into `github-artifacts/`.
+This triggers `.github/workflows/build.yml` and downloads both build artifacts
+into `github-artifacts/`, without creating a release.
 
-## Publish a release
+## Workflow guarantees
 
-```bash
-./github.sh release 0.3.3
-```
+- `verify.yml`: version, source checks and tests
+- `build.yml`: manual build for Linux and Windows
+- `release.yml`: tag-triggered verification, bilingual release-note integrity,
+  package builds and GitHub Release publication
 
-Optional bilingual notes:
-
-```bash
-./github.sh release 0.3.3 \
-  "Correction de la synchronisation et amélioration des contacts." \
-  "Synchronisation fixes and improved contacts."
-```
-
-The release command:
-
-1. validates the repository and personal-data exclusions
-2. updates all application version markers
-3. updates the bilingual README date
-4. creates a source commit
-5. pushes the commit and tag
-6. waits for GitHub Actions
-7. publishes Linux and Windows archives in GitHub Releases
-
-## Workflows
-
-- `verify.yml`: source, version, JSON, JavaScript and SQLite dependency checks
-- `build.yml`: manual portable Linux and Windows builds
-- `release.yml`: tag-triggered builds and GitHub Release publication
-
-Public workflows always call the build scripts **without `--with-data`**.
+Public builds never use `--with-data`. No account data, messages or credentials
+should be included in any public artifact.
 
 ---
 
 # Publication de LibraMail avec GitHub Actions
 
-## Mise en place unique
+## Configuration initiale
 
-Installez puis connectez GitHub CLI :
+Installer GitHub CLI et se connecter :
 
 ```bash
 gh auth login
 ```
 
-Copiez ce kit à la racine des sources LibraMail puis lancez :
+À la racine des sources de LibraMail :
 
 ```bash
 chmod +x github.sh *.sh
@@ -94,20 +119,56 @@ chmod +x github.sh *.sh
 ./github.sh init
 ```
 
-Valeurs par défaut :
+Par défaut : dépôt `technifree/LibraMail`, branche `master`, visibilité publique.
+La configuration initiale peut être adaptée avec les variables `GITHUB_OWNER`,
+`REPO_NAME` et `VISIBILITY`.
 
-```text
-Propriétaire  technifree
-Dépôt         LibraMail
-Branche       master
-Visibilité    public
-```
+## Préparer la mise à jour sans publier
 
-Elles peuvent être remplacées lors de l'initialisation :
+1. Ajouter la nouvelle version **en tête** de `CHANGELOG.md` en respectant
+   le format présenté plus haut, avec `## Français` et `## English`.
+   Les deux textes doivent décrire réellement les modifications : aucune
+   traduction automatique approximative n'est effectuée.
+
+2. Actualiser les documents et contrôler la version :
+
+   ```bash
+   python3 tools/set_version.py 0.6.2
+   ./github.sh notes 0.6.2
+   ./github.sh check
+   ```
+
+   La commande `notes` régénère les rubriques « Dernière version » du README
+   français et anglais, les liens vers la publication et les notes détaillées
+   `.github/release-notes.md`. Elle ne publie rien sur GitHub.
+
+3. Examiner les modifications puis créer un commit avec les sources testées :
+
+   ```bash
+   git diff -- README.md CHANGELOG.md .github/release-notes.md
+   git status --short
+   git add README.md CHANGELOG.md .github/release-notes.md VERSION
+   # Ajouter également les fichiers applicatifs vérifiés.
+   git commit -m "Préparer LibraMail 0.6.2"
+   ```
+
+   Le contrôle `check` bloque les notes obsolètes et vérifie la cohérence du
+   README, le code et la sécurité. Ne jamais intégrer le dossier privé `data/`.
+
+## Publier la version
 
 ```bash
-GITHUB_OWNER=mon-compte REPO_NAME=LibraMail VISIBILITY=private ./github.sh init
+./github.sh release 0.6.2
 ```
+
+Le script refuse les modifications locales non validées et les tags existants.
+Il contrôle le `CHANGELOG.md` bilingue avant de modifier la version, synchronise
+les documents, lance les tests et pousse le commit et le tag vers GitHub.
+GitHub Actions compile ensuite les paquets Linux et Windows et crée la page
+Releases avec notes bilingues, téléchargements et empreintes SHA-256.
+
+Une commande `notes` ou `check` n'a **aucun effet sur le site GitHub** : la page
+ne change qu'après publication et succès du workflow.
 
 ## Compiler sans publier
 
@@ -115,32 +176,10 @@ GITHUB_OWNER=mon-compte REPO_NAME=LibraMail VISIBILITY=private ./github.sh init
 ./github.sh build
 ```
 
-Le script déclenche `.github/workflows/build.yml`, attend les compilations Linux
-et Windows, puis télécharge les artefacts dans `github-artifacts/`.
+Les archives sont téléchargées dans `github-artifacts/` sans créer de nouvelle
+publication GitHub.
 
-## Publier une version
+## Sécurité
 
-```bash
-./github.sh release 0.3.3
-```
-
-Avec des notes bilingues facultatives :
-
-```bash
-./github.sh release 0.3.3 \
-  "Correction de la synchronisation et amélioration des contacts." \
-  "Synchronisation fixes and improved contacts."
-```
-
-La commande :
-
-1. vérifie le dépôt et l'absence de données personnelles suivies
-2. synchronise tous les numéros de version
-3. actualise la date du README bilingue
-4. crée un commit source
-5. pousse le commit et le tag
-6. attend GitHub Actions
-7. publie les archives Linux et Windows dans Releases
-
-Les actions publiques appellent toujours les scripts de compilation **sans
-`--with-data`**.
+Les workflows publics n'utilisent jamais `--with-data`. Les données de comptes,
+les mots de passe et les messages restent exclusivement sur les postes locaux.

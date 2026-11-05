@@ -1,6 +1,6 @@
 # LibraMail
 
-[![Version](https://img.shields.io/badge/version-0.6.0-4f8bd8)](https://github.com/technifree/LibraMail/releases)
+[![Version](https://img.shields.io/badge/version-0.6.2-4f8bd8)](https://github.com/technifree/LibraMail/releases)
 [![Verification](https://github.com/technifree/LibraMail/actions/workflows/verify.yml/badge.svg)](https://github.com/technifree/LibraMail/actions/workflows/verify.yml)
 [![Builds](https://github.com/technifree/LibraMail/actions/workflows/build.yml/badge.svg)](https://github.com/technifree/LibraMail/actions/workflows/build.yml)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -12,6 +12,17 @@ Neutralinojs and a self-contained Node.js engine. It manages several IMAP/SMTP
 accounts without requiring Node.js to be installed on the target computer.
 
 ![LibraMail main window](docs/screenshots/libramail-main.png)
+
+<!-- LIBRAMAIL:RELEASE-EN:START -->
+## Latest version — 0.6.2 (2026-11-04)
+
+- Faster conversation display thanks to a dedicated SQLite index, automatically created for existing databases at startup.
+- A **0-second** delay marks a message as read immediately when it is effectively opened in the reader.
+- Sidebar and account counters are now calculated with one aggregated query instead of loading several message lists.
+- Opening a conversation marks all its messages as read when the option is enabled, even if the newest message was already read.
+
+[Full release notes](https://github.com/technifree/LibraMail/releases/tag/v0.6.2) · [CHANGELOG](CHANGELOG.md)
+<!-- LIBRAMAIL:RELEASE-EN:END -->
 
 ## Highlights
 
@@ -83,12 +94,14 @@ This repository includes one command centre:
 ./github.sh check
 ./github.sh init
 ./github.sh build
-./github.sh release 0.3.3
+./github.sh notes 0.6.2
+./github.sh release 0.6.2
 ```
 
 - `init` creates/configures the GitHub repository and pushes the source
 - `build` asks GitHub Actions to build Linux and Windows, then downloads them
-- `release` updates the version, pushes a tag and publishes both packages
+- `notes` refreshes bilingual release notes and the README from `CHANGELOG.md`
+- `release` validates the bilingual notes, updates the version, pushes a tag and publishes both packages
 - `check` verifies versions and prevents personal data from being tracked
 
 Detailed instructions are available in [docs/PUBLISHING.md](docs/PUBLISHING.md).
@@ -117,6 +130,17 @@ Neutralinojs et un moteur Node.js autonome. Il gère plusieurs comptes IMAP/SMTP
 sans exiger l'installation de Node.js sur l'ordinateur cible.
 
 ![Fenêtre principale de LibraMail](docs/screenshots/libramail-main.png)
+
+<!-- LIBRAMAIL:RELEASE-FR:START -->
+## Dernière version — 0.6.2 (2026-11-04)
+
+- Accélération de l'affichage des conversations grâce à un index SQLite dédié, y compris sur les bases existantes (créé automatiquement au démarrage).
+- Le délai de lecture **0 seconde** marque le message comme lu dès son ouverture effective dans le lecteur.
+- Une seule requête agrégée pour les compteurs de la barre latérale et des comptes, au lieu de relire plusieurs listes de messages.
+- L'ouverture d'une conversation marque tous ses messages comme lus si l'option est activée, même si le dernier message était déjà lu.
+
+[Notes de version complètes](https://github.com/technifree/LibraMail/releases/tag/v0.6.2) · [CHANGELOG](CHANGELOG.md)
+<!-- LIBRAMAIL:RELEASE-FR:END -->
 
 ## Fonctions principales
 
@@ -191,12 +215,14 @@ Un seul script sert de tableau de commande :
 ./github.sh check
 ./github.sh init
 ./github.sh build
-./github.sh release 0.3.3
+./github.sh notes 0.6.2
+./github.sh release 0.6.2
 ```
 
 - `init` crée et configure le dépôt GitHub, puis envoie les sources
 - `build` demande à GitHub Actions de compiler Linux et Windows et les télécharge
-- `release` met à jour la version, pousse un tag et publie les deux paquets
+- `notes` actualise les notes FR/EN et le README depuis `CHANGELOG.md`
+- `release` vérifie les notes bilingues, met à jour la version, pousse un tag et publie les deux paquets
 - `check` contrôle les versions et bloque les données personnelles suivies par Git
 
 Le mode d'emploi détaillé se trouve dans
@@ -206,4 +232,4 @@ Le mode d'emploi détaillé se trouve dans
 
 LibraMail est distribué sous [licence MIT](LICENSE).
 
-_Last documentation update / Dernière mise à jour : 27 September 2026 / 27 septembre 2026._
+_Last documentation update / Dernière mise à jour : 2026-11-04._

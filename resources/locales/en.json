@@ -436,6 +436,7 @@
   "selection.noLabels": "No labels are available. Create one with the + button in the Labels panel.",
   "selection.notSpamMessage": "Eligible selected messages will be removed from junk and used to correct local training.",
   "selection.notSpamTitle": "Mark selection as not junk",
+  "selection.deleting": "Deleting {count} selected item(s)…",
   "selection.processed": "{count} message(s) processed",
   "selection.removeLabel": "Remove label “{label}”",
   "selection.selectAll": "Select all",
@@ -1276,5 +1277,17 @@
   "migrationImap.mirrorConfirmNote": "This confirmation applies only to the current simulation. Any plan change requires a new simulation.",
   "migrationImap.mirrorNoDeletion": "The simulation announces no destination deletion; no additional destructive confirmation is required.",
   "migrationImap.historyMirror": "Mirror",
-  "migrationImap.historyMirrorNotRestored": "The plan was restored without re-enabling mirror mode. Enable it deliberately and run a new simulation if you want another mirror."
+  "migrationImap.historyMirrorNotRestored": "The plan was restored without re-enabling mirror mode. Enable it deliberately and run a new simulation if you want another mirror.",
+  "activity.diagnosticTitle": "Mail check diagnostic",
+  "activity.diagnosticShow": "Show diagnostic details",
+  "activity.diagnosticHide": "Hide diagnostic details",
+  "activity.diagnosticCopy": "Copy diagnostic",
+  "activity.diagnosticCopied": "Diagnostic copied to clipboard",
+  "activity.diagnosticCopyFailed": "Could not copy diagnostic",
+  "activity.diagnosticNoSteps": "No detailed step is available.",
+  "activity.diagnosticGeneratedAt": "Generated at",
+  "activity.diagnosticSteps": "Steps",
+  "activity.diagnosticProtocol": "Protocol",
+  "activity.diagnosticTotal": "Total duration",
+  "activity.diagnosticConnection": "Connection"
 }

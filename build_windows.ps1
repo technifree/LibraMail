@@ -12,6 +12,7 @@ param(
     [switch]$WithData,
     [switch]$FreshNpm,
     [switch]$EmbedResources,
+    [switch]$WithoutImapsync,
     [switch]$Offline,
     [switch]$KeepWork,
     [string]$NodeVersion = '22.23.1'
@@ -247,6 +248,89 @@ function Test-BetterSqlite3 {
     }
 }
 
+# LibraMail 0.6.1 - imapsync Windows packaging
+function Install-ImapsyncRuntime {
+    param(
+        [Parameter(Mandatory)][string]$PackageDir
+    )
+
+    if ($WithoutImapsync) {
+        Write-Warning 'Construction explicite sans imapsync : la migration IMAP sera indisponible.'
+        return
+    }
+
+    $projectCandidate = Join-Path $ProjectDir 'runtime\imapsync\imapsync.exe'
+    $sourceCandidate = $null
+
+    if (Test-Path -LiteralPath $projectCandidate -PathType Leaf) {
+        $sourceCandidate = $projectCandidate
+        Write-Build -Message 'Moteur imapsync fourni par le projet : runtime\imapsync\imapsync.exe'
+    }
+    else {
+        $pathCandidate = Get-Command 'imapsync.exe' -ErrorAction SilentlyContinue
+        if ($pathCandidate) {
+            $sourceCandidate = $pathCandidate.Source
+            Write-Build -Message "Moteur imapsync détecté dans le PATH : $sourceCandidate"
+        }
+    }
+
+    if (-not $sourceCandidate) {
+        throw "imapsync.exe est requis pour le paquet Windows. Placez le binaire officiel dans runtime\imapsync\imapsync.exe, ou utilisez -WithoutImapsync pour un build volontairement incomplet."
+    }
+
+    $sourceItem = Get-Item -LiteralPath $sourceCandidate
+    if ($sourceItem.Length -le 0) {
+        throw "Le moteur imapsync détecté est vide : $sourceCandidate"
+    }
+
+    Write-Build -Message 'Vérification du moteur imapsync Windows.'
+    & $sourceCandidate --version | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        & $sourceCandidate --help | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "imapsync.exe ne démarre pas correctement : $sourceCandidate"
+        }
+    }
+
+    $targetDir = Join-Path $PackageDir 'runtime\imapsync'
+    Ensure-Directory -Path $targetDir
+
+    Copy-Item `
+        -LiteralPath $sourceCandidate `
+        -Destination (Join-Path $targetDir 'imapsync.exe') `
+        -Force
+
+    $licenseCandidate = Join-Path (Split-Path -Parent $sourceCandidate) 'LICENSE'
+    if (Test-Path -LiteralPath $licenseCandidate -PathType Leaf) {
+        Copy-Item `
+            -LiteralPath $licenseCandidate `
+            -Destination (Join-Path $targetDir 'LICENSE') `
+            -Force
+    }
+
+    $runtimeReadme = "imapsync est utilisé par LibraMail pour la fonction Migration IMAP.`r`nProjet amont : https://imapsync.lamiral.info/`r`n"
+    [IO.File]::WriteAllText(
+        (Join-Path $targetDir 'README.txt'),
+        $runtimeReadme,
+        (New-Object System.Text.UTF8Encoding($false))
+    )
+
+    $targetExe = Join-Path $targetDir 'imapsync.exe'
+    if (-not (Test-Path -LiteralPath $targetExe -PathType Leaf)) {
+        throw "imapsync.exe n'a pas été intégré au paquet Windows."
+    }
+
+    & $targetExe --version | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        & $targetExe --help | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Le moteur imapsync embarqué ne démarre pas.'
+        }
+    }
+
+    Write-Ok -Message 'Moteur de migration intégré : runtime\imapsync\imapsync.exe'
+}
+
 try {
     Remove-Item -LiteralPath $WorkDir -Recurse -Force -ErrorAction SilentlyContinue
 
@@ -474,6 +558,8 @@ try {
         -Value $NodeVersion `
         -Encoding ASCII
 
+    Install-ImapsyncRuntime -PackageDir $PackageDir
+
     Write-Build -Message 'Préparation du moteur JavaScript.'
 
     $packageEngine = Join-Path $PackageDir 'engine'
@@ -607,6 +693,13 @@ try {
     $vbsFiles = @(Get-ChildItem -LiteralPath $PackageDir -Recurse -File -Filter '*.vbs' -ErrorAction SilentlyContinue)
     if ($vbsFiles.Count -gt 0) {
         throw "Le paquet Windows contient encore un fichier VBS : $($vbsFiles[0].FullName)"
+    }
+
+    if (-not $WithoutImapsync) {
+        $packagedImapsync = Join-Path $PackageDir 'runtime\imapsync\imapsync.exe'
+        if (-not (Test-Path -LiteralPath $packagedImapsync -PathType Leaf)) {
+            throw 'Le moteur imapsync attendu est absent du paquet final.'
+        }
     }
 
     $archivePath = Join-Path $OutputDir "$PackageName.zip"

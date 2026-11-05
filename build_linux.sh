@@ -25,6 +25,7 @@ FRESH_NPM=0
 EMBED_RESOURCES=0
 KEEP_WORK=0
 OFFLINE=0
+WITH_IMAPSYNC=1
 NODE_VERSION="${LIBRAMAIL_NODE_VERSION:-22.23.1}"
 
 usage() {
@@ -38,6 +39,8 @@ Options :
   --fresh-npm             Réinstalle les dépendances de production avec le
                           Node.js embarqué, au lieu de recopier node_modules.
   --embed-resources       Intègre les ressources Neutralino dans l'exécutable.
+  --without-imapsync      Construit explicitement sans moteur de migration IMAP.
+                          Par défaut, le build exige et embarque imapsync.
   --node-version VERSION  Version officielle de Node.js à embarquer.
                           Valeur par défaut : 22.23.1
   --offline               Interdit tout téléchargement. Les fichiers Node.js
@@ -56,6 +59,7 @@ while (($#)); do
     --with-data) WITH_DATA=1 ;;
     --fresh-npm) FRESH_NPM=1 ;;
     --embed-resources) EMBED_RESOURCES=1 ;;
+    --without-imapsync) WITH_IMAPSYNC=0 ;;
     --offline) OFFLINE=1 ;;
     --keep-work) KEEP_WORK=1 ;;
     --node-version)
@@ -354,6 +358,100 @@ printf '%s\n' "$NODE_VERSION" > "$PACKAGE_DIR/runtime/node/VERSION"
 ok "Runtime intégré : runtime/node/bin/node (v${NODE_VERSION})."
 
 # ---------------------------------------------------------------------------
+# LibraMail 0.6.1 - imapsync Linux packaging
+# ---------------------------------------------------------------------------
+prepare_imapsync_runtime() {
+  if [[ "$WITH_IMAPSYNC" -eq 0 ]]; then
+    warn "Construction explicite sans imapsync : la migration IMAP sera indisponible."
+    return 0
+  fi
+
+  local project_candidate="$PROJECT_DIR/runtime/imapsync/imapsync"
+  local source_candidate=""
+  local staged="$WORK_DIR/imapsync-standalone"
+  local target_dir="$PACKAGE_DIR/runtime/imapsync"
+  local magic=""
+
+  if [[ -x "$project_candidate" ]]; then
+    source_candidate="$project_candidate"
+    log "Moteur imapsync fourni par le projet : runtime/imapsync/imapsync"
+  elif command -v imapsync >/dev/null 2>&1; then
+    source_candidate="$(command -v imapsync)"
+    log "Moteur imapsync détecté sur le poste de build : $source_candidate"
+  else
+    die "imapsync est requis pour le paquet Linux. Installez-le sur le poste de build ou placez un exécutable dans runtime/imapsync/imapsync. Utilisez --without-imapsync uniquement pour un build volontairement incomplet."
+  fi
+
+  [[ -s "$source_candidate" ]] || die "Le moteur imapsync détecté est vide : $source_candidate"
+  magic="$(LC_ALL=C head -c 4 "$source_candidate" 2>/dev/null || true)"
+
+  if [[ "$magic" == $'\x7fELF' ]]; then
+    log "imapsync est déjà un exécutable Linux autonome."
+    install -m 0755 "$source_candidate" "$staged"
+  else
+    command -v pp >/dev/null 2>&1 || die \
+      "imapsync est un script Perl et PAR::Packer (commande pp) est absent. Installez libpar-packer-perl puis relancez le build."
+
+    log "Création d'un exécutable imapsync autonome avec PAR::Packer..."
+    # LibraMail 0.6.1 - imapsync Linux PAR autodetect
+    # PAR::Packer analyse les dépendances réellement utilisées par imapsync.
+    rm -f -- "$staged"
+
+    # LibraMail 0.6.1 - imapsync Linux runtime scan
+    pp \
+      -x \
+      --xargs="--version" \
+      -o "$staged" \
+      "$source_candidate" \
+      || die "PAR::Packer n'a pas réussi à générer l'exécutable imapsync."
+
+    chmod 0755 "$staged"
+  fi
+
+  [[ -x "$staged" ]] || die "L'exécutable imapsync autonome n'a pas été généré."
+
+  log "Vérification du moteur imapsync autonome..."
+
+  local verify_log="$WORK_DIR/imapsync-standalone-check.log"
+  rm -f -- "$verify_log"
+
+  if "$staged" --version >"$verify_log" 2>&1; then
+    ok "Standalone imapsync : --version OK."
+  else
+    warn "Le standalone imapsync a échoué avec --version. Essai avec --help..."
+    if "$staged" --help >>"$verify_log" 2>&1; then
+      ok "Standalone imapsync : --help OK."
+    else
+      echo >&2
+      echo "----- Diagnostic imapsync standalone -----" >&2
+      cat "$verify_log" >&2 || true
+      echo "------------------------------------------" >&2
+      echo >&2
+      die "L'exécutable imapsync généré ne démarre pas correctement. Le diagnostic complet est affiché ci-dessus."
+    fi
+  fi
+
+  mkdir -p "$target_dir"
+  install -m 0755 "$staged" "$target_dir/imapsync"
+
+  if [[ -f "$PROJECT_DIR/runtime/imapsync/LICENSE" ]]; then
+    cp -- "$PROJECT_DIR/runtime/imapsync/LICENSE" "$target_dir/LICENSE"
+  elif [[ -f "$(dirname "$source_candidate")/LICENSE" ]]; then
+    cp -- "$(dirname "$source_candidate")/LICENSE" "$target_dir/LICENSE"
+  fi
+
+  printf '%s\n' \
+    'imapsync est utilisé par LibraMail pour la fonction Migration IMAP.' \
+    'Projet amont : https://imapsync.lamiral.info/' \
+    > "$target_dir/README.txt"
+
+  [[ -x "$target_dir/imapsync" ]] || die "imapsync n'a pas été intégré au paquet."
+  ok "Moteur de migration intégré : runtime/imapsync/imapsync"
+}
+
+prepare_imapsync_runtime
+
+# ---------------------------------------------------------------------------
 # Moteur LibraMail et dépendances npm
 # ---------------------------------------------------------------------------
 log "Préparation du moteur JavaScript..."
@@ -621,6 +719,7 @@ Contrôle du paquet :
 Node.js :
   - version embarquée : ${NODE_VERSION}
   - exécutable utilisé : ./runtime/node/bin/node
+  - migration IMAP : ./runtime/imapsync/imapsync
   - aucune installation de Node.js ou npm n'est requise sur le poste cible.
 
 Prérequis système :
@@ -653,6 +752,14 @@ PACKAGE_NODE="$PACKAGE_DIR/runtime/node/bin/node"
 [[ -x "$PACKAGE_DIR/libramail-app" ]] || die "Binaire Neutralino absent."
 [[ -x "$PACKAGE_NODE" ]] || die "Runtime Node.js absent."
 [[ -f "$PACKAGE_DIR/engine/backend.js" ]] || die "Moteur absent."
+
+if [[ "$WITH_IMAPSYNC" -eq 1 ]]; then
+  [[ -x "$PACKAGE_DIR/runtime/imapsync/imapsync" ]] \
+    || die "Le moteur imapsync attendu est absent du paquet final."
+  "$PACKAGE_DIR/runtime/imapsync/imapsync" --version >/dev/null 2>&1 \
+    || "$PACKAGE_DIR/runtime/imapsync/imapsync" --help >/dev/null 2>&1 \
+    || die "Le moteur imapsync embarqué ne démarre pas."
+fi
 
 if find "$PACKAGE_DIR/engine" -type f \
     \( -name '*.old' -o -name '*.bak' -o -name '*.orig' \) -print -quit | grep -q .; then

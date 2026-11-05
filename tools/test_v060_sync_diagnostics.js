@@ -49,6 +49,10 @@ assert(app.includes("event === 'calendar.google.sync.progress'"));
 assert(app.includes("event === 'calendar.google.sync.done'"));
 assert(app.includes("event === 'calendar.google.sync.error'"));
 assert(app.includes('function syncDiagnosticSuffix'));
+assert(app.includes('function activityDiagnosticText'));
+assert(app.includes('data-toggle-diagnostic'));
+assert(app.includes('data-copy-diagnostic'));
+assert(app.includes('expandedActivityDiagnostics'));
 assert(planner.includes("event === 'calendar.google.sync.progress'"));
 
 for (const locale of [fr, en]) {
@@ -57,6 +61,7 @@ for (const locale of [fr, en]) {
     'activity.syncFolderDone', 'activity.syncRetry', 'activity.syncTimeout',
     'activity.diagnosticDuration', 'activity.diagnosticConnect',
     'activity.googleSyncStarted', 'activity.googleSyncDone', 'activity.googleSyncFailed',
+    'activity.diagnosticTitle', 'activity.diagnosticCopy', 'activity.diagnosticCopied',
     'planner.googleSyncDiagnosticDiscovery', 'planner.googleSyncDiagnosticDone',
   ]) assert(locale[key], `traduction manquante: ${key}`);
 }
