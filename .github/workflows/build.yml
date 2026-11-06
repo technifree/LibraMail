@@ -57,12 +57,29 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y zip xz-utils build-essential python3 dpkg-dev
+          sudo apt-get install -y --no-install-recommends \
+            libauthen-ntlm-perl libclass-load-perl libcrypt-openssl-rsa-perl \
+            libcrypt-ssleay-perl libdata-uniqid-perl libdigest-hmac-perl \
+            libdist-checkconflicts-perl libencode-imaputf7-perl \
+            libfile-copy-recursive-perl libfile-tail-perl libio-compress-perl \
+            libio-socket-inet6-perl libio-socket-ssl-perl libio-tee-perl \
+            libjson-webtoken-perl libmail-imapclient-perl libmodule-scandeps-perl \
+            libnet-dbus-perl libnet-dns-perl libnet-ssleay-perl \
+            libpar-packer-perl libproc-processtable-perl libreadonly-perl \
+            libregexp-common-perl libsys-meminfo-perl libterm-readkey-perl \
+            libunicode-string-perl liburi-perl
 
       - name: Verify sources
         run: |
           chmod +x security_check.sh build_linux.sh build_deb.sh
           ./security_check.sh
           python3 tools/check_version.py
+
+      - name: Prepare verified imapsync 2.314 Linux engine
+        shell: bash
+        run: |
+          python3 tools/prepare_imapsync_ci.py linux
+          runtime/imapsync/imapsync --version || runtime/imapsync/imapsync --help
 
       - name: Build Linux portable and Debian packages
         run: ./build_deb.sh --fresh-npm
@@ -113,6 +130,24 @@ jobs:
             if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
               throw "Required Windows packaging file is missing: $file"
             }
+          }
+
+      - name: Set up Python for imapsync verification
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Prepare verified imapsync 2.314 Windows engine
+        shell: pwsh
+        env:
+          IMAPSYNC_WINDOWS_ZIP_SHA256: ${{ vars.IMAPSYNC_WINDOWS_ZIP_SHA256 }}
+        run: |
+          python tools/prepare_imapsync_ci.py windows
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\runtime\imapsync\imapsync.exe --version
+          if ($LASTEXITCODE -ne 0) {
+            & .\runtime\imapsync\imapsync.exe --help
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
       - name: Build portable Windows package

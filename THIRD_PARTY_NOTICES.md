@@ -34,7 +34,14 @@ SOFTWARE.
 
 ## imapsync
 
-The IMAP migration feature can invoke **imapsync** as an external migration engine.
-At this development stage, LibraMail does **not** bundle imapsync automatically.
-If a future LibraMail package distributes imapsync, its upstream license and notices
-will be added to this file and to the corresponding package metadata.
+LibraMail uses **imapsync** for the IMAP migration feature. The optional
+standalone migration engine is packaged into full Linux and Windows releases
+from the upstream imapsync 2.314 distribution after SHA-256 verification.
+
+- Author: Gilles Lamiral
+- Project: https://imapsync.lamiral.info/
+- License: NOLIMIT Public License (NLPL)
+- The exact upstream LICENSE is included at `runtime/imapsync/LICENSE`.
+
+Source archives and build logs are managed by the GitHub Actions build. The
+Windows archive checksum must be approved as a repository variable in advance.

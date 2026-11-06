@@ -70,4 +70,7 @@ github-artifacts/
 listing.txt
 /.runtime/
 
+# Exécutables externes préparés uniquement lors de la construction
+/runtime/imapsync/
+
 /.patch-backups/
