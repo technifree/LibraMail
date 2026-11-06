@@ -89,28 +89,55 @@ def read_windows_member(archive: Path, name: str) -> bytes:
         return z.read(member)
 
 
-def stage(archive: Path, platform: str, expected_hash: str, dest: Path) -> None:
+def windows_license_text(archive: Path, linux_license_archive: Path | None = None) -> tuple[bytes, str]:
+    """Get NLPL license from Windows ZIP, or pinned Linux source if absent.
+
+    The official imapsync_2.314.zip is known not to bundle LICENSE, while the
+    exact same release's Linux source tarball does.  Never fetch an unverified
+    license or accept an ambiguous member from a ZIP.
+    """
+    try:
+        return read_windows_member(archive, "LICENSE"), WINDOWS_ARCHIVE
+    except ValueError as error:
+        if str(error) != "Membre Windows manquant : LICENSE":
+            raise
+
+    source = linux_license_archive or Path(".cache") / "imapsync" / LINUX_ARCHIVE
+    if linux_license_archive is None:
+        download_if_missing(f"{UPSTREAM}/{LINUX_ARCHIVE}", source)
+    check_sha256(source, LINUX_SHA256)
+    license_text = read_linux_member(source, "LICENSE")
+    print(f"[imapsync] LICENSE récupérée depuis l'archive source vérifiée {LINUX_ARCHIVE}")
+    return license_text, LINUX_ARCHIVE
+
+
+def stage(archive: Path, platform: str, expected_hash: str, dest: Path,
+          linux_license_archive: Path | None = None) -> None:
     check_sha256(archive, expected_hash)
-    dest.mkdir(parents=True, exist_ok=True)
     if platform == "linux":
         binary = read_linux_member(archive, "imapsync")
         if not binary.startswith(b"#!"):
             raise ValueError("imapsync Linux n'est pas un script exécutable attendu")
         target = dest / "imapsync"
-        target.write_bytes(binary)
-        target.chmod(0o755)
         license_text = read_linux_member(archive, "LICENSE")
+        license_source = LINUX_ARCHIVE
     else:
         binary = read_windows_member(archive, "imapsync.exe")
         if not binary.startswith(b"MZ"):
             raise ValueError("imapsync.exe ne contient pas un en-tête PE valide")
         target = dest / "imapsync.exe"
-        target.write_bytes(binary)
-        license_text = read_windows_member(archive, "LICENSE")
+        license_text, license_source = windows_license_text(archive, linux_license_archive)
+
+    # All artifacts are verified and readable before writing anything to runtime.
+    dest.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(binary)
+    if platform == "linux":
+        target.chmod(0o755)
     (dest / "LICENSE").write_bytes(license_text)
     (dest / "UPSTREAM.txt").write_text(
         f"imapsync {VERSION} — https://imapsync.lamiral.info/\n"
-        f"Archive : {archive.name}\nSHA-256 : {expected_hash.lower()}\n",
+        f"Archive : {archive.name}\nSHA-256 : {expected_hash.lower()}\n"
+        f"Licence NLPL : {license_source}\n",
         encoding="utf-8",
     )
     print(f"[imapsync] Moteur officiel {VERSION} préparé : {target}")
