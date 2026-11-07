@@ -18,16 +18,17 @@ function run(root, ...args) {
   });
 }
 
-// Publication documents must already match the single changelog source.
-let result = run(ROOT, '0.6.2', '--check');
-assert.strictEqual(result.status, 0, `Documents 0.6.2 incohérents : ${result.stderr}`);
+// Publication documents must match the newest changelog entry, even after 0.6.2.
+const current = fs.readFileSync(path.join(ROOT, 'VERSION'), 'utf8').trim();
+let result = run(ROOT, current, '--check');
+assert.strictEqual(result.status, 0, `Documents ${current} incohérents : ${result.stderr}`);
 
 const notes = fs.readFileSync(path.join(ROOT, '.github', 'release-notes.md'), 'utf8');
 const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
 assert(notes.includes('## Français') && notes.includes('## English'));
 assert(notes.includes('0-second') && notes.includes('0 seconde'));
-assert(readme.includes('Latest version — 0.6.2') && readme.includes('Dernière version — 0.6.2'));
-assert(readme.includes('/releases/tag/v0.6.2'));
+assert(readme.includes(`Latest version — ${current}`) && readme.includes(`Dernière version — ${current}`));
+assert(readme.includes(`/releases/tag/v${current}`));
 
 // Isolated fixtures: no GitHub requests, no publication and no source changes.
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'libramail-publish-'));

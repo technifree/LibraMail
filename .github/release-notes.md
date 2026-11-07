@@ -1,48 +1,44 @@
-# LibraMail 0.6.2 — 2026-11-04
+# LibraMail 0.6.3 — 2026-11-06
 
 ## Français
 
-### Réactivité et suppression
+### Correction de lecture
 
-- Accélération de l'affichage des conversations grâce à un index SQLite dédié, y compris sur les bases existantes (créé automatiquement au démarrage).
-- Une seule requête agrégée pour les compteurs de la barre latérale et des comptes, au lieu de relire plusieurs listes de messages.
-- Suppressions par lots traitées avec trois groupes de dossiers au maximum en parallèle pour ne pas saturer les serveurs IMAP.
-- Une fois le déplacement IMAP confirmé, la réponse de suppression ne reste plus bloquée par la relève du dossier Corbeille : celle-ci est différée, puis la vue est actualisée.
-- Retour visuel pendant une suppression multiple ; réconciliation des lignes en cas d'erreur partielle.
-- Propagation des changements de lecture d'une conversation par lots de UID, sans ouvrir une connexion IMAP par message.
+- Le **délai de 0 seconde** marque le message comme lu et actualise aussi le compteur de la conversation, y compris lorsque celle-ci ne contient qu’un seul courriel.
+- Les listes de messages mémorisées sont invalidées après un changement de lecture pour éviter de réafficher un ancien point vert au retour dans la boîte unifiée.
+- Nouveau test de non-régression de lecture simple et des conversations à plusieurs messages.
 
-### Marquage comme lu
+### Notification des nouvelles versions
 
-- Le délai de lecture **0 seconde** marque le message comme lu dès son ouverture effective dans le lecteur.
-- L'ouverture d'une conversation marque tous ses messages comme lus si l'option est activée, même si le dernier message était déjà lu.
-- Une modification du délai ou de l'activation du marquage automatique est immédiatement réappliquée au message déjà affiché.
+- Indicateur discret dans la barre supérieure lorsqu'une nouvelle version est publiée sur GitHub.
+- Un clic sur cet indicateur ou sur « Nouvelle version disponible » dans « À propos » ouvre directement la page de téléchargement de la Release concernée, dans le navigateur par défaut.
+- Le statut « LibraMail est à jour » dans « À propos » ouvre également la liste des téléchargements officiels, même lorsqu'aucune mise à jour n'est disponible.
+- Contrôle automatique silencieux au démarrage et toutes les six heures lorsque LibraMail reste ouvert, avec vérification du numéro de version et d'une URL GitHub officielle.
 
-### Vérifications
+### Préparation macOS (préversion)
 
-- Ajout de tests SQLite des compteurs/index et de tests du marquage immédiat, différé et désactivé.
-- Les tests automatisés ne se substituent pas à une validation IMAP en conditions réelles auprès de différents fournisseurs.
+- Ajout d’un script de construction macOS destiné à Intel x86_64 et Apple Silicon arm64, avec Node.js et SQLite natifs, imapsync obligatoire et données utilisateur enregistrées hors du paquet applicatif.
+- Ajout d’un workflow GitHub Actions **manuel et expérimental** pour tester les deux architectures. Les paquets macOS ne sont pas encore intégrés à la publication officielle : compilation, signature et tests utilisateurs restent nécessaires.
 
 ## English
 
-### Responsiveness and deletion
+### Read-state fixes
 
-- Faster conversation display thanks to a dedicated SQLite index, automatically created for existing databases at startup.
-- Sidebar and account counters are now calculated with one aggregated query instead of loading several message lists.
-- Bulk deletions process up to three folder groups concurrently to avoid overwhelming IMAP servers.
-- Once an IMAP move is confirmed, deletion no longer waits for the Trash folder to synchronize. That refresh takes place later, followed by a view update.
-- Better visual feedback during bulk deletion, with list reconciliation after a partial failure.
-- Read-state updates in a conversation use batches of UIDs instead of opening an IMAP connection per message.
+- A **0-second read delay** now updates both the message and its conversation unread count, including single-message threads.
+- Cached message lists are invalidated after read-state changes to prevent a stale unread dot when returning to the unified inbox.
+- Added regression tests for single-message and multi-message conversations.
 
-### Mark as read
+### Update notifications
 
-- A **0-second** delay marks a message as read immediately when it is effectively opened in the reader.
-- Opening a conversation marks all its messages as read when the option is enabled, even if the newest message was already read.
-- Changing the read delay or the automatic-read setting takes effect immediately on the message currently displayed.
+- A discreet header indicator appears when a newer GitHub Release is available.
+- Clicking the indicator or the “New version available” label in About opens that release's download page in the default browser.
+- Clicking “LibraMail is up to date” in About also opens the official downloads list, even when no update is available.
+- Silent checks run at startup and every six hours while the app stays open, using version validation and the official GitHub release URL.
 
-### Verification
+### macOS build preparation (preview)
 
-- Added SQLite counter/index tests and coverage for immediate, delayed and disabled read marking.
-- Automated tests do not replace real-world IMAP checks with different providers.
+- Added an experimental macOS build script for Intel x86_64 and Apple Silicon arm64, with native Node.js and SQLite, mandatory imapsync and user data stored outside the application bundle.
+- Added a **manual, experimental** GitHub Actions workflow for both architectures. macOS artifacts are not yet part of the official release; packaging, signing and real-world testing remain to be qualified.
 
 ### Downloads / Téléchargements
 

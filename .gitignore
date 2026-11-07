@@ -74,3 +74,6 @@ listing.txt
 /runtime/imapsync/
 
 /.patch-backups/
+
+# Apercus de compilation macOS
+/.build-macos-work/

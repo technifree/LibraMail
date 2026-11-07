@@ -14,7 +14,7 @@ La section X.Y.Z de CHANGELOG.md doit contenir :
   ## English
 
 Exemple :
-  ./release.sh 0.6.2
+  ./release.sh 0.6.3
 EOF
 }
 

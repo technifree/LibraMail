@@ -1,0 +1,69 @@
+name: Experimental macOS portable packages
+
+# Intentionally separate from the official release until BOTH architectures
+# have been built, tested on macOS, and Gatekeeper signing has been qualified.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: macOS preview (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            arch: x86_64
+          - runner: macos-15
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Verify version and sources
+        shell: bash
+        run: |
+          ./security_check.sh
+          python3 tools/check_version.py
+          python3 tools/generate_release_notes.py --check
+          bash -n build_macos.sh
+          test "$(uname -m)" = '${{ matrix.arch }}'
+
+      - name: Install native imapsync packaging prerequisites (Apple Silicon)
+        if: matrix.arch == 'arm64'
+        shell: bash
+        run: |
+          brew install imapsync perl cpanminus
+          export PATH="$(brew --prefix perl)/bin:$PATH"
+          cpanm --notest --local-lib-contained "$RUNNER_TEMP/pp-lib" PAR::Packer
+          echo "$(brew --prefix perl)/bin" >> "$GITHUB_PATH"
+          echo "$RUNNER_TEMP/pp-lib/bin" >> "$GITHUB_PATH"
+          echo "PERL5LIB=$RUNNER_TEMP/pp-lib/lib/perl5" >> "$GITHUB_ENV"
+          test -x "$RUNNER_TEMP/pp-lib/bin/pp"
+
+      - name: Build native .app and ZIP (no personal data)
+        shell: bash
+        env:
+          IMAPSYNC_MACOS_X64_SHA256: ${{ vars.IMAPSYNC_MACOS_X64_SHA256 }}
+        run: |
+          chmod +x build_macos.sh
+          ./build_macos.sh
+          test -n "$(find build/macos -name 'LibraMail-*.zip' -type f -print -quit)"
+
+      - name: Upload preview package
+        uses: actions/upload-artifact@v4
+        with:
+          name: libramail-macos-${{ matrix.arch }}-preview
+          path: build/macos/*
+          if-no-files-found: error
+          retention-days: 14

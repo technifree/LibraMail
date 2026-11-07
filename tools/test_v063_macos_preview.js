@@ -1,0 +1,19 @@
+#!/usr/bin/env node
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname, '..');
+const source = fs.readFileSync(path.join(root, 'build_macos.sh'), 'utf8');
+const workflow = fs.readFileSync(path.join(root, '.github/workflows/macos-preview.yml'), 'utf8');
+assert(source.includes('LIBRAMAIL_STATE_ROOT'), 'macOS data must be written outside read-only .app');
+assert(source.includes('Library/Application Support/LibraMail'));
+assert(source.includes('better-sqlite3'), 'native SQLite packaging must be tested');
+assert(source.includes('IMAPSYNC_MACOS_X64_SHA256'), 'Intel imapsync must be checksum-verified');
+assert(source.includes('prepare_imapsync_ci.py linux'), 'native arm64 must use pinned source');
+assert(source.includes('PAR::Packer') && source.includes('pp -x'), 'native ARM imapsync packaging is mandatory');
+assert(!source.includes('--without-imapsync'), 'preview must not omit imapsync silently');
+assert(workflow.includes('macos-15-intel') && workflow.includes('macos-15'));
+assert(workflow.includes('workflow_dispatch:'));
+assert(!workflow.includes('push:'), 'macOS preview should not silently publish on push');
+console.log('[OK] LibraMail 0.6.3 : pipeline macOS apercu Intel/Apple Silicon, migration obligatoire');

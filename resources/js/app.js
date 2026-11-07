@@ -1697,7 +1697,7 @@ const App = (() => {
   };
 
   function applyAppVersion() {
-    const rawVersion = String(window.NL_APPVERSION || '0.6.2').replace(/^v/i, '');
+    const rawVersion = String(window.NL_APPVERSION || '0.6.3').replace(/^v/i, '');
     const badge = document.getElementById('app-version');
     if (badge) {
       badge.textContent = `v${rawVersion}`;
@@ -4238,16 +4238,41 @@ const App = (() => {
       await rpc('messages.setFlag', { id: row.id, flag: 'seen', value: seen });
       row.seen = seen ? 1 : 0;
       updateReaderTabsFlag(row, { seen: row.seen });
-      if (currentConversation && currentConversation.messages.some(message => message.id === row.id)) {
-        const item = currentConversation.messages.find(message => message.id === row.id);
+      if (currentConversation && currentConversation.messages.some(message => Number(message.id) === Number(row.id))) {
+        const item = currentConversation.messages.find(message => Number(message.id) === Number(row.id));
         if (item) item.seen = seen ? 1 : 0;
         list.patchConversationMessage(currentConversation.threadKey, row.id, { seen: seen ? 1 : 0 });
         renderConversationPanel(currentConversation.messages, row.id);
+      }
+
+      // En mode conversations, même un fil d'un seul courriel est une ligne
+      // is_thread dont l'état visuel dépend de thread_unread (pas de seen).
+      // Un patchRow({seen:1}) seul laissait le point vert et le sujet en gras.
+      const threadKey = String(row.thread_key || row.parent_thread_key || '');
+      const visibleThread = threadKey && list.rows.find(item =>
+        item.is_thread && !item.is_thread_child && item.thread_key === threadKey);
+      if (visibleThread) {
+        if (currentConversation?.threadKey === threadKey) {
+          const remaining = currentConversation.messages.filter(item => !item.seen).length;
+          list.patchThread(threadKey, { seen: remaining ? 0 : 1, thread_unread: remaining });
+        } else if (Number(visibleThread.thread_count || 1) === 1) {
+          list.patchThread(threadKey, { seen: seen ? 1 : 0, thread_unread: seen ? 0 : 1 });
+        } else {
+          // Fil non déplié : ne pas afficher un compteur calculé à l'aveugle.
+          // La prochaine lecture de la vue récupérera l'agrégat du serveur local.
+          const remaining = seen ? Math.max(0, Number(visibleThread.thread_unread || 1) - 1)
+            : Number(visibleThread.thread_unread || 0) + 1;
+          list.patchThread(threadKey, { seen: remaining ? 0 : 1, thread_unread: remaining });
+        }
       } else {
         list.patchRow(row.id, { seen: seen ? 1 : 0 });
       }
     }
 
+    // Les vues mémorisées contiennent leurs propres copies des lignes.
+    // Sans invalidation, revenir à la boîte unifiée réaffichait les anciens
+    // points verts malgré l'écriture réussie en base.
+    invalidateListViewCacheAfterMutation();
     if (Viewer.current?.meta?.id === row.id) {
       Viewer.current.meta.seen = seen ? 1 : 0;
       setReaderSeenButton(seen);
@@ -8342,7 +8367,7 @@ const App = (() => {
 
   // ---------- Mise à jour et À propos ----------
   function appVersion() {
-    return String(window.NL_APPVERSION || '0.6.2').replace(/^v/i, '');
+    return String(window.NL_APPVERSION || '0.6.3').replace(/^v/i, '');
   }
 
   function compareVersions(a, b) {
@@ -8355,13 +8380,54 @@ const App = (() => {
     return 0;
   }
 
+  // La Release officielle est construite à partir du tag validé, jamais d'une
+  // URL arbitraire retournée par un service distant.
+  function releaseDownloadPage(version) {
+    const clean = String(version || '').trim().replace(/^v/i, '');
+    const base = 'https://github.com/technifree/LibraMail/releases';
+    return /^\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$/.test(clean)
+      ? `${base}/tag/v${clean}`
+      : base;
+  }
+
+  // Les deux liens About ouvrent uniquement les téléchargements du dépôt officiel.
+  // Lorsque l'application est à jour, on ouvre la liste des Releases : cela
+  // fonctionne aussi pendant le développement d'une version non encore publiée.
+  async function openOfficialReleasePage(url) {
+    try {
+      try {
+        await rpc('app.openExternal', { url });
+      } catch {
+        // Repli pour les anciens moteurs et les lancements de développement.
+        await Neutralino.os.open(url);
+      }
+      return true;
+    } catch (error) {
+      status(t('update.openFailed', { error: error?.message || String(error) }), 'error');
+      return false;
+    }
+  }
+
+  async function openUpdateDownloadPage() {
+    if (!updateState.available || !updateState.latest) return false;
+    return openOfficialReleasePage(releaseDownloadPage(updateState.latest));
+  }
+
+  async function openCurrentDownloadsPage() {
+    return openOfficialReleasePage(releaseDownloadPage(''));
+  }
+
   function setUpdateNotice() {
     const notice = document.getElementById('update-notice');
     if (!notice) return;
     if (updateState.available && updateState.latest) {
-      notice.classList.remove('hidden');
-      notice.querySelector('span').textContent = t('update.notice', { version: updateState.latest });
+      const label = t('update.notice', { version: updateState.latest });
+      const compact = t('update.noticeShort', { version: updateState.latest });
+      notice.querySelector('.update-notice-long').textContent = label;
+      notice.querySelector('.update-notice-short').textContent = compact;
       notice.title = t('update.noticeTitle');
+      notice.setAttribute('aria-label', `${label}. ${notice.title}`);
+      notice.classList.remove('hidden');
     } else {
       notice.classList.add('hidden');
     }
@@ -8380,10 +8446,20 @@ const App = (() => {
       state.innerHTML = `<i class="fa-solid fa-rotate fa-spin"></i><strong>${esc(t('update.checking'))}</strong>`;
       details.textContent = t('update.checkingDetail');
     } else if (updateState.available) {
-      state.innerHTML = `<i class="fa-solid fa-circle-up"></i><strong>${esc(t('update.availableTitle', { version: updateState.latest }))}</strong>`;
+      state.innerHTML = `<button id="about-update-link" class="about-update-link" type="button" title="${esc(t('update.noticeTitle'))}">
+        <i class="fa-solid fa-circle-up" aria-hidden="true"></i>
+        <strong>${esc(t('update.availableTitle', { version: updateState.latest }))}</strong>
+        <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
+      </button>`;
+      state.querySelector('#about-update-link')?.addEventListener('click', () => { openUpdateDownloadPage(); });
       details.textContent = t('update.availableDetail', { current: appVersion(), latest: updateState.latest });
     } else if (updateState.latest) {
-      state.innerHTML = `<i class="fa-solid fa-circle-check"></i><strong>${esc(t('update.currentTitle'))}</strong>`;
+      state.innerHTML = `<button id="about-current-downloads-link" class="about-update-link" type="button" title="${esc(t('update.downloadsTitle'))}">
+        <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+        <strong>${esc(t('update.currentTitle'))}</strong>
+        <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
+      </button>`;
+      state.querySelector('#about-current-downloads-link')?.addEventListener('click', () => { openCurrentDownloadsPage(); });
       details.textContent = t('update.currentDetail', { version: appVersion() });
     } else if (updateState.error) {
       state.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i><strong>${esc(t('update.unavailableTitle'))}</strong>`;
@@ -8433,8 +8509,9 @@ const App = (() => {
       updateState = {
         checking: false,
         latest,
-        url: payload?.url || 'https://github.com/technifree/LibraMail/releases',
-        available: latest ? compareVersions(latest, appVersion()) > 0 : false,
+        url: releaseDownloadPage(latest),
+        available: /^\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$/.test(latest)
+          && compareVersions(latest, appVersion()) > 0,
         checkedAt: Date.now(),
         error: '',
       };
@@ -10253,6 +10330,8 @@ const App = (() => {
     if (key === 'locale') {
       await I18N.load(value);
       applyAppVersion();
+      setUpdateNotice();
+      renderUpdateStatus();
       syncSecurityUi(securityState);
       applySidebarSectionStates();
       renderSidebar();
@@ -11087,7 +11166,7 @@ const App = (() => {
     document.getElementById('brand')?.addEventListener('keydown', event => {
       if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openAboutModal(); }
     });
-    document.getElementById('update-notice')?.addEventListener('click', openAboutModal);
+    document.getElementById('update-notice')?.addEventListener('click', () => { openUpdateDownloadPage(); });
     document.getElementById('btn-check-update')?.addEventListener('click', () => checkForUpdates(true));
     document.getElementById('set-signature-account').onchange = event => loadSignatureEditor(event.target.value);
     document.getElementById('btn-save-signature').onclick = saveSignatureSettings;
@@ -11218,6 +11297,13 @@ const App = (() => {
   window.addEventListener('DOMContentLoaded', async () => {
     try { Neutralino.init(); } catch {}
     wire();
+    // LibraMail pouvant rester ouvert plusieurs jours, refaire une vérification
+    // silencieuse toutes les six heures (en plus de celle du démarrage).
+    setInterval(() => {
+      if (!securityState.locked && securityState.runtimeReady) {
+        checkForUpdates(false).catch(() => {});
+      }
+    }, 6 * 60 * 60 * 1000);
     try {
       await ensureBundledWindowsEngine();
     } catch (error) {

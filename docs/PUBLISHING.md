@@ -42,8 +42,8 @@ these settings may be changed with `GITHUB_OWNER`, `REPO_NAME`, `VISIBILITY`.
 2. Update the local version and generate the bilingual README and release notes:
 
    ```bash
-   python3 tools/set_version.py 0.6.2
-   ./github.sh notes 0.6.2
+   python3 tools/set_version.py 0.6.3
+   ./github.sh notes 0.6.3
    ./github.sh check
    ```
 
@@ -58,7 +58,7 @@ these settings may be changed with `GITHUB_OWNER`, `REPO_NAME`, `VISIBILITY`.
    git status --short
    git add README.md CHANGELOG.md .github/release-notes.md VERSION
    # Also stage and commit your tested application source changes.
-   git commit -m "Prepare LibraMail 0.6.2"
+   git commit -m "Prepare LibraMail 0.6.3"
    ```
 
    `./github.sh check` validates documentation consistency and runs the tests.
@@ -67,7 +67,7 @@ these settings may be changed with `GITHUB_OWNER`, `REPO_NAME`, `VISIBILITY`.
 ## Publish a release
 
 ```bash
-./github.sh release 0.6.2
+./github.sh release 0.6.3
 ```
 
 `release` requires a clean Git working tree and an authenticated `gh` session.
@@ -133,8 +133,8 @@ La configuration initiale peut être adaptée avec les variables `GITHUB_OWNER`,
 2. Actualiser les documents et contrôler la version :
 
    ```bash
-   python3 tools/set_version.py 0.6.2
-   ./github.sh notes 0.6.2
+   python3 tools/set_version.py 0.6.3
+   ./github.sh notes 0.6.3
    ./github.sh check
    ```
 
@@ -149,7 +149,7 @@ La configuration initiale peut être adaptée avec les variables `GITHUB_OWNER`,
    git status --short
    git add README.md CHANGELOG.md .github/release-notes.md VERSION
    # Ajouter également les fichiers applicatifs vérifiés.
-   git commit -m "Préparer LibraMail 0.6.2"
+   git commit -m "Préparer LibraMail 0.6.3"
    ```
 
    Le contrôle `check` bloque les notes obsolètes et vérifie la cohérence du
@@ -158,7 +158,7 @@ La configuration initiale peut être adaptée avec les variables `GITHUB_OWNER`,
 ## Publier la version
 
 ```bash
-./github.sh release 0.6.2
+./github.sh release 0.6.3
 ```
 
 Le script refuse les modifications locales non validées et les tags existants.
@@ -241,3 +241,13 @@ le correctif des scripts de packaging. Le tag reste inchangé ; documenter cette
 particularité si l'origine exacte du binaire doit être auditée.
 
 Le succès réel de cette réparation doit être validé par le workflow distant.
+
+## macOS experimental build (0.6.3+)
+
+Mac builds are **not** part of the official release workflow yet. The separate
+`macos-preview.yml` workflow must first pass on Intel x86_64 **and** Apple
+Silicon arm64, with embedded Node/SQLite/imapsync and real-device launch tests.
+The preview app is unsigned and must not be presented as a notarized release.
+
+See [docs/MACOS_PREVIEW.md](MACOS_PREVIEW.md) for native architecture, pinned
+imapsync verification, required CI variable and manual workflow instructions.
