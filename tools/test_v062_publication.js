@@ -15,6 +15,8 @@ function run(root, ...args) {
   return spawnSync(pythonCmd, [script, ...args], {
     cwd: root,
     encoding: 'utf8',
+    // Python's redirected stderr may otherwise use cp1252 on Windows.
+    env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' },
   });
 }
 

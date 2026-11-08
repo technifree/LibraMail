@@ -2,6 +2,9 @@ name: Experimental macOS portable packages
 
 # Intentionally separate from the official release until BOTH architectures
 # have been built, tested on macOS, and Gatekeeper signing has been qualified.
+# Pushes to this development branch run the preview without placing the
+# experimental workflow on master. Manual dispatch becomes available once
+# the workflow is merged into the default branch.
 on:
   push:
     branches:
@@ -48,10 +51,17 @@ jobs:
         run: |
           brew install imapsync perl cpanminus
           export PATH="$(brew --prefix perl)/bin:$PATH"
-          cpanm --notest --local-lib-contained "$RUNNER_TEMP/pp-lib" PAR::Packer
+          # Homebrew stores imapsync's Perl modules in its private libexec.
+          # PAR::Packer's --xargs scan executes imapsync, so it must see them.
+          IMAPSYNC_PERL_LIB="$(brew --prefix imapsync)/libexec/lib/perl5"
+          test -d "$IMAPSYNC_PERL_LIB"
+          cpanm --notest --local-lib-contained "$RUNNER_TEMP/pp-lib" PAR::Packer Digest::HMAC
+          export PERL5LIB="$RUNNER_TEMP/pp-lib/lib/perl5:$IMAPSYNC_PERL_LIB"
+          perl -MDigest::HMAC_SHA1 -e 'print "[imapsync] Digest::HMAC_SHA1 available\n"'
+          perl -MMail::IMAPClient -e 'print "[imapsync] Mail::IMAPClient available\n"'
           echo "$(brew --prefix perl)/bin" >> "$GITHUB_PATH"
           echo "$RUNNER_TEMP/pp-lib/bin" >> "$GITHUB_PATH"
-          echo "PERL5LIB=$RUNNER_TEMP/pp-lib/lib/perl5" >> "$GITHUB_ENV"
+          echo "PERL5LIB=$PERL5LIB" >> "$GITHUB_ENV"
           test -x "$RUNNER_TEMP/pp-lib/bin/pp"
 
       - name: Build native .app and ZIP (no personal data)

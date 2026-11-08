@@ -15,6 +15,9 @@ assert(source.includes('PAR::Packer') && source.includes('pp -x'), 'native ARM i
 assert(!source.includes('--without-imapsync'), 'preview must not omit imapsync silently');
 assert(workflow.includes('macos-15-intel') && workflow.includes('macos-15'));
 assert(workflow.includes('workflow_dispatch:'));
+assert(workflow.includes('brew --prefix imapsync'), 'PAR scanner must receive Homebrew imapsync module paths');
+assert(workflow.includes('Digest::HMAC_SHA1'), 'arm64 package must validate required Perl HMAC module');
+assert(workflow.includes('PERL5LIB=$PERL5LIB'), 'Perl module paths must persist to packaging step');
 assert(/push:\s*\n\s*branches:\s*\n\s*- dev-0\.6\.3/.test(workflow), 'preview must trigger on development branch push');
 assert(!/release:\s*\n\s*types:/.test(workflow), 'preview must not publish a release');
 assert(workflow.includes('libramail-macos-${{ matrix.arch }}-preview'), 'preview artifacts must be explicitly marked');
