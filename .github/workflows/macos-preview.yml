@@ -3,6 +3,9 @@ name: Experimental macOS portable packages
 # Intentionally separate from the official release until BOTH architectures
 # have been built, tested on macOS, and Gatekeeper signing has been qualified.
 on:
+  push:
+    branches:
+      - dev-0.6.3
   workflow_dispatch:
 
 permissions:

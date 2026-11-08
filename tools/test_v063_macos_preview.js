@@ -15,5 +15,7 @@ assert(source.includes('PAR::Packer') && source.includes('pp -x'), 'native ARM i
 assert(!source.includes('--without-imapsync'), 'preview must not omit imapsync silently');
 assert(workflow.includes('macos-15-intel') && workflow.includes('macos-15'));
 assert(workflow.includes('workflow_dispatch:'));
-assert(!workflow.includes('push:'), 'macOS preview should not silently publish on push');
+assert(/push:\s*\n\s*branches:\s*\n\s*- dev-0\.6\.3/.test(workflow), 'preview must trigger on development branch push');
+assert(!/release:\s*\n\s*types:/.test(workflow), 'preview must not publish a release');
+assert(workflow.includes('libramail-macos-${{ matrix.arch }}-preview'), 'preview artifacts must be explicitly marked');
 console.log('[OK] LibraMail 0.6.3 : pipeline macOS apercu Intel/Apple Silicon, migration obligatoire');
