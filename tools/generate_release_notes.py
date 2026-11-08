@@ -139,22 +139,32 @@ def render(root: Path, version: str) -> tuple[str, str]:
     changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
     date, fr, en = get_release(changelog, version)
     numeric_version = tuple(map(int, re.match(r"(\d+)\.(\d+)\.(\d+)", version).groups()))
-    mac_downloads = (
-        "- macOS Intel x86_64 and Apple Silicon arm64 **EXPERIMENTAL** ZIP packages (unsigned, not notarized)\n"
-        "- macOS : paquets **EXPÉRIMENTAUX**, non signés et non notarisés ; interface non validée sur Mac physique\n"
+    mac_downloads_fr = (
+        "- macOS Intel x86_64 et Apple Silicon arm64 : paquets ZIP **EXPÉRIMENTAUX** "
+        "(non signés, non notarisés, sans validation graphique sur Mac physique)\n"
+        if numeric_version >= (0, 6, 3) else ""
+    )
+    mac_downloads_en = (
+        "- macOS Intel x86_64 and Apple Silicon arm64: **EXPERIMENTAL** ZIP packages "
+        "(unsigned, not notarized, no physical-Mac GUI validation)\n"
         if numeric_version >= (0, 6, 3) else ""
     )
     notes = (
         f"# LibraMail {version} — {date}\n\n"
         f"## Français\n\n{fr}\n\n"
+        "### Téléchargements\n\n"
+        "- Linux x86_64 : archive portable et paquet Debian (`.deb`)\n"
+        "- Windows x86_64 : archive portable\n"
+        f"{mac_downloads_fr}"
+        "- Empreintes SHA-256 pour vérifier les téléchargements\n\n"
+        "Les paquets publics ne contiennent aucun compte, mot de passe ou message.\n\n"
         f"## English\n\n{en}\n\n"
-        "### Downloads / Téléchargements\n\n"
-        "- Linux x86_64 portable package and Debian package (`.deb`)\n"
-        "- Windows x86_64 portable package\n"
-        f"{mac_downloads}"
-        "- SHA-256 checksums for verification\n\n"
+        "### Downloads\n\n"
+        "- Linux x86_64 portable archive and Debian package (`.deb`)\n"
+        "- Windows x86_64 portable archive\n"
+        f"{mac_downloads_en}"
+        "- SHA-256 checksums for download verification\n\n"
         "Public packages contain no account, password or message data.\n"
-        "Les paquets publics ne contiennent aucun compte, mot de passe ou message.\n"
     )
     readme = (root / "README.md").read_text(encoding="utf-8")
     readme = replace_block(readme, "EN", readme_section(version, date, en, "EN"))

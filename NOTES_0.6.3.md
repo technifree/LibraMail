@@ -1,4 +1,4 @@
-# LibraMail 0.6.3 — lecture, notification des mises à jour et préparation macOS
+# LibraMail 0.6.3 — lecture, notification des mises à jour et distribution macOS expérimentale
 
 ## Correctif
 
@@ -28,19 +28,19 @@ silencieuse au démarrage et toutes les six heures si le programme reste ouvert.
 
 ## macOS
 
-Un script de compilation native macOS et un workflow Actions **manuel** sont
-ajoutés : Intel x86_64 et Apple Silicon arm64. Les deux exigent un imapsync
+Les compilations natives macOS et leurs tests d’exécution ont été validés
+par GitHub Actions pour Intel x86_64 et Apple Silicon arm64. Les deux exigent un imapsync
 exécutable ; le programme ne distribue jamais silencieusement une édition
 incomplète. Node.js et better-sqlite3 sont compilés/installés pour
 l'architecture cible. Le dossier de données macOS est distinct de l'application
 (`~/Library/Application Support/LibraMail`).
 
-Le workflow macOS est expérimental. Aucun paquet Mac n'a encore été validé
-physiquement et aucune signature/notarisation Apple n'est fournie : ne pas
-publier comme version stable avant qualification sur les deux machines.
+Les paquets macOS sont destinés à une distribution **expérimentale**.
+Les essais graphiques sur Mac physique restent à réaliser ; aucune signature
+ni notarisation Apple n’est fournie. Ne pas les présenter comme stables.
 
 ## Vérification
 
-86 tests automatisés exécutés sous Linux avec le Node.js ABI 127 et les
-dépendances du paquet précédent. Pas d'essai macOS réel ni d'essai IMAP
-sur les comptes de l'utilisateur dans cet environnement.
+87 tests automatisés exécutés localement sous Linux. Les compilations et
+tests d’exécution macOS ont réussi sur les deux architectures dans GitHub
+Actions ; essais graphiques sur Mac physique et essais IMAP réels non réalisés.

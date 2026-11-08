@@ -14,11 +14,11 @@ accounts without requiring Node.js to be installed on the target computer.
 ![LibraMail main window](docs/screenshots/libramail-main.png)
 
 <!-- LIBRAMAIL:RELEASE-EN:START -->
-## Latest version — 0.6.3 (2026-11-06)
+## Latest version — 0.6.3 (2026-11-08)
 
 - A **0-second read delay** now updates both the message and its conversation unread count, including single-message threads.
 - A discreet header indicator appears when a newer GitHub Release is available.
-- Added an experimental macOS build script for Intel x86_64 and Apple Silicon arm64, with native Node.js and SQLite, mandatory imapsync and user data stored outside the application bundle.
+- Two experimental macOS packages for Intel x86_64 and Apple Silicon arm64 are now included in GitHub downloads, with bundled Node.js, SQLite and imapsync and user data stored outside the application bundle.
 - Cached message lists are invalidated after read-state changes to prevent a stale unread dot when returning to the unified inbox.
 
 [Full release notes](https://github.com/technifree/LibraMail/releases/tag/v0.6.3) · [CHANGELOG](CHANGELOG.md)
@@ -39,21 +39,23 @@ accounts without requiring Node.js to be installed on the target computer.
 - Remote-content blocking and confirmation before opening external links
 - Light and dark themes, French and English interfaces
 - Complete ZIP backup and restore of settings, accounts, contacts, calendar and local mail
-- Portable Linux and Windows packages with an embedded Node.js runtime
+- Linux portable and Debian packages, Windows portable package, and experimental macOS Intel/Apple Silicon packages with bundled Node.js
 
 ## Privacy
 
 LibraMail stores accounts, settings, the SQLite index and downloaded messages
-locally in the `data/` directory. Public GitHub builds are always generated
-without personal data. There is no LibraMail cloud account and no telemetry.
+locally. On macOS, the data directory is `~/Library/Application Support/LibraMail/data`;
+on Linux and Windows, the local `data/` directory is used. Public GitHub builds
+are generated without personal data. There is no LibraMail cloud account or telemetry.
 
 **Never commit or publish the `data/` directory or a private build produced with
 `--with-data`.** It may contain account credentials and complete messages.
 
 ## Download
 
-Portable Linux and Windows builds are attached to each
-[GitHub Release](https://github.com/technifree/LibraMail/releases).
+The [GitHub Releases](https://github.com/technifree/LibraMail/releases) include
+Linux portable and Debian (`.deb`) packages, a Windows portable package and,
+starting with 0.6.3, experimental macOS packages for Intel and Apple Silicon.
 
 ### Linux
 
@@ -72,6 +74,13 @@ distribution.
 
 Extract the archive and double-click `LibraMail.exe`.
 The Node.js runtime is embedded; Microsoft Edge WebView2 is required by the Neutralino window.
+
+### macOS (experimental)
+
+Choose the ZIP matching your Mac (`x86_64` for Intel, `arm64` for Apple Silicon),
+extract `LibraMail.app` and place it in Applications. These builds are **unsigned,
+not notarized and have not been GUI-tested on a physical Mac**; macOS Gatekeeper
+may block their launch. Use test accounts first. See [macOS preview notes](docs/MACOS_PREVIEW.md).
 
 ## Build from source
 
@@ -101,7 +110,7 @@ This repository includes one command centre:
 - `init` creates/configures the GitHub repository and pushes the source
 - `build` asks GitHub Actions to build Linux and Windows, then downloads them
 - `notes` refreshes bilingual release notes and the README from `CHANGELOG.md`
-- `release` validates the bilingual notes, updates the version, pushes a tag and publishes both packages
+- `release` validates bilingual notes, updates the version, pushes a tag and publishes all five distributions (including both experimental Mac packages from 0.6.3)
 - `check` verifies versions and prevents personal data from being tracked
 
 Detailed instructions are available in [docs/PUBLISHING.md](docs/PUBLISHING.md).
@@ -132,11 +141,11 @@ sans exiger l'installation de Node.js sur l'ordinateur cible.
 ![Fenêtre principale de LibraMail](docs/screenshots/libramail-main.png)
 
 <!-- LIBRAMAIL:RELEASE-FR:START -->
-## Dernière version — 0.6.3 (2026-11-06)
+## Dernière version — 0.6.3 (2026-11-08)
 
 - Le **délai de 0 seconde** marque le message comme lu et actualise aussi le compteur de la conversation, y compris lorsque celle-ci ne contient qu’un seul courriel.
 - Indicateur discret dans la barre supérieure lorsqu'une nouvelle version est publiée sur GitHub.
-- Ajout d’un script de construction macOS destiné à Intel x86_64 et Apple Silicon arm64, avec Node.js et SQLite natifs, imapsync obligatoire et données utilisateur enregistrées hors du paquet applicatif.
+- Deux archives macOS expérimentales, pour Intel x86_64 et Apple Silicon arm64, rejoignent les téléchargements GitHub, avec Node.js, SQLite et imapsync embarqués et les données utilisateur conservées hors de l’application.
 - Les listes de messages mémorisées sont invalidées après un changement de lecture pour éviter de réafficher un ancien point vert au retour dans la boîte unifiée.
 
 [Notes de version complètes](https://github.com/technifree/LibraMail/releases/tag/v0.6.3) · [CHANGELOG](CHANGELOG.md)
@@ -158,14 +167,15 @@ sans exiger l'installation de Node.js sur l'ordinateur cible.
 - Blocage des contenus distants et confirmation avant ouverture des liens
 - Thèmes clair et sombre, interfaces française et anglaise
 - Sauvegarde et restauration ZIP des paramètres, comptes, contacts, planning et messages
-- Paquets portables Linux et Windows avec Node.js embarqué
+- Paquets Linux portable et Debian, Windows portable, et macOS Intel/Apple Silicon expérimentaux avec Node.js embarqué
 
 ## Confidentialité
 
 LibraMail conserve localement les comptes, les paramètres, l'index SQLite et
-les messages téléchargés dans le dossier `data/`. Les compilations publiques
-GitHub sont toujours produites sans données personnelles. LibraMail n'utilise
-ni compte cloud propre ni télémétrie.
+les messages téléchargés. Sur macOS, les données sont dans
+`~/Library/Application Support/LibraMail/data` ; sur Linux et Windows, dans le
+dossier local `data/`. Les compilations publiques GitHub sont produites sans
+données personnelles. LibraMail n'utilise ni compte cloud propre ni télémétrie.
 
 **Ne publiez jamais le dossier `data/` ni une compilation privée créée avec
 `--with-data`.** Ils peuvent contenir les identifiants des comptes et les
@@ -173,8 +183,9 @@ messages complets.
 
 ## Téléchargement
 
-Les versions portables Linux et Windows sont jointes à chaque
-[publication GitHub](https://github.com/technifree/LibraMail/releases).
+Les [publications GitHub](https://github.com/technifree/LibraMail/releases)
+contiennent Linux portable et Debian (`.deb`), Windows portable et, à partir
+de la 0.6.3, deux paquets macOS expérimentaux pour Intel et Apple Silicon.
 
 ### Linux
 
@@ -193,6 +204,14 @@ distribution Linux.
 
 Décompressez l'archive puis double-cliquez sur `LibraMail.exe`.
 Le runtime Node.js est embarqué ; la fenêtre Neutralino nécessite Microsoft Edge WebView2.
+
+### macOS (expérimental)
+
+Choisissez l'archive ZIP adaptée au Mac (`x86_64` pour Intel, `arm64` pour Apple Silicon),
+décompressez `LibraMail.app` et placez-la dans Applications. Ces paquets sont
+**non signés, non notarisés et non validés graphiquement sur un Mac physique** :
+Gatekeeper peut en bloquer le lancement. Utilisez d'abord des comptes de test.
+Consultez la [documentation macOS](docs/MACOS_PREVIEW.md).
 
 ## Compilation depuis les sources
 
@@ -222,7 +241,7 @@ Un seul script sert de tableau de commande :
 - `init` crée et configure le dépôt GitHub, puis envoie les sources
 - `build` demande à GitHub Actions de compiler Linux et Windows et les télécharge
 - `notes` actualise les notes FR/EN et le README depuis `CHANGELOG.md`
-- `release` vérifie les notes bilingues, met à jour la version, pousse un tag et publie les deux paquets
+- `release` vérifie les notes bilingues, met à jour la version, pousse un tag et publie les cinq distributions (dont les deux paquets Mac expérimentaux dès la 0.6.3)
 - `check` contrôle les versions et bloque les données personnelles suivies par Git
 
 Le mode d'emploi détaillé se trouve dans
@@ -232,4 +251,4 @@ Le mode d'emploi détaillé se trouve dans
 
 LibraMail est distribué sous [licence MIT](LICENSE).
 
-_Last documentation update / Dernière mise à jour : 2026-11-06._
+_Last documentation update / Dernière mise à jour : 2026-11-08._

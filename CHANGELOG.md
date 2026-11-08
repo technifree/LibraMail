@@ -1,4 +1,4 @@
-# LibraMail 0.6.3 - 2026-11-06
+# LibraMail 0.6.3 - 2026-11-08
 
 ## Français
 
@@ -15,9 +15,9 @@
 - Le statut « LibraMail est à jour » dans « À propos » ouvre également la liste des téléchargements officiels, même lorsqu'aucune mise à jour n'est disponible.
 - Contrôle automatique silencieux au démarrage et toutes les six heures lorsque LibraMail reste ouvert, avec vérification du numéro de version et d'une URL GitHub officielle.
 
-### Préparation macOS (préversion)
+### Distribution macOS expérimentale
 
-- Ajout d’un script de construction macOS destiné à Intel x86_64 et Apple Silicon arm64, avec Node.js et SQLite natifs, imapsync obligatoire et données utilisateur enregistrées hors du paquet applicatif.
+- Deux archives macOS expérimentales, pour Intel x86_64 et Apple Silicon arm64, rejoignent les téléchargements GitHub, avec Node.js, SQLite et imapsync embarqués et les données utilisateur conservées hors de l’application.
 - Les compilations macOS Intel et Apple Silicon ont été validées dans GitHub Actions, avec des tests automatisés du paquet, de SQLite, du moteur Node.js et d’imapsync.
 - Les archives macOS sont intégrées à la publication GitHub sous l’intitulé **expérimental** : elles restent non signées, non notarisées et non testées graphiquement sur un Mac physique. Un échec sur une architecture bloque la publication complète.
 
@@ -36,9 +36,9 @@
 - Clicking “LibraMail is up to date” in About also opens the official downloads list, even when no update is available.
 - Silent checks run at startup and every six hours while the app stays open, using version validation and the official GitHub release URL.
 
-### macOS build preparation (preview)
+### Experimental macOS distribution
 
-- Added an experimental macOS build script for Intel x86_64 and Apple Silicon arm64, with native Node.js and SQLite, mandatory imapsync and user data stored outside the application bundle.
+- Two experimental macOS packages for Intel x86_64 and Apple Silicon arm64 are now included in GitHub downloads, with bundled Node.js, SQLite and imapsync and user data stored outside the application bundle.
 - Both macOS architectures now pass CI builds and automated smoke tests of the app package, native SQLite, Node.js engine and imapsync.
 - macOS archives are included in the GitHub release as clearly labeled **experimental** assets: they remain unsigned, unnotarized and not visually tested on physical Macs. A failing architecture blocks the complete release.
 

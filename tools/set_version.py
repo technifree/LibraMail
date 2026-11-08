@@ -54,4 +54,14 @@ replace_file(ROOT / "resources/js/app.js", [
     (r"(NL_APPVERSION\s*\|\|\s*['\"])[^'\"]+(['\"])", rf"\g<1>{version}\g<2>"),
 ], required=False)
 
+# Le moteur fait partie de la meme version publique que l'application.
+for package_path in (ROOT / "engine/package.json", ROOT / "engine/package-lock.json"):
+    if not package_path.is_file():
+        raise SystemExit(f"Fichier npm absent : {package_path.relative_to(ROOT)}")
+    package = json.loads(package_path.read_text(encoding="utf-8"))
+    package["version"] = version
+    if package_path.name == "package-lock.json":
+        package.setdefault("packages", {}).setdefault("", {})["version"] = version
+    package_path.write_text(json.dumps(package, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
 print(f"[VERSION] LibraMail synchronisé sur {version}")

@@ -1,6 +1,6 @@
 {
   "name": "libramail-engine",
-  "version": "0.1.0",
+  "version": "0.6.3",
   "description": "Moteur mail de LibraMail : IMAP, POP3, SMTP, stockage local chiffré, index SQLite et anti-spam bayésien",
   "main": "backend.js",
   "type": "commonjs",

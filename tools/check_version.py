@@ -51,4 +51,17 @@ backend_patterns = [
 if not any(re.search(pattern, backend) for pattern in backend_patterns):
     fail("engine/backend.js ne contient pas une constante de version reconnue.")
 
+# Controle les metadonnees du paquet npm et du lockfile (npm ci).
+package_path = ROOT / "engine/package.json"
+lock_path = ROOT / "engine/package-lock.json"
+for package_file in (package_path, lock_path):
+    if not package_file.is_file():
+        fail(f"{package_file.relative_to(ROOT)} absent.")
+package = json.loads(package_path.read_text(encoding="utf-8"))
+lockfile = json.loads(lock_path.read_text(encoding="utf-8"))
+if package.get("version") != version:
+    fail("engine/package.json n'est pas synchronisé avec VERSION.")
+if lockfile.get("version") != version or lockfile.get("packages", {}).get("", {}).get("version") != version:
+    fail("engine/package-lock.json n'est pas synchronisé avec VERSION.")
+
 print(f"[VERSION] OK : {version}")

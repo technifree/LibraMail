@@ -10,7 +10,7 @@ Install and authenticate the GitHub CLI:
 gh auth login
 ```
 
-From the root of the LibreMail source tree:
+From the root of the LibraMail source tree:
 
 ```bash
 chmod +x github.sh *.sh
