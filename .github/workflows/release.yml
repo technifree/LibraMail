@@ -21,6 +21,8 @@ env:
 
 jobs:
   verify:
+    outputs:
+      macos_enabled: ${{ steps.macos_policy.outputs.enabled }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -38,6 +40,14 @@ jobs:
           CONFIG_VERSION="$(python3 -c "import json; print(json.load(open('neutralino.config.json'))['version'])")"
           test "$TAG_VERSION" = "$FILE_VERSION"
           test "$TAG_VERSION" = "$CONFIG_VERSION"
+          # Never publish a tag created only on a development branch.
+          if [[ "$GITHUB_EVENT_NAME" == 'push' ]]; then
+            git fetch --no-tags origin master
+            git merge-base --is-ancestor HEAD refs/remotes/origin/master || {
+              echo "Refus : le tag de publication n'est pas intégré à master." >&2
+              exit 1
+            }
+          fi
           if [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' ]]; then
             git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
             git merge-base --is-ancestor "$RELEASE_TAG" HEAD || {
@@ -50,7 +60,7 @@ jobs:
             while IFS= read -r file; do
               [[ -z "$file" ]] && continue
               case "$file" in
-                .github/workflows/*|.gitignore|THIRD_PARTY_NOTICES.md|docs/PUBLISHING.md|tools/prepare_imapsync_ci.py|tools/test_v062_imapsync_ci.js|tools/test_prepare_imapsync_ci.py) ;;
+                .github/workflows/*|.gitignore|THIRD_PARTY_NOTICES.md|docs/PUBLISHING.md|docs/MACOS_PREVIEW.md|build_macos.sh|tools/prepare_imapsync_ci.py|tools/prepare_macos_release_assets.py|tools/smoke_macos_package.sh|tools/smoke_macos_engine.js|tools/test_v062_imapsync_ci.js|tools/test_prepare_imapsync_ci.py|tools/test_v063_macos_preview.js|tools/test_v063_release_macos.js) ;;
                 *) echo "Manuel impossible : fichier applicatif changé depuis $RELEASE_TAG : $file" >&2; exit 1 ;;
               esac
             done <<< "$changes"
@@ -59,6 +69,21 @@ jobs:
           ./security_check.sh
           python3 tools/check_version.py
           python3 tools/generate_release_notes.py "$TAG_VERSION" --check
+
+      - name: Determine the release package policy
+        id: macos_policy
+        shell: bash
+        run: |
+          python3 - <<'PYCODE'
+          import os
+          from pathlib import Path
+          version = Path('VERSION').read_text(encoding='utf-8').strip()
+          major, minor, patch = map(int, version.split('.'))
+          enabled = (major, minor, patch) >= (0, 6, 3)
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
+              out.write(f"enabled={'true' if enabled else 'false'}\n")
+          print(f"macOS experimental assets: {'enabled' if enabled else 'disabled (legacy release)'}")
+          PYCODE
 
       - name: Set up Node.js 22.23.1
         uses: actions/setup-node@v5
@@ -153,7 +178,7 @@ jobs:
           test -n "$(find release-linux -maxdepth 1 -type f -print -quit)"
 
       - name: Upload Linux package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: release-linux
           path: release-linux/*
@@ -206,16 +231,102 @@ jobs:
           }
 
       - name: Upload Windows package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: release-windows
           path: release-windows/*
           if-no-files-found: error
 
+  macos:
+    name: macOS experimental release (${{ matrix.arch }})
+    needs: verify
+    if: ${{ needs.verify.outputs.macos_enabled == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            arch: x86_64
+          - runner: macos-15
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Validate macOS source and architecture
+        shell: bash
+        run: |
+          ./security_check.sh
+          python3 tools/check_version.py
+          bash -n build_macos.sh
+          test "$(uname -m)" = '${{ matrix.arch }}'
+
+      - name: Install Perl packaging prerequisites for Apple Silicon
+        if: matrix.arch == 'arm64'
+        shell: bash
+        run: |
+          brew install imapsync cpanminus
+          export PATH="/usr/bin:$PATH"
+          test "$(command -v perl)" = '/usr/bin/perl'
+          IMAPSYNC_PERL_LIB="$(brew --prefix imapsync)/libexec/lib/perl5"
+          test -d "$IMAPSYNC_PERL_LIB"
+          export PERL5LIB="$RUNNER_TEMP/pp-lib/lib/perl5:$IMAPSYNC_PERL_LIB"
+          cpanm --notest --local-lib-contained "$RUNNER_TEMP/pp-lib" PAR::Packer Digest::HMAC
+          perl -MDigest::HMAC_SHA1 -MIO::Socket::SSL -MNet::SSLeay -MMail::IMAPClient \
+            -e 'print "[imapsync] macOS ARM Perl modules OK\n"'
+          test -x "$RUNNER_TEMP/pp-lib/bin/pp"
+          echo '/usr/bin' >> "$GITHUB_PATH"
+          echo "$RUNNER_TEMP/pp-lib/bin" >> "$GITHUB_PATH"
+          echo "PERL5LIB=$PERL5LIB" >> "$GITHUB_ENV"
+
+      - name: Build native app from release tag
+        shell: bash
+        env:
+          IMAPSYNC_MACOS_X64_SHA256: ${{ vars.IMAPSYNC_MACOS_X64_SHA256 }}
+        run: |
+          if [[ '${{ matrix.arch }}' == 'arm64' ]]; then
+            export PATH="/usr/bin:$PATH"
+            test "$(command -v perl)" = '/usr/bin/perl'
+          fi
+          chmod +x build_macos.sh
+          ./build_macos.sh
+
+      - name: Smoke-test packaged app (required)
+        shell: bash
+        run: |
+          bash tools/smoke_macos_package.sh '${{ matrix.arch }}'
+
+      - name: Prepare clearly marked experimental assets
+        shell: bash
+        run: |
+          python3 tools/prepare_macos_release_assets.py \
+            --version "${RELEASE_TAG#v}" \
+            --arch '${{ matrix.arch }}' \
+            --source build/macos --dest release-macos
+
+      - name: Upload experimental macOS release assets
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-macos-${{ matrix.arch }}
+          path: release-macos/*
+          if-no-files-found: error
+
   publish:
     needs:
+      - verify
       - linux
       - windows
+      - macos
+    # Skipped macOS is acceptable only for versions earlier than 0.6.3.
+    # A failed macOS build/test must block a release, not silently omit it.
+    if: ${{ always() && needs.verify.result == 'success' && needs.linux.result == 'success' && needs.windows.result == 'success' && (needs.macos.result == 'success' || (needs.macos.result == 'skipped' && needs.verify.outputs.macos_enabled == 'false')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -225,13 +336,30 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Download all packages
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           path: release-assets
+          pattern: release-*
           merge-multiple: true
 
       - name: List release assets
         run: find release-assets -maxdepth 2 -type f -printf '%P\n' | sort
+
+      - name: Validate all release assets before publishing
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$(find release-assets -maxdepth 1 -name '*.deb' -type f -print -quit)"
+          test -n "$(find release-assets -maxdepth 1 -name '*windows*.zip' -type f -print -quit)" || \
+            test -n "$(find release-assets -maxdepth 1 -name '*win*.zip' -type f -print -quit)"
+          if [[ '${{ needs.verify.outputs.macos_enabled }}' == 'true' ]]; then
+            for arch in x86_64 arm64; do
+              asset="LibraMail-${RELEASE_TAG#v}-macos-${arch}-experimental.zip"
+              test -s "release-assets/$asset"
+              test -s "release-assets/$asset.sha256"
+              (cd release-assets && sha256sum -c "$asset.sha256")
+            done
+          fi
 
       - name: Publish GitHub Release
         env:

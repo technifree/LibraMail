@@ -1,8 +1,8 @@
 # LibraMail — macOS preview / Préversion macOS
 
-**Status:** experimental. Do not publish this ZIP as an official LibraMail release until both architectures have passed CI and real-device testing.
+**Status:** experimental. For 0.6.3 and later, the official GitHub Release may contain clearly labeled **experimental** macOS assets, in addition to stable Linux and Windows packages. macOS is not declared stable until real-device and Apple signing/notarization qualification.
 
-**Statut :** expérimental. Ne publie pas ces ZIP comme version officielle avant la validation des deux architectures et des essais sur Mac.
+**Statut :** expérimental. La Release GitHub 0.6.3 peut inclure des ZIP macOS explicitement marqués **-experimental**, à côté des paquets Linux et Windows. Il ne s'agit pas d'une version Mac stable tant que les essais réels, la signature et la notarisation ne sont pas effectués.
 
 ## Intended targets / Plateformes prévues
 
@@ -48,7 +48,7 @@ gh run list --workflow macos-preview.yml --branch dev-0.6.3 --limit 1 \
 # Then: gh run view <RUN_ID> --log-failed
 ```
 
-**Only after** the workflow has been merged to the default branch will manual dispatch with `gh workflow run macos-preview.yml --ref master` be possible. Do not merge it to `master` at this stage. The pipeline will create a macOS artifact **only after** Node, the Neutralino app, native SQLite and an executable imapsync have passed packaging checks. Artifacts are experimental, not GitHub Releases.
+**Only after** this workflow has been merged to the default branch is manual dispatch with `gh workflow run macos-preview.yml --ref master` possible. The preview workflow itself does not publish GitHub Releases. When ready for a 0.6.3 release, merge the tested development branch into `master` and use the separate publication workflow (see `docs/PUBLISHING.md`). The preview pipeline creates an artifact **only after** the embedded runtime and native packages pass checks.
 
 ## Validation before official release
 
@@ -71,3 +71,9 @@ After producing each ZIP, the native macOS runner executes `tools/smoke_macos_pa
 - Confirms the RPC session file is removed and that tests do not write personal data inside the packaged application. Temporary state is deleted.
 
 The tests **do not** exercise the graphical window, Gatekeeper, notarization, real mail accounts, SMTP delivery or an IMAP migration. A passing preview is still not a fully qualified stable macOS release.
+
+## Official GitHub Release integration (0.6.3+) / Intégration aux Releases
+
+`release.yml` runs native macOS builds for **both** architectures after source verification, with the same mandatory smoke tests as this preview pipeline. Archives are renamed with `-experimental` and given matching SHA-256 checksum files. A failing macOS job prevents publication of the entire Release; legacy 0.6.2 tags are exempt. The local `release.sh` refuses to tag the development branch.
+
+Le workflow de publication vérifie **les deux** architectures macOS. Les ZIP expérimentaux possèdent une empreinte SHA-256 et restent non signés et non notarisés. Si l'un des deux tests Mac échoue, la Release n'est pas publiée.

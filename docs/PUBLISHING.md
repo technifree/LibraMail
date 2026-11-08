@@ -70,11 +70,14 @@ these settings may be changed with `GITHUB_OWNER`, `REPO_NAME`, `VISIBILITY`.
 ./github.sh release 0.6.3
 ```
 
-`release` requires a clean Git working tree and an authenticated `gh` session.
+`release` requires a clean Git working tree, the `master` branch and an authenticated `gh` session.
 It validates bilingual changelog content *before* changing files, synchronizes
 version markers and notes, executes the full local preflight, then creates the
-commit (if necessary) and tag and pushes them. GitHub Actions builds Linux and
-Windows artifacts and publishes the release with bilingual notes and checksums.
+commit (if necessary) and tag and pushes them. GitHub Actions builds Linux, Windows, and (starting with 0.6.3) both macOS
+architectures, with mandatory macOS package smoke tests. Mac archives are
+**experimental, unsigned and not notarized**, with "-experimental" in their
+names. If either Mac build fails, the release is not published. The bilingual
+notes identify the remaining real-Mac validation gap.
 
 If the tag already exists, the script refuses to overwrite it. The GitHub page
 is not changed by `notes` or `check`: it is changed only when `release` pushes
@@ -92,9 +95,11 @@ into `github-artifacts/`, without creating a release.
 ## Workflow guarantees
 
 - `verify.yml`: version, source checks and tests
-- `build.yml`: manual build for Linux and Windows
+- `build.yml`: manual build for Linux and Windows (unchanged)
+- `macos-preview.yml`: separate CI smoke tests on development-branch pushes
 - `release.yml`: tag-triggered verification, bilingual release-note integrity,
-  package builds and GitHub Release publication
+  Linux, Windows and two macOS package builds (from 0.6.3), macOS smoke tests
+  and GitHub Release publication; either macOS failure blocks the publication
 
 Public builds never use `--with-data`. No account data, messages or credentials
 should be included in any public artifact.
@@ -161,11 +166,15 @@ La configuration initiale peut être adaptée avec les variables `GITHUB_OWNER`,
 ./github.sh release 0.6.3
 ```
 
-Le script refuse les modifications locales non validées et les tags existants.
+Le script refuse une branche autre que `master`, les modifications locales non validées et les tags existants.
 Il contrôle le `CHANGELOG.md` bilingue avant de modifier la version, synchronise
 les documents, lance les tests et pousse le commit et le tag vers GitHub.
-GitHub Actions compile ensuite les paquets Linux et Windows et crée la page
-Releases avec notes bilingues, téléchargements et empreintes SHA-256.
+GitHub Actions compile ensuite Linux, Windows et, dès la version 0.6.3,
+macOS Intel et Apple Silicon. Les paquets Mac sont identifiés
+« -experimental » : ils ne sont ni signés ni notarisés, et leurs interfaces
+n'ont pas été testées sur des Mac physiques. Les tests automatisés macOS sont
+obligatoires ; l'échec d'une architecture bloque toute la publication.
+La Release inclut des notes bilingues et des empreintes SHA-256.
 
 Une commande `notes` ou `check` n'a **aucun effet sur le site GitHub** : la page
 ne change qu'après publication et succès du workflow.
@@ -251,3 +260,10 @@ The preview app is unsigned and must not be presented as a notarized release.
 
 See [docs/MACOS_PREVIEW.md](MACOS_PREVIEW.md) for native architecture, pinned
 imapsync verification, required CI variable and manual workflow instructions.
+
+## Validation avant publication de la 0.6.3 / Before publishing 0.6.3
+
+- Fusionner `dev-0.6.3` vers `master` **après** vérification de la préversion et des tests ; ne pas créer le tag sur la branche de développement.
+- Vérifier `IMAPSYNC_WINDOWS_ZIP_SHA256` et `IMAPSYNC_MACOS_X64_SHA256` dans les variables GitHub du dépôt.
+- Lancer `./github.sh check`, puis `./github.sh release 0.6.3` depuis `master` uniquement après décision de publier.
+- Les paquets macOS sont destinés aux essais volontaires, pas à une distribution stable ou notarifiée.

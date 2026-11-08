@@ -18,7 +18,8 @@
 ### Préparation macOS (préversion)
 
 - Ajout d’un script de construction macOS destiné à Intel x86_64 et Apple Silicon arm64, avec Node.js et SQLite natifs, imapsync obligatoire et données utilisateur enregistrées hors du paquet applicatif.
-- Ajout d’un workflow GitHub Actions **manuel et expérimental** pour tester les deux architectures. Les paquets macOS ne sont pas encore intégrés à la publication officielle : compilation, signature et tests utilisateurs restent nécessaires.
+- Les compilations macOS Intel et Apple Silicon ont été validées dans GitHub Actions, avec des tests automatisés du paquet, de SQLite, du moteur Node.js et d’imapsync.
+- Les archives macOS sont intégrées à la publication GitHub sous l’intitulé **expérimental** : elles restent non signées, non notarisées et non testées graphiquement sur un Mac physique. Un échec sur une architecture bloque la publication complète.
 
 ## English
 
@@ -38,7 +39,8 @@
 ### macOS build preparation (preview)
 
 - Added an experimental macOS build script for Intel x86_64 and Apple Silicon arm64, with native Node.js and SQLite, mandatory imapsync and user data stored outside the application bundle.
-- Added a **manual, experimental** GitHub Actions workflow for both architectures. macOS artifacts are not yet part of the official release; packaging, signing and real-world testing remain to be qualified.
+- Both macOS architectures now pass CI builds and automated smoke tests of the app package, native SQLite, Node.js engine and imapsync.
+- macOS archives are included in the GitHub release as clearly labeled **experimental** assets: they remain unsigned, unnotarized and not visually tested on physical Macs. A failing architecture blocks the complete release.
 
 ---
 

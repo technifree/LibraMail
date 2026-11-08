@@ -23,7 +23,11 @@ EOF
 VERSION="${1#v}"
 TAG="v$VERSION"
 BRANCH="$(git branch --show-current)"
-[[ -n "$BRANCH" ]] || BRANCH="master"
+[[ -n "$BRANCH" ]] || { echo "[PUBLICATION] Refus : exécuter depuis la branche master, pas depuis un HEAD détaché." >&2; exit 1; }
+[[ "$BRANCH" == master ]] || {
+  echo "[PUBLICATION] Refus : vous êtes sur '$BRANCH'. Fusionner dev-0.6.3 sur master avant ./github.sh release." >&2
+  exit 1
+}
 
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || {
   echo "Version invalide : $VERSION" >&2
