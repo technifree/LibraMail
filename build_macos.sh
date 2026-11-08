@@ -64,7 +64,18 @@ with open(sys.argv[2], 'w', encoding='utf-8') as fd: json.dump(cfg,fd,indent=2,e
 PY
 (
   cd "$STAGING"
-  "$NODE_BIN" "$NPX_CLI" --yes @neutralinojs/neu update
+  # In official CI releases, the pinned 6.8.0 native binary was downloaded,
+  # verified against the official GitHub SHA-256, and placed under ROOT/bin.
+  # Only build artifacts are preloaded: no application files are modified.
+  PINNED_NEU="$ROOT/bin/neutralino-mac_${NEU_ARCH}"
+  if [[ -s "$PINNED_NEU" ]]; then
+    mkdir -p bin
+    cp "$PINNED_NEU" "bin/neutralino-mac_${NEU_ARCH}"
+    chmod +x "bin/neutralino-mac_${NEU_ARCH}"
+    echo '[macOS] Binaire Neutralino 6.8.0 prévalidé : téléchargement neu update évité.'
+  else
+    "$NODE_BIN" "$NPX_CLI" --yes @neutralinojs/neu update
+  fi
   "$NODE_BIN" "$NPX_CLI" --yes @neutralinojs/neu build --embed-resources
 )
 NEU_BINARY="$STAGING/dist/libramail-mac_${NEU_ARCH}"

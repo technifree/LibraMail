@@ -60,7 +60,7 @@ jobs:
             while IFS= read -r file; do
               [[ -z "$file" ]] && continue
               case "$file" in
-                .github/workflows/*|.gitignore|THIRD_PARTY_NOTICES.md|docs/PUBLISHING.md|docs/MACOS_PREVIEW.md|build_macos.sh|tools/prepare_imapsync_ci.py|tools/prepare_macos_release_assets.py|tools/smoke_macos_package.sh|tools/smoke_macos_engine.js|tools/test_v062_imapsync_ci.js|tools/test_prepare_imapsync_ci.py|tools/test_v063_macos_preview.js|tools/test_v063_release_macos.js) ;;
+                .github/workflows/*|.gitignore|THIRD_PARTY_NOTICES.md|docs/PUBLISHING.md|docs/MACOS_PREVIEW.md|build_macos.sh|tools/prepare_imapsync_ci.py|tools/prepare_macos_release_assets.py|tools/smoke_macos_package.sh|tools/smoke_macos_engine.js|tools/test_v062_imapsync_ci.js|tools/test_prepare_imapsync_ci.py|tools/test_v063_macos_preview.js|tools/test_v063_release_macos.js|tools/prepare_neutralino_ci.py|tools/test_v063_neutralino_ci.js) ;;
                 *) echo "Manuel impossible : fichier applicatif changé depuis $RELEASE_TAG : $file" >&2; exit 1 ;;
               esac
             done <<< "$changes"
@@ -162,6 +162,11 @@ jobs:
           python3 tools/prepare_imapsync_ci.py linux
           runtime/imapsync/imapsync --version || runtime/imapsync/imapsync --help
 
+      - name: Retrieve verified Neutralino 6.8.0 native binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/prepare_neutralino_ci.py --target linux-x64
+
       - name: Build Linux portable and Debian packages
         run: |
           chmod +x build_linux.sh build_deb.sh
@@ -210,6 +215,14 @@ jobs:
             & .\runtime\imapsync\imapsync.exe --help
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
+
+      - name: Retrieve verified Neutralino 6.8.0 native binary
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python tools/prepare_neutralino_ci.py --target windows-x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build portable Windows package
         shell: pwsh
@@ -285,6 +298,17 @@ jobs:
           echo '/usr/bin' >> "$GITHUB_PATH"
           echo "$RUNNER_TEMP/pp-lib/bin" >> "$GITHUB_PATH"
           echo "PERL5LIB=$PERL5LIB" >> "$GITHUB_ENV"
+
+      - name: Retrieve verified Neutralino 6.8.0 native binary
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ '${{ matrix.arch }}' == 'arm64' ]]; then
+            python3 tools/prepare_neutralino_ci.py --target macos-arm64
+          else
+            python3 tools/prepare_neutralino_ci.py --target macos-x64
+          fi
 
       - name: Build native app from release tag
         shell: bash
