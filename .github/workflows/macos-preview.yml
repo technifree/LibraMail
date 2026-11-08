@@ -83,8 +83,13 @@ jobs:
           ./build_macos.sh
           test -n "$(find build/macos -name 'LibraMail-*.zip' -type f -print -quit)"
 
+      - name: Smoke-test the packaged app on the native macOS runner
+        shell: bash
+        run: |
+          bash tools/smoke_macos_package.sh '${{ matrix.arch }}'
+
       - name: Upload preview package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: libramail-macos-${{ matrix.arch }}-preview
           path: build/macos/*
