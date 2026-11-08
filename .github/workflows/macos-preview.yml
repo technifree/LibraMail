@@ -49,26 +49,36 @@ jobs:
         if: matrix.arch == 'arm64'
         shell: bash
         run: |
-          brew install imapsync perl cpanminus
-          export PATH="$(brew --prefix perl)/bin:$PATH"
-          # Homebrew stores imapsync's Perl modules in its private libexec.
-          # PAR::Packer's --xargs scan executes imapsync, so it must see them.
+          brew install imapsync cpanminus
+          # Homebrew imapsync is built against the Perl supplied by macOS.
+          # Do not build PAR::Packer with Homebrew Perl 5.x: the Perl modules
+          # installed by the imapsync formula may not be ABI-compatible.
+          export PATH="/usr/bin:$PATH"
+          test "$(command -v perl)" = '/usr/bin/perl'
+          perl -e 'printf "[imapsync] Perl %s : %s\n", $^V, $^X'
+          # The formula installs third-party modules in its private libexec.
           IMAPSYNC_PERL_LIB="$(brew --prefix imapsync)/libexec/lib/perl5"
           test -d "$IMAPSYNC_PERL_LIB"
-          cpanm --notest --local-lib-contained "$RUNNER_TEMP/pp-lib" PAR::Packer Digest::HMAC
           export PERL5LIB="$RUNNER_TEMP/pp-lib/lib/perl5:$IMAPSYNC_PERL_LIB"
-          perl -MDigest::HMAC_SHA1 -e 'print "[imapsync] Digest::HMAC_SHA1 available\n"'
-          perl -MMail::IMAPClient -e 'print "[imapsync] Mail::IMAPClient available\n"'
-          echo "$(brew --prefix perl)/bin" >> "$GITHUB_PATH"
+          cpanm --notest --local-lib-contained "$RUNNER_TEMP/pp-lib" PAR::Packer Digest::HMAC
+          # Check the modules needed by the verified imapsync 2.314 source
+          # before running the PAR static/dynamic dependency scanner.
+          perl -MDigest::HMAC_SHA1 -MIO::Socket::SSL -MNet::SSLeay -MMail::IMAPClient \
+            -e 'print "[imapsync] Perl SSL/IMAP dependencies available\n"'
+          test -x "$RUNNER_TEMP/pp-lib/bin/pp"
+          echo '/usr/bin' >> "$GITHUB_PATH"
           echo "$RUNNER_TEMP/pp-lib/bin" >> "$GITHUB_PATH"
           echo "PERL5LIB=$PERL5LIB" >> "$GITHUB_ENV"
-          test -x "$RUNNER_TEMP/pp-lib/bin/pp"
 
       - name: Build native .app and ZIP (no personal data)
         shell: bash
         env:
           IMAPSYNC_MACOS_X64_SHA256: ${{ vars.IMAPSYNC_MACOS_X64_SHA256 }}
         run: |
+          if [[ '${{ matrix.arch }}' == 'arm64' ]]; then
+            export PATH="/usr/bin:$PATH"
+            test "$(command -v perl)" = '/usr/bin/perl'
+          fi
           chmod +x build_macos.sh
           ./build_macos.sh
           test -n "$(find build/macos -name 'LibraMail-*.zip' -type f -print -quit)"
