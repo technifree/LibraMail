@@ -1,3 +1,43 @@
+# LibraMail 0.6.4 - 2026-11-10
+
+## Français
+
+### Correction des pièces jointes
+
+- L'ajout d'une ou plusieurs pièces jointes à un nouveau message utilise désormais le répertoire de données réel de LibraMail, y compris avec une installation Debian.
+- Le transfert d'un message reprend automatiquement ses pièces jointes depuis le contenu MIME d'origine, sans imposer de les ajouter à nouveau.
+- Il est possible de retirer une pièce jointe depuis la fenêtre de rédaction avant l'envoi.
+
+### Sécurisation des envois
+
+- L'envoi, l'enregistrement d'un brouillon et la programmation d'un envoi différé attendent la préparation des fichiers joints.
+- Lorsqu'une pièce jointe est manquante ou inaccessible, l'envoi SMTP est bloqué au lieu d'expédier silencieusement un message incomplet.
+- Les copies temporaires gérées par LibraMail sont nettoyées lorsqu'elles ne sont plus nécessaires.
+
+### Vérifications
+
+- Tests de non-régression couvrant plusieurs pièces jointes, le transfert MIME et l'intégrité binaire d'un PDF et d'une image.
+
+## English
+
+### Attachment fixes
+
+- Adding one or more attachments to a new message now uses LibraMail's actual writable data directory, including Debian installations.
+- Forwarding a message automatically carries over its attachments from the original MIME message; recipients no longer receive a forward without the original files.
+- Attachments can now be removed from the compose window before sending.
+
+### Safer sending
+
+- Sending, saving a draft and scheduling a message wait until attachment preparation has completed.
+- If an attachment is missing or unreadable, SMTP sending is blocked instead of silently delivering an incomplete message.
+- Temporary copies managed by LibraMail are cleaned up when no longer needed.
+
+### Verification
+
+- Regression tests cover multiple attachments, MIME forwarding and byte-for-byte integrity of PDF and image files.
+
+---
+
 # LibraMail 0.6.3 - 2026-11-08
 
 ## Français

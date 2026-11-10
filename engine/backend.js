@@ -40,7 +40,7 @@ const atomicFile = require('./lib/atomic_file');
 const composeAttachments = require('./lib/compose_attachments');
 
 const PORT = 47800;
-const APP_VERSION = '0.6.3';
+const APP_VERSION = '0.6.4';
 const ROOT = path.resolve(__dirname, '..');
 
 // LibraMail 0.4.8 — séparation programme / données utilisateur.

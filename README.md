@@ -1,6 +1,6 @@
 # LibraMail
 
-[![Version](https://img.shields.io/badge/version-0.6.3-4f8bd8)](https://github.com/technifree/LibraMail/releases)
+[![Version](https://img.shields.io/badge/version-0.6.4-4f8bd8)](https://github.com/technifree/LibraMail/releases)
 [![Verification](https://github.com/technifree/LibraMail/actions/workflows/verify.yml/badge.svg)](https://github.com/technifree/LibraMail/actions/workflows/verify.yml)
 [![Builds](https://github.com/technifree/LibraMail/actions/workflows/build.yml/badge.svg)](https://github.com/technifree/LibraMail/actions/workflows/build.yml)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
@@ -14,14 +14,14 @@ accounts without requiring Node.js to be installed on the target computer.
 ![LibraMail main window](docs/screenshots/libramail-main.png)
 
 <!-- LIBRAMAIL:RELEASE-EN:START -->
-## Latest version — 0.6.3 (2026-11-08)
+## Latest version — 0.6.4 (2026-11-10)
 
-- A **0-second read delay** now updates both the message and its conversation unread count, including single-message threads.
-- A discreet header indicator appears when a newer GitHub Release is available.
-- Two experimental macOS packages for Intel x86_64 and Apple Silicon arm64 are now included in GitHub downloads, with bundled Node.js, SQLite and imapsync and user data stored outside the application bundle.
-- Cached message lists are invalidated after read-state changes to prevent a stale unread dot when returning to the unified inbox.
+- Adding one or more attachments to a new message now uses LibraMail's actual writable data directory, including Debian installations.
+- Sending, saving a draft and scheduling a message wait until attachment preparation has completed.
+- Forwarding a message automatically carries over its attachments from the original MIME message; recipients no longer receive a forward without the original files.
+- If an attachment is missing or unreadable, SMTP sending is blocked instead of silently delivering an incomplete message.
 
-[Full release notes](https://github.com/technifree/LibraMail/releases/tag/v0.6.3) · [CHANGELOG](CHANGELOG.md)
+[Full release notes](https://github.com/technifree/LibraMail/releases/tag/v0.6.4) · [CHANGELOG](CHANGELOG.md)
 <!-- LIBRAMAIL:RELEASE-EN:END -->
 
 ## Highlights
@@ -103,8 +103,8 @@ This repository includes one command centre:
 ./github.sh check
 ./github.sh init
 ./github.sh build
-./github.sh notes 0.6.3
-./github.sh release 0.6.3
+./github.sh notes 0.6.4
+./github.sh release 0.6.4
 ```
 
 - `init` creates/configures the GitHub repository and pushes the source
@@ -141,14 +141,14 @@ sans exiger l'installation de Node.js sur l'ordinateur cible.
 ![Fenêtre principale de LibraMail](docs/screenshots/libramail-main.png)
 
 <!-- LIBRAMAIL:RELEASE-FR:START -->
-## Dernière version — 0.6.3 (2026-11-08)
+## Dernière version — 0.6.4 (2026-11-10)
 
-- Le **délai de 0 seconde** marque le message comme lu et actualise aussi le compteur de la conversation, y compris lorsque celle-ci ne contient qu’un seul courriel.
-- Indicateur discret dans la barre supérieure lorsqu'une nouvelle version est publiée sur GitHub.
-- Deux archives macOS expérimentales, pour Intel x86_64 et Apple Silicon arm64, rejoignent les téléchargements GitHub, avec Node.js, SQLite et imapsync embarqués et les données utilisateur conservées hors de l’application.
-- Les listes de messages mémorisées sont invalidées après un changement de lecture pour éviter de réafficher un ancien point vert au retour dans la boîte unifiée.
+- L'ajout d'une ou plusieurs pièces jointes à un nouveau message utilise désormais le répertoire de données réel de LibraMail, y compris avec une installation Debian.
+- L'envoi, l'enregistrement d'un brouillon et la programmation d'un envoi différé attendent la préparation des fichiers joints.
+- Le transfert d'un message reprend automatiquement ses pièces jointes depuis le contenu MIME d'origine, sans imposer de les ajouter à nouveau.
+- Lorsqu'une pièce jointe est manquante ou inaccessible, l'envoi SMTP est bloqué au lieu d'expédier silencieusement un message incomplet.
 
-[Notes de version complètes](https://github.com/technifree/LibraMail/releases/tag/v0.6.3) · [CHANGELOG](CHANGELOG.md)
+[Notes de version complètes](https://github.com/technifree/LibraMail/releases/tag/v0.6.4) · [CHANGELOG](CHANGELOG.md)
 <!-- LIBRAMAIL:RELEASE-FR:END -->
 
 ## Fonctions principales
@@ -234,8 +234,8 @@ Un seul script sert de tableau de commande :
 ./github.sh check
 ./github.sh init
 ./github.sh build
-./github.sh notes 0.6.3
-./github.sh release 0.6.3
+./github.sh notes 0.6.4
+./github.sh release 0.6.4
 ```
 
 - `init` crée et configure le dépôt GitHub, puis envoie les sources
@@ -251,4 +251,4 @@ Le mode d'emploi détaillé se trouve dans
 
 LibraMail est distribué sous [licence MIT](LICENSE).
 
-_Last documentation update / Dernière mise à jour : 2026-11-08._
+_Last documentation update / Dernière mise à jour : 2026-11-10._

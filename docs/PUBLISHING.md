@@ -42,8 +42,8 @@ these settings may be changed with `GITHUB_OWNER`, `REPO_NAME`, `VISIBILITY`.
 2. Update the local version and generate the bilingual README and release notes:
 
    ```bash
-   python3 tools/set_version.py 0.6.3
-   ./github.sh notes 0.6.3
+   python3 tools/set_version.py 0.6.4
+   ./github.sh notes 0.6.4
    ./github.sh check
    ```
 
@@ -58,7 +58,7 @@ these settings may be changed with `GITHUB_OWNER`, `REPO_NAME`, `VISIBILITY`.
    git status --short
    git add README.md CHANGELOG.md .github/release-notes.md VERSION
    # Also stage and commit your tested application source changes.
-   git commit -m "Prepare LibraMail 0.6.3"
+   git commit -m "Prepare LibraMail 0.6.4"
    ```
 
    `./github.sh check` validates documentation consistency and runs the tests.
@@ -67,7 +67,7 @@ these settings may be changed with `GITHUB_OWNER`, `REPO_NAME`, `VISIBILITY`.
 ## Publish a release
 
 ```bash
-./github.sh release 0.6.3
+./github.sh release 0.6.4
 ```
 
 `release` requires a clean Git working tree, the `master` branch and an authenticated `gh` session.
@@ -138,8 +138,8 @@ La configuration initiale peut être adaptée avec les variables `GITHUB_OWNER`,
 2. Actualiser les documents et contrôler la version :
 
    ```bash
-   python3 tools/set_version.py 0.6.3
-   ./github.sh notes 0.6.3
+   python3 tools/set_version.py 0.6.4
+   ./github.sh notes 0.6.4
    ./github.sh check
    ```
 
@@ -154,7 +154,7 @@ La configuration initiale peut être adaptée avec les variables `GITHUB_OWNER`,
    git status --short
    git add README.md CHANGELOG.md .github/release-notes.md VERSION
    # Ajouter également les fichiers applicatifs vérifiés.
-   git commit -m "Préparer LibraMail 0.6.3"
+   git commit -m "Préparer LibraMail 0.6.4"
    ```
 
    Le contrôle `check` bloque les notes obsolètes et vérifie la cohérence du
@@ -163,7 +163,7 @@ La configuration initiale peut être adaptée avec les variables `GITHUB_OWNER`,
 ## Publier la version
 
 ```bash
-./github.sh release 0.6.3
+./github.sh release 0.6.4
 ```
 
 Le script refuse une branche autre que `master`, les modifications locales non validées et les tags existants.
@@ -251,19 +251,20 @@ particularité si l'origine exacte du binaire doit être auditée.
 
 Le succès réel de cette réparation doit être validé par le workflow distant.
 
-## macOS experimental build (0.6.3+)
+## macOS experimental packages (0.6.3+)
 
-Mac builds are **not** part of the official release workflow yet. The separate
-`macos-preview.yml` workflow must first pass on Intel x86_64 **and** Apple
-Silicon arm64, with embedded Node/SQLite/imapsync and real-device launch tests.
-The preview app is unsigned and must not be presented as a notarized release.
+The official release workflow builds both Intel (`x86_64`) and Apple Silicon
+(`arm64`) macOS packages, in addition to Linux and Windows. Both macOS jobs
+must pass their automated smoke tests before publication. These packages
+remain **experimental, unsigned and unnotarized**; the graphical application
+has not been validated on physical Macs. See [MACOS_PREVIEW.md](MACOS_PREVIEW.md).
 
-See [docs/MACOS_PREVIEW.md](MACOS_PREVIEW.md) for native architecture, pinned
-imapsync verification, required CI variable and manual workflow instructions.
+## Validation avant publication de la 0.6.4 / Before publishing 0.6.4
 
-## Validation avant publication de la 0.6.3 / Before publishing 0.6.3
-
-- Fusionner `dev-0.6.3` vers `master` **après** vérification de la préversion et des tests ; ne pas créer le tag sur la branche de développement.
-- Vérifier `IMAPSYNC_WINDOWS_ZIP_SHA256` et `IMAPSYNC_MACOS_X64_SHA256` dans les variables GitHub du dépôt.
-- Lancer `./github.sh check`, puis `./github.sh release 0.6.3` depuis `master` uniquement après décision de publier.
-- Les paquets macOS sont destinés aux essais volontaires, pas à une distribution stable ou notarifiée.
+- Valider en conditions réelles la rédaction d'un message avec plusieurs pièces jointes, son transfert et un brouillon contenant des fichiers joints.
+- Vérifier `./github.sh check`, les workflows `Verify sources` et les constructions macOS expérimentales sur `dev-0.6.4`.
+- Vérifier les variables de construction `IMAPSYNC_WINDOWS_ZIP_SHA256` et `IMAPSYNC_MACOS_X64_SHA256` avant la Release.
+- Fusionner `dev-0.6.4` dans `master` sans modifier ni déplacer le tag de la 0.6.3.
+- Exécuter `./github.sh release 0.6.4` **uniquement sur `master`** après validation des workflows. La commande crée un tag et déclenche une publication publique.
+- Mettre à jour la date des notes avec `python3 tools/prepare_v064_release.py --date AAAA-MM-JJ` si la publication a lieu après le 10 novembre 2026.
+- Conserver la mention **expérimental** pour les deux versions macOS, non signées et non notarisées.

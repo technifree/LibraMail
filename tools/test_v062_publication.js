@@ -15,8 +15,6 @@ function run(root, ...args) {
   return spawnSync(pythonCmd, [script, ...args], {
     cwd: root,
     encoding: 'utf8',
-    // Python's redirected stderr may otherwise use cp1252 on Windows.
-    env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' },
   });
 }
 
@@ -28,7 +26,12 @@ assert.strictEqual(result.status, 0, `Documents ${current} incohérents : ${resu
 const notes = fs.readFileSync(path.join(ROOT, '.github', 'release-notes.md'), 'utf8');
 const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
 assert(notes.includes('## Français') && notes.includes('## English'));
-assert(notes.includes('0-second') && notes.includes('0 seconde'));
+// The 0-second read-state fix belongs to an earlier release. Keep the
+// historical regression check, without requiring every future release's
+// generated notes to repeat it.
+const changelog = fs.readFileSync(path.join(ROOT, 'CHANGELOG.md'), 'utf8');
+assert(changelog.includes('0-second') && changelog.includes('0 seconde'),
+  'Le correctif historique du délai de lecture doit rester documenté');
 assert(readme.includes(`Latest version — ${current}`) && readme.includes(`Dernière version — ${current}`));
 assert(readme.includes(`/releases/tag/v${current}`));
 
