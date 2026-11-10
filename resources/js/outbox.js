@@ -200,6 +200,7 @@
     const button = document.getElementById('btn-save-draft');
     if (button) button.disabled = true;
     try {
+      await App.waitForComposeAttachments();
       const state = App.composeState();
       const context = App.composeContext();
       const result = await App.rpc('drafts.save', {

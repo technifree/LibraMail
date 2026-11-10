@@ -6612,6 +6612,28 @@ const App = (() => {
 
   // ---------- Compositeur et signatures ----------
   let composeAttachments = [];
+  let composeAttachmentSession = 0;
+  let composeAttachmentQueue = Promise.resolve();
+  let composeAttachmentError = null;
+  let composeForwardAttachmentError = null;
+
+  function queueComposeAttachmentTask(task, { forward = false } = {}) {
+    const session = composeAttachmentSession;
+    const operation = composeAttachmentQueue.catch(() => {}).then(async () => {
+      if (session !== composeAttachmentSession) return;
+      await task(session);
+      if (session === composeAttachmentSession && !forward) composeAttachmentError = null;
+    });
+    composeAttachmentQueue = operation.catch(error => {
+      if (session === composeAttachmentSession) {
+        if (forward) composeForwardAttachmentError = error;
+        else composeAttachmentError = error;
+      }
+      throw error;
+    });
+    return composeAttachmentQueue;
+  }
+
   let composeMode = 'new';
   let composeSource = null;
   let composeQuoteText = '';
@@ -6957,6 +6979,10 @@ const App = (() => {
     window.OutboxUI?.toggleScheduleControls?.(false);
     composeMode = mode;
     composeSource = source;
+    composeAttachmentSession++;
+    composeAttachmentQueue = Promise.resolve();
+    composeAttachmentError = null;
+    composeForwardAttachmentError = null;
     composeAttachments = [];
     composeQuoteText = mode === 'new' ? '' : quoteOriginalMessage(source, mode);
     composeReplyHeaders = isReplyMode(mode) ? {
@@ -7010,6 +7036,40 @@ const App = (() => {
     setComposeEmojiPickerOpen(false);
     openModal('compose-modal');
     prepareComposeEditorForMode(mode, { focusRecipient: mode === 'new' });
+
+    // Un transfert conserve les pièces jointes MIME du message d'origine.
+    // L'extraction se fait dans le moteur, sans faire circuler leurs octets sur le RPC.
+    const originalAttachments = mode === 'forward' && Array.isArray(source?.attachments)
+      ? source.attachments : [];
+    if (mode === 'forward' && !originalAttachments.length && Boolean(meta.has_attach)) {
+      queueComposeAttachmentTask(() => {
+        throw new Error(t('compose.forwardAttachmentsError'));
+      }, { forward: true }).catch(error => status(error.message, 'error'));
+    }
+    if (originalAttachments.length) {
+      const messageId = Number(meta.id);
+      const indexes = originalAttachments.map(item => Number(item.index));
+      queueComposeAttachmentTask(async session => {
+        if (!Number.isSafeInteger(messageId) || messageId <= 0) {
+          throw new Error(t('compose.forwardAttachmentsError'));
+        }
+        status(t('compose.attachPreparing'), 'busy');
+        const result = await rpc('attachments.forward.prepare', { messageId, indexes });
+        if (session !== composeAttachmentSession) {
+          rpc('attachments.compose.cleanup', { attachments: result?.attachments || [] }).catch(() => {});
+          return;
+        }
+        const prepared = Array.isArray(result?.attachments) ? result.attachments : [];
+        if (prepared.length !== originalAttachments.length) {
+          throw new Error(t('compose.forwardAttachmentsError'));
+        }
+        composeAttachments.push(...prepared);
+        renderComposeAttachments();
+        reportAddedComposeAttachments(prepared.length);
+      }, { forward: true }).catch(error => {
+        status(`${t('compose.forwardAttachmentsError')} : ${error.message}`, 'error');
+      });
+    }
   }
 
   // LibraMail 0.2.24 UI v14 — destinataires et édition enrichie fiables
@@ -7510,9 +7570,22 @@ const App = (() => {
   function renderComposeAttachments() {
     const container = document.getElementById('compose-attachments');
     if (!container) return;
-    container.innerHTML = composeAttachments.map(attachment =>
-      `<span class="att-chip"><i class="fa-solid fa-paperclip"></i>${esc(attachment.filename || attachment.path || '')}</span>`
+    container.innerHTML = composeAttachments.map((attachment, index) =>
+      `<span class="att-chip"><i class="fa-solid fa-paperclip"></i>${esc(attachment.filename || attachment.path || '')}` +
+      `<button type="button" class="att-remove" data-remove-compose-attachment="${index}" ` +
+      `title="${esc(t('compose.removeAttachment'))}" aria-label="${esc(t('compose.removeAttachment'))}">×</button></span>`
     ).join('');
+    container.querySelectorAll('[data-remove-compose-attachment]').forEach(button => {
+      button.onclick = () => {
+        const index = Number(button.dataset.removeComposeAttachment);
+        if (!Number.isInteger(index) || index < 0 || index >= composeAttachments.length) return;
+        const [removed] = composeAttachments.splice(index, 1);
+        renderComposeAttachments();
+        if (removed?.managedCopy) {
+          rpc('attachments.compose.cleanup', { attachments: [removed] }).catch(() => {});
+        }
+      };
+    });
   }
 
   function composeState() {
@@ -7624,12 +7697,6 @@ const App = (() => {
     return String(typeof NL_OS === 'undefined' ? '' : NL_OS) === 'Windows' ? '\\' : '/';
   }
 
-  function composeAttachmentStorageDirectory() {
-    const separator = composeAttachmentPathSeparator();
-    const base = String(typeof NL_PATH === 'undefined' ? '.' : NL_PATH).replace(/[\\/]+$/, '');
-    return `${base}${separator}data${separator}compose-attachments`;
-  }
-
   function joinComposeAttachmentPath(directory, filename) {
     return `${String(directory || '').replace(/[\\/]+$/, '')}${composeAttachmentPathSeparator()}${filename}`;
   }
@@ -7678,25 +7745,33 @@ const App = (() => {
     };
   }
 
-  async function importComposeAttachmentFiles(files) {
+  async function importComposeAttachmentFiles(files, session = composeAttachmentSession) {
     const selectedFiles = Array.from(files || []).filter(file => file && typeof file.name === 'string');
     if (!selectedFiles.length) return;
 
     const button = document.getElementById('btn-attach');
     const existingSources = new Set(composeAttachments.map(item => String(item.sourceKey || '')).filter(Boolean));
-    const directory = composeAttachmentStorageDirectory();
     let added = 0;
     const failures = [];
 
     if (button) button.disabled = true;
     status(t('compose.attachPreparing'), 'busy');
     try {
-      try { await Neutralino.filesystem.createDirectory(directory); } catch {}
+      // Le moteur sait si l'application est portable ou installée dans /opt.
+      // NL_PATH est le dossier du programme, pas nécessairement celui des données.
+      const storage = await rpc('attachments.compose.directory');
+      const directory = String(storage?.directory || '');
+      if (!directory) throw new Error(t('compose.attachStorageError'));
+      if (session !== composeAttachmentSession) return;
       for (const file of selectedFiles) {
         const sourceKey = composeAttachmentSourceKey(file);
         if (existingSources.has(sourceKey)) continue;
         try {
           const attachment = await copyComposeAttachmentFile(file, directory);
+          if (session !== composeAttachmentSession) {
+            rpc('attachments.compose.cleanup', { attachments: [attachment] }).catch(() => {});
+            return;
+          }
           composeAttachments.push(attachment);
           existingSources.add(sourceKey);
           added++;
@@ -7710,7 +7785,9 @@ const App = (() => {
         reportAddedComposeAttachments(added);
       }
       if (failures.length) {
-        status(t('compose.attachCopyError', { name: failures[0] }), 'error');
+        const message = t('compose.attachCopyError', { name: failures[0] });
+        status(message, 'error');
+        throw new Error(message);
       } else if (!added) {
         status(t('compose.attachAlreadyAdded'), 'info');
       }
@@ -7805,10 +7882,18 @@ const App = (() => {
     picker.click();
   }
 
+  async function waitForComposeAttachments() {
+    await composeAttachmentQueue;
+    if (composeForwardAttachmentError) throw composeForwardAttachmentError;
+    if (composeAttachmentError) throw composeAttachmentError;
+  }
+
   async function send() {
     const button = document.getElementById('btn-send');
     button.disabled = true;
     try {
+      // Attendre toutes les copies, y compris en cas d'envoi différé.
+      await waitForComposeAttachments();
       const envelope = composeEnvelope();
       const schedule = document.getElementById('compose-send-later')?.checked === true;
       if (schedule) {
@@ -10434,6 +10519,14 @@ const App = (() => {
   // ---------- Utilitaires ----------
   const openModal = id => document.getElementById(id).classList.add('open');
   const closeModals = () => {
+    if (document.getElementById('compose-modal')?.classList.contains('open')) {
+      const prepared = composeAttachments.filter(item => item?.managedCopy);
+      // Une fermeture invalide les transferts/ajouts encore en cours.
+      composeAttachmentSession++;
+      if (prepared.length) {
+        rpc('attachments.compose.cleanup', { attachments: prepared }).catch(() => {});
+      }
+    }
     document.querySelectorAll('.modal-veil').forEach(modal => modal.classList.remove('open'));
     if (pendingConfirmAction) {
       const resolve = pendingConfirmAction;
@@ -10799,15 +10892,12 @@ const App = (() => {
     document.getElementById('btn-confirm-exit').onclick = shutdownEngineAndExit;
     document.getElementById('btn-send').onclick = send;
     document.getElementById('btn-attach').onclick = attachFile;
-    document.getElementById('compose-file-picker')?.addEventListener('change', async event => {
+    document.getElementById('compose-file-picker')?.addEventListener('change', event => {
       const input = event.currentTarget;
-      try {
-        await importComposeAttachmentFiles(input.files);
-      } catch (error) {
-        status(`${t('error')} : ${error.message}`, 'error');
-      } finally {
-        input.value = '';
-      }
+      const files = Array.from(input.files || []);
+      input.value = '';
+      queueComposeAttachmentTask(session => importComposeAttachmentFiles(files, session))
+        .catch(error => status(`${t('error')} : ${error.message}`, 'error'));
     });
     const composeEditor = composeEditorElement();
     ['mouseup', 'keyup', 'focus'].forEach(eventName => {
@@ -11330,6 +11420,7 @@ const App = (() => {
     openCompose,
     composeState,
     composeEnvelope,
+    waitForComposeAttachments,
     composeContext,
     setComposeContext,
     loadComposeState,

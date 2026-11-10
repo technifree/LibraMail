@@ -422,6 +422,9 @@ body.resizing-panes.resize-rows { cursor: row-resize; }
 .att-chip i { color: var(--accent); }
 .att-chip .size { color: var(--fg-faint); font-size: 11px; }
 .att-chip:hover { background: var(--bg-active); }
+#compose-attachments .att-remove { border:0; background:transparent; color:var(--fg-muted); cursor:pointer; padding:0 2px; font:inherit; font-size:16px; line-height:1; }
+#compose-attachments .att-remove:hover { color:var(--danger, #b91c1c); }
+
 
 .att-save {
   flex: none;

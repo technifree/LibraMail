@@ -21,12 +21,21 @@ function transporter(account) {
 }
 
 function normalizeAttachments(attachments) {
-  return (attachments || []).map(attachment => attachment.path
-    ? { filename: attachment.filename, path: attachment.path }
-    : {
-        filename: attachment.filename,
-        content: Buffer.from(attachment.content || '', 'base64'),
-      });
+  if (attachments != null && !Array.isArray(attachments)) {
+    throw new Error('Liste de pièces jointes invalide');
+  }
+  return (attachments || []).map((attachment, index) => {
+    const filename = String(attachment?.filename || `piece-jointe-${index + 1}`);
+    if (typeof attachment?.path === 'string' && attachment.path) {
+      const stats = fs.statSync(attachment.path);
+      if (!stats.isFile()) throw new Error(`Pièce jointe inaccessible : ${filename}`);
+      return { filename, path: attachment.path };
+    }
+    if (typeof attachment?.content === 'string') {
+      return { filename, content: Buffer.from(attachment.content, 'base64') };
+    }
+    throw new Error(`Pièce jointe inaccessible : ${filename}`);
+  });
 }
 
 

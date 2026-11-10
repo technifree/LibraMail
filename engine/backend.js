@@ -37,6 +37,7 @@ const emlImport = require('./lib/eml_import');
 const appPaths = require('./lib/app_paths');
 const rpcSecurity = require('./lib/rpc_security');
 const atomicFile = require('./lib/atomic_file');
+const composeAttachments = require('./lib/compose_attachments');
 
 const PORT = 47800;
 const APP_VERSION = '0.6.3';
@@ -4334,6 +4335,20 @@ const methods = {
   },
 
   // ---------- Pièces jointes ----------
+  'attachments.compose.directory': async () => ({
+    directory: composeAttachments.directory(DATA),
+  }),
+  'attachments.compose.cleanup': async ({ attachments = [] }) => ({
+    removed: composeAttachments.cleanupPrepared(DATA, attachments),
+  }),
+  'attachments.forward.prepare': async ({ messageId, indexes = [] }) => {
+    const message = db.getMessage(messageId);
+    if (!message) throw new Error('Message introuvable');
+    const parsed = await simpleParser(readLocalMessage(message));
+    return {
+      attachments: composeAttachments.stageForward(DATA, parsed.attachments || [], indexes),
+    };
+  },
   'attachments.save': async ({ messageId, index, targetPath }) => {
     const message = db.getMessage(messageId);
     if (!message) throw new Error('Message introuvable');
@@ -4366,12 +4381,15 @@ const methods = {
   },
   'drafts.save': async ({ id = null, state, removeScheduledId = null }) => {
     const item = outbox.saveDraft({ id, state, removeScheduledId });
+    // Les pièces jointes sont désormais persistées sous data/outbox.
+    composeAttachments.cleanupPrepared(DATA, state?.attachments);
     const counts = outbox.counts();
     broadcast('outbox.updated', counts);
     return { item, counts };
   },
   'scheduled.save': async ({ id = null, accountId, state, mail, sendAt, removeDraftId = null }) => {
     const item = outbox.saveScheduled({ id, accountId, state, mail, sendAt, removeDraftId });
+    composeAttachments.cleanupPrepared(DATA, state?.attachments);
     const counts = outbox.counts();
     broadcast('outbox.updated', counts);
     return { item, counts };
@@ -4401,6 +4419,8 @@ const methods = {
   // ---------- Envoi ----------
   'mail.send': async ({ accountId, mail, draftId = null, scheduledId = null }) => {
     const result = await sendMailNow(accountId, mail);
+    // Supprimer uniquement les copies temporaires après confirmation de l'envoi.
+    composeAttachments.cleanupPrepared(DATA, mail?.attachments);
     if (draftId) outbox.remove(draftId, 'draft');
     if (scheduledId) outbox.remove(scheduledId, 'scheduled');
     const counts = outbox.counts();
