@@ -15,6 +15,9 @@ function run(root, ...args) {
   return spawnSync(pythonCmd, [script, ...args], {
     cwd: root,
     encoding: 'utf8',
+    // Windows may default Python stderr to cp1252. Force UTF-8 so accented
+    // diagnostics remain stable across Linux, Windows and macOS CI runners.
+    env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' },
   });
 }
 
