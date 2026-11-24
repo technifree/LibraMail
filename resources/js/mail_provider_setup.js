@@ -42,7 +42,7 @@
     };
     if (provider === 'microsoft') return {
       imap: { host: 'outlook.office365.com', port: 993, secure: true, user },
-      smtp: { host: 'smtp-mail.outlook.com', port: 587, secure: false, user },
+      smtp: { host: recognizedProvider(email) === 'microsoft' ? 'smtp-mail.outlook.com' : 'smtp.office365.com', port: 587, secure: false, user },
       authentication: 'oauth2-required',
     };
     return null;
@@ -54,7 +54,19 @@
     if (field === 'port') return ['993', '995', '465', '587'].includes(current);
     return false;
   }
-  const api = Object.freeze({ recognizedProvider, resolvedProvider, profileFor, mayReplace });
+  // Le mot de passe guidé ne doit jamais être transmis à un serveur personnalisé.
+  function isStandardGmail(email, protocol, fields) {
+    if (protocol !== 'imap' || !String(email || '').trim()) return false;
+    const profile = profileFor('gmail', email);
+    return ['imap', 'smtp'].every(kind => {
+      const actual = fields?.[kind];
+      const expected = profile[kind];
+      return actual && String(actual.host || '').trim().toLowerCase() === expected.host &&
+        Number(actual.port) === expected.port && actual.secure === true &&
+        String(actual.user || '').trim() === expected.user;
+    });
+  }
+  const api = Object.freeze({ recognizedProvider, resolvedProvider, profileFor, mayReplace, isStandardGmail });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.LibraMailProviderSetup = api;
 })(typeof globalThis !== 'undefined' ? globalThis : null);

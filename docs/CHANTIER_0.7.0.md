@@ -87,3 +87,12 @@ Chaque événement doit posséder une origine explicite (`local`, `google`, `mic
 - Contrôle cohérence des versions et publication uniquement après réussite de tous les tests et vérification réelle sur des comptes de test.
 
 **Stratégie de livraison proposée** : `dev-0.7.0`, lots tests/commits séparés : (A) assistance Gmail ; (B) Microsoft OAuth2 Mail ; (C) Google Calendar UX et qualification ; (D) Microsoft Graph Calendar ; (E) CalDAV/iCloud ; (F) intégration complète, non-régression et publication.
+
+
+## Phase B — Assistant de configuration des comptes
+
+- Paramètres avancés repliés pour les nouveaux comptes Gmail standard et Microsoft ; ouverts pour les comptes existants et configurations manuelles.
+- Champ de mot de passe Gmail unique (le champ IMAP existant est déplacé, pas dupliqué), espaces de présentation retirés lors de l’enregistrement standard. SMTP utilise le même mot de passe si son champ avancé est vide.
+- Le mot de passe guidé est effacé en cas de changement d’adresse ou de configuration des serveurs ; les mots de passe sont masqués et effacés à la fermeture du dialogue.
+- Sélection manuelle Microsoft pour les domaines professionnels, avec SMTP Office 365 ; aucune connexion Microsoft fictive ni sauvegarde d’un nouveau compte Microsoft avant raccordement OAuth2 (phase C).
+- Le mode avancé conserve IMAP/POP3/SMTP, les options de compte et les mécanismes de validation existants.

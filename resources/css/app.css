@@ -6632,3 +6632,13 @@ button.planner-attachment-open:hover strong {
 .account-provider-advice { margin-top: 8px; font-size: .87rem; line-height: 1.45; color: var(--muted); }
 .account-provider-advice.alert { color: var(--danger); }
 .account-provider-link { display: inline-block; margin-top: 6px; font-size: .86rem; text-decoration: underline; text-underline-offset: 3px; }
+
+/* 0.7.0 — assistant de compte, dans les thèmes LibraMail existants. */
+.account-advanced { margin-top: 12px; border: 1px solid var(--border-soft); border-radius: 10px; padding: 10px 12px; }
+.account-advanced > summary { cursor: pointer; color: var(--fg-strong); font-weight: 600; padding: 4px 0; }
+.account-advanced > summary:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.account-advanced[open] > summary { margin-bottom: 10px; }
+.account-guided-password { margin-top: 12px; }
+.account-provider-summary { margin-top: 8px; color: var(--fg-muted); font-size: .88rem; font-weight: 600; }
+.account-provider-advice { color: var(--fg-muted); }
+.account-microsoft-pending .account-password-field { display: none; }

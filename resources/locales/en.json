@@ -1301,11 +1301,17 @@
   "account.providerGmail": "Gmail / Google",
   "account.providerMicrosoft": "Outlook / Hotmail / Microsoft 365",
   "account.providerOther": "Other provider (manual configuration)",
-  "account.gmailAppPasswordGuide": "Gmail: IMAP and SMTP server settings have been filled automatically. To sign in using a password, turn on 2-Step Verification in your Google Account, then generate an app password. Paste it in the IMAP password field; SMTP password can be left blank. Do not use your usual Google Account password.",
+  "account.gmailAppPasswordGuide": "Enable 2-Step Verification in your Google Account, create an app password, and enter it below. Do not use your regular Google password. In advanced setup, use the IMAP (or POP3) field and leave SMTP blank if the password is the same.",
   "account.gmailOpenAppPasswords": "Create an app password on Google",
   "account.microsoftOAuthNotReady": "Microsoft requires OAuth2 for Outlook.com/Hotmail. Microsoft sign-in is not yet implemented in this LibraMail build: a regular password or app password is not sufficient. This account cannot be added yet.",
   "account.otherProviderHelp": "Enter the connection settings from your email provider. Some services require an app password or OAuth2.",
   "account.microsoftOAuthRequiredSave": "Microsoft accounts require OAuth2. Microsoft sign-in is part of the 0.7.0 development work; a non-working account will not be saved.",
   "planner.googleWriteHelp": "To sync an event to Google, select a writable Google calendar in the Calendar field when creating it. A local calendar does not publish events.",
-  "planner.googleManagedClient": "Google sign-in is configured by LibraMail: you do not need to create a Client ID. Sign in with your Google account."
+  "planner.googleManagedClient": "Google sign-in is configured by LibraMail: you do not need to create a Client ID. Sign in with your Google account.",
+  "account.advancedSettings": "Advanced settings",
+  "account.gmailAppPasswordLabel": "Gmail app password",
+  "account.gmailAppPasswordPlaceholder": "xxxx xxxx xxxx xxxx",
+  "account.gmailAutoConfigured": "Google servers configured automatically.",
+  "account.microsoftConnectionPending": "Secure Microsoft sign-in: integration in progress.",
+  "account.testAndAdd": "Test and add"
 }

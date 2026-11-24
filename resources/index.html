@@ -632,9 +632,15 @@
             <option value="microsoft" data-i18n="account.providerMicrosoft"></option>
             <option value="other" data-i18n="account.providerOther"></option>
           </select>
+          <div class="account-provider-summary hidden" id="acc-provider-summary" role="status"></div>
           <div class="account-provider-advice" id="acc-provider-advice" role="status" aria-live="polite"></div>
           <a class="account-provider-link hidden" id="acc-gmail-password-link" href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer" data-i18n="account.gmailOpenAppPasswords"></a>
         </div>
+      </div>
+      <div id="acc-guided-password-slot" class="account-guided-password hidden"></div>
+      <details id="acc-advanced" class="account-advanced">
+        <summary data-i18n="account.advancedSettings"></summary>
+        <div class="grid2">
         <div class="field field-span-2"><label data-i18n="account.receiveProtocol"></label>
           <select id="acc-receive-protocol"><option value="imap" data-i18n="account.protocol.imap"></option><option value="pop3" data-i18n="account.protocol.pop3"></option></select>
           <small class="field-hint" data-i18n="account.protocolHint"></small>
@@ -648,11 +654,13 @@
         <div class="field"><label data-i18n="account.security"></label>
           <select id="acc-imap-secure"><option value="1" data-i18n="account.security.ssl"></option><option value="0" data-i18n="account.security.starttls"></option></select></div>
         <div class="field"><label data-i18n="account.user"></label><input id="acc-imap-user" autocomplete="username"></div>
-        <div class="field field-span-2"><label data-i18n="account.pass"></label>
+        <div id="acc-imap-password-home" class="field-span-2">
+        <div id="acc-imap-password-field" class="field account-password-field"><label for="acc-imap-pass" id="acc-imap-password-label" data-i18n="account.pass"></label>
           <div class="security-password-input-wrap">
             <input id="acc-imap-pass" type="password" autocomplete="new-password" data-i18n-ph="account.passwordKeep">
             <button class="security-password-toggle" type="button" data-password-toggle="acc-imap-pass" data-i18n-title="security.showPassword"><i class="fa-solid fa-eye"></i></button>
           </div>
+        </div>
         </div>
       </div>
       </div>
@@ -663,7 +671,7 @@
           <div class="field"><label data-i18n="account.port"></label><input id="acc-pop3-port" type="number" min="1" max="65535" value="995"></div>
           <div class="field"><label data-i18n="account.security"></label><select id="acc-pop3-secure"><option value="1" data-i18n="account.security.ssl"></option><option value="0" data-i18n="account.security.starttls"></option></select></div>
           <div class="field"><label data-i18n="account.user"></label><input id="acc-pop3-user" autocomplete="username"></div>
-          <div class="field field-span-2"><label data-i18n="account.pass"></label>
+          <div class="field field-span-2 account-password-field"><label data-i18n="account.pass"></label>
             <div class="security-password-input-wrap">
               <input id="acc-pop3-pass" type="password" autocomplete="new-password" data-i18n-ph="account.passwordKeep">
               <button class="security-password-toggle" type="button" data-password-toggle="acc-pop3-pass" data-i18n-title="security.showPassword"><i class="fa-solid fa-eye"></i></button>
@@ -683,7 +691,7 @@
         <div class="field"><label data-i18n="account.security"></label>
           <select id="acc-smtp-secure"><option value="1" data-i18n="account.security.ssl"></option><option value="0" data-i18n="account.security.starttls"></option></select></div>
         <div class="field"><label data-i18n="account.user"></label><input id="acc-smtp-user" autocomplete="username"></div>
-        <div class="field field-span-2"><label data-i18n="account.pass"></label>
+        <div class="field field-span-2 account-password-field"><label data-i18n="account.pass"></label>
           <div class="security-password-input-wrap">
             <input id="acc-smtp-pass" type="password" autocomplete="new-password" data-i18n-ph="account.passwordKeep">
             <button class="security-password-toggle" type="button" data-password-toggle="acc-smtp-pass" data-i18n-title="security.showPassword"><i class="fa-solid fa-eye"></i></button>
@@ -713,13 +721,14 @@
       <div class="field-hint" id="account-password-hint" data-i18n="account.passwordHint"></div>
       <div class="field-hint" data-i18n="settings.syncDisabledHint"></div>
       <div class="field-hint" data-i18n="settings.retentionDisabledHint"></div>
+      </details>
       <div id="acc-status" class="account-status"></div>
     </div>
     <footer class="account-modal-footer">
       <button class="btn danger hidden" id="btn-delete-account"><i class="fa-solid fa-trash"></i><span data-i18n="account.remove"></span></button>
       <span class="footer-spacer"></span>
       <button class="btn" data-close data-i18n="cancel"></button>
-      <button class="btn primary" id="btn-save-account"><i class="fa-solid fa-floppy-disk"></i><span data-i18n="save"></span></button>
+      <button class="btn primary" id="btn-save-account"><i class="fa-solid fa-floppy-disk"></i><span id="btn-save-account-label" data-i18n="save"></span></button>
     </footer>
   </div>
 </div>
