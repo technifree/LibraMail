@@ -16,6 +16,12 @@
     filterAccountId: '',
     subscriptions: [],
     editingSubscriptionId: null,
+    caldavCalendars: [],
+    caldavLoadSequence: 0,
+    editingCalDav: null,
+    caldavOperationId: '',
+    caldavWriteBusy: false,
+    caldavWriteBlocked: false,
     googleConnections: [],
     googleCalendars: {},
     googleOAuthFlowId: '',
@@ -141,6 +147,43 @@
     const match = String(value || '').match(/^google:(\d+)$/);
     return match ? Number(match[1]) : null;
   }
+  function caldavTargetId(value = document.getElementById('planner-account')?.value || '') {
+    const match = String(value || '').match(/^caldav:([1-9]\d*)$/);
+    return match && Number.isSafeInteger(Number(match[1])) ? Number(match[1]) : null;
+  }
+  function caldavEvent(event) {
+    return Boolean(event?.remoteCalendarId && (
+      /^caldav-/.test(String(event.remoteCalendarAccessRole || '')) ||
+      state.caldavCalendars.some(calendar => Number(calendar.id) === Number(event.remoteCalendarId))
+    ));
+  }
+  function writableCalDavCalendars() {
+    return state.caldavCalendars.filter(calendar => calendar.enabled && calendar.selected && calendar.accessRole === 'caldav-readWrite');
+  }
+  async function loadCalDavConnections() {
+    const sequence = ++state.caldavLoadSequence;
+    try {
+      const connections = (await App.rpc('calendar.connections.list') || []).filter(c => ['icloud', 'caldav'].includes(c.provider));
+      const lists = await Promise.all(connections.map(async connection => (await App.rpc('calendar.remoteCalendars.list', { connectionId: connection.id }) || [])
+        .filter(calendar => Number(calendar.connectionId) === Number(connection.id))
+        .map(calendar => ({ ...calendar, enabled: connection.enabled === true, connectionLabel: connection.displayName || connection.email || t('planner.caldavCalendar') }))));
+      if (sequence !== state.caldavLoadSequence) return;
+      state.caldavCalendars = lists.flat();
+    } catch (_) {
+      if (sequence !== state.caldavLoadSequence) return;
+      state.caldavCalendars = []; // fail closed; never replace an explicit remote target with local
+    }
+    populateAccountSelects();
+  }
+  function ensureRemoteEditorOption(value, name) {
+    const editor = document.getElementById('planner-account');
+    if (!editor || !value || [...editor.options].some(option => option.value === value)) return;
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = name || t('planner.caldavCalendar');
+    option.disabled = true;
+    editor.appendChild(option);
+  }
   function sortedEvents(events) {
     return [...events].sort((a, b) => Number(b.allDay) - Number(a.allDay) || Number(a.startAt) - Number(b.startAt) || String(a.title).localeCompare(String(b.title), locale()));
   }
@@ -157,12 +200,16 @@
     const editor = document.getElementById('planner-account');
     if (editor) {
       const current = editor.value || '';
+      const currentLabel = editor.selectedOptions?.[0]?.textContent || '';
       const google = writableGoogleCalendars();
+      const caldav = writableCalDavCalendars();
       editor.innerHTML = [
         `<option value="">${esc(t('planner.localCalendar'))}</option>`,
         ...App.accounts.map(account => `<option value="${esc(account.id)}">${esc(account.displayName || account.email)}</option>`),
         google.length ? `<optgroup label="${esc(t('planner.googleCalendar'))}">${google.map(calendar => `<option value="google:${Number(calendar.id)}">${esc(calendar.name || calendar.remoteId)} · ${esc(calendar.connectionLabel)}</option>`).join('')}</optgroup>` : '',
+        caldav.length ? `<optgroup label="${esc(t('planner.caldavCalendar'))}">${caldav.map(calendar => `<option value="caldav:${Number(calendar.id)}">${esc(calendar.name || t('planner.caldavCalendar'))} · ${esc(calendar.connectionLabel)}</option>`).join('')}</optgroup>` : '',
       ].join('');
+      if (/^(?:caldav|google):\d+$/.test(current)) ensureRemoteEditorOption(current, currentLabel);
       if ([...editor.options].some(option => option.value === current)) editor.value = current;
     }
   }
@@ -653,6 +700,10 @@
   }
 
   function closeEditor() {
+    if (state.caldavWriteBusy) return;
+    state.editingCalDav = null;
+    state.caldavOperationId = '';
+    state.caldavWriteBlocked = false;
     document.getElementById('planner-editor')?.classList.add('hidden');
     const error = document.getElementById('planner-form-error');
     if (error) error.textContent = '';
@@ -673,44 +724,58 @@
     document.getElementById('planner-end-time').value = timeValue(end);
   }
 
-  function renderGoogleEditorNotice({ remote = false, writable = false } = {}) {
+  function renderGoogleEditorNotice({ remote = false, writable = false, caldav = false } = {}) {
     const notice = document.getElementById('planner-remote-readonly');
     if (!notice) return;
     notice.classList.toggle('hidden', !remote);
     notice.classList.toggle('writable', remote && writable);
     const text = notice.querySelector('span');
-    if (text) text.textContent = t(writable ? 'planner.googleWritableEvent' : 'planner.googleReadOnlyEvent');
+    if (text) text.textContent = t(caldav
+      ? (writable ? 'planner.caldavWritableEvent' : 'planner.caldavReadOnlyEvent')
+      : (writable ? 'planner.googleWritableEvent' : 'planner.googleReadOnlyEvent'));
+    const icon = notice.querySelector('i');
+    if (icon) icon.className = caldav ? 'fa-solid fa-cloud' : 'fa-brands fa-google';
   }
 
   function syncEditorTargetMode({ clearPending = false } = {}) {
     if (state.editingRemoteEvent) return;
-    const remoteCalendarId = googleTargetId();
+    const caldavId = caldavTargetId();
+    const remoteCalendarId = googleTargetId() || caldavId;
     const remote = Boolean(remoteCalendarId);
+    const category = document.getElementById('planner-category');
+    if (category) category.disabled = Boolean(caldavId);
     const attachments = document.querySelector('#planner-editor .planner-attachments-section');
     const attach = document.getElementById('btn-planner-attachment-add');
     attachments?.classList.toggle('hidden', remote);
     attach?.classList.toggle('hidden', remote);
-    renderGoogleEditorNotice({ remote, writable: remote });
+    renderGoogleEditorNotice({ remote, writable: remote && (!caldavId || writableCalDavCalendars().some(c => Number(c.id) === caldavId)), caldav: Boolean(caldavId) });
     if (remote && clearPending && state.pendingAttachments.length) resetPlannerAttachments();
   }
 
   function setRemoteEditorMode(event = null) {
     const remote = Boolean(event?.remoteCalendarId);
-    const writable = remote && googleWritableRole(event?.remoteCalendarAccessRole);
+    const caldav = caldavEvent(event);
+    const writable = remote && (caldav
+      ? event.remoteCalendarAccessRole === 'caldav-readWrite' && /^"[\x21\x23-\x7e\x80-\xff]*"$/.test(String(event.remoteEtag || '')) && !String(event.remoteEventId || '').includes('#') && Boolean(event.remoteEventId)
+      : googleWritableRole(event?.remoteCalendarAccessRole));
     const readOnly = remote && !writable;
     state.editingRemoteEvent = remote;
     state.editingRemoteWritable = writable;
+    // Snapshot the ETag at opening; an automatic refresh must not replace it.
+    state.editingCalDav = caldav ? { id: Number(event.id), remoteCalendarId: Number(event.remoteCalendarId), expectedEtag: event.remoteEtag, startAt: Number(event.startAt), endAt: Number(event.endAt), allDay: Boolean(event.allDay) } : null;
+    state.caldavOperationId = '';
+    state.caldavWriteBlocked = false;
     const editor = document.getElementById('planner-editor');
     editor?.classList.toggle('remote-readonly', readOnly);
     editor?.classList.toggle('remote-writable', writable);
-    renderGoogleEditorNotice({ remote, writable });
+    renderGoogleEditorNotice({ remote, writable, caldav });
     [
       'planner-title', 'planner-category', 'planner-all-day',
       'planner-start-date', 'planner-start-time', 'planner-end-date', 'planner-end-time',
       'planner-location', 'planner-notes',
     ].forEach(id => {
       const element = document.getElementById(id);
-      if (element) element.disabled = readOnly;
+      if (element) element.disabled = readOnly || (caldav && id === 'planner-category');
     });
     const account = document.getElementById('planner-account');
     if (account) account.disabled = remote;
@@ -718,6 +783,8 @@
     const remove = document.getElementById('btn-planner-delete');
     const attach = document.getElementById('btn-planner-attachment-add');
     const attachments = document.querySelector('#planner-editor .planner-attachments-section');
+    if (save) save.disabled = readOnly;
+    if (remove) remove.disabled = readOnly;
     save?.classList.toggle('hidden', readOnly);
     remove?.classList.toggle('hidden', readOnly || !document.getElementById('planner-event-id')?.value);
     attach?.classList.toggle('hidden', remote);
@@ -725,6 +792,7 @@
   }
 
   function openNewEvent(date = state.selected, startMinutes = null) {
+    if (state.caldavWriteBusy) return;
     const day = startOfDay(date || new Date());
     document.getElementById('planner-event-id').value = '';
     document.getElementById('planner-editor-title').textContent = t('planner.newEvent');
@@ -753,13 +821,16 @@
   }
 
   function openEditor(event) {
+    if (state.caldavWriteBusy) return;
     const start = new Date(Number(event.startAt));
     let end = new Date(Number(event.endAt));
     if (event.allDay) end = addDays(end, -1);
     document.getElementById('planner-event-id').value = String(event.id);
     document.getElementById('planner-editor-title').textContent = t('planner.editEvent');
     document.getElementById('planner-title').value = event.title || '';
-    document.getElementById('planner-account').value = event.remoteCalendarId ? `google:${Number(event.remoteCalendarId)}` : (event.accountId || '');
+    const target = event.remoteCalendarId ? `${caldavEvent(event) ? 'caldav' : 'google'}:${Number(event.remoteCalendarId)}` : (event.accountId || '');
+    if (event.remoteCalendarId) ensureRemoteEditorOption(target, event.remoteCalendarName);
+    document.getElementById('planner-account').value = target;
     populateCategorySelect(event.categoryId || '');
     document.getElementById('planner-all-day').checked = Boolean(event.allDay);
     document.getElementById('planner-start-date').value = dateKey(start);
@@ -771,7 +842,7 @@
     state.pendingAttachments = [];
     state.editorAttachments = [];
     renderPlannerAttachments();
-    loadPlannerAttachments(event.id);
+    if (!caldavEvent(event)) loadPlannerAttachments(event.id);
     document.getElementById('planner-form-error').textContent = '';
     setRemoteEditorMode(event);
     if (!event.remoteCalendarId) document.getElementById('btn-planner-delete').classList.remove('hidden');
@@ -832,9 +903,95 @@
     };
   }
 
+  function caldavPayload() {
+    const { title, startAt, endAt, allDay, location, notes } = editorPayload();
+    const original = state.editingCalDav;
+    // The existing editor displays minutes, not seconds. Preserve untouched times.
+    const restore = (value, old, side) => !allDay && original && !original.allDay
+      && document.getElementById(`planner-${side}-date`).value === dateKey(old)
+      && document.getElementById(`planner-${side}-time`).value === timeValue(old) ? old : value;
+    return { title, startAt: restore(startAt, original?.startAt, 'start'), endAt: restore(endAt, original?.endAt, 'end'), allDay, location, notes };
+  }
+  function newCalDavOperationId() {
+    const bytes = window.crypto.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 15) | 64;
+    bytes[8] = (bytes[8] & 63) | 128;
+    const hex = [...bytes].map(n => n.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+  }
+  function caldavWriteMessage(error) {
+    const code = /^CalDAV: ([A-Z_]+)/.exec(String(error?.message || ''))?.[1];
+    if (code === 'CONFLICT') return ['planner.caldavConflict', true];
+    if (code === 'UNSUPPORTED_EVENT' || code === 'ETAG_REQUIRED') return ['planner.caldavUnsupported', true];
+    if (code === 'READ_ONLY' || code === 'INVALID_CONNECTION' || code === 'INVALID_SELECTION') return ['planner.caldavReadOnlyEvent', true];
+    if (code === 'SYNC_BUSY') return ['planner.caldavBusy', false];
+    if (code === 'INVALID_EVENT') return ['planner.caldavInvalidEvent', false];
+    if (code === 'AUTHENTICATION_FAILED' || code === 'CREDENTIALS_REQUIRED' || code === 'FORBIDDEN') return ['planner.caldavAuthorization', false];
+    // Unknown errors, disconnected RPC and WRITE_UNCERTAIN are not safe to retry blindly.
+    return ['planner.caldavUncertain', true];
+  }
+  async function caldavEditorAction(action) {
+    const errorElement = document.getElementById('planner-form-error');
+    if (state.caldavWriteBusy || state.caldavWriteBlocked) return;
+    const existing = state.editingCalDav;
+    const target = caldavTargetId();
+    const id = Number(document.getElementById('planner-event-id').value || 0) || null;
+    if ((id && (!existing || existing.id !== id || existing.remoteCalendarId !== target)) || (!id && existing)) {
+      errorElement.textContent = t('planner.caldavMoveUnsupported'); return;
+    }
+    if (!target || (existing && !state.editingRemoteWritable) || !writableCalDavCalendars().some(c => Number(c.id) === target)) {
+      errorElement.textContent = t('planner.caldavReadOnlyEvent'); return;
+    }
+    const params = { remoteCalendarId: target };
+    if (existing) Object.assign(params, { id: existing.id, expectedEtag: existing.expectedEtag });
+    if (action !== 'remove') {
+      try { params.event = caldavPayload(); } catch (error) { errorElement.textContent = error.message; return; }
+      if (!existing) {
+        try { state.caldavOperationId ||= newCalDavOperationId(); }
+        catch (_) { errorElement.textContent = t('planner.caldavUnavailable'); return; }
+        params.operationId = state.caldavOperationId;
+      }
+    } else params.confirmed = true; // only called after the existing confirmation dialog
+    state.caldavWriteBusy = true;
+    const controls = [...document.querySelectorAll('#planner-editor input, #planner-editor select, #planner-editor textarea, #planner-editor button')];
+    const disabled = controls.map(control => control.disabled);
+    controls.forEach(control => { control.disabled = true; });
+    let success = false;
+    try {
+      const result = await App.rpc(`calendar.caldav.event.${action}`, params);
+      if (action === 'remove') {
+        if (result?.removed !== true || Number(result.id) !== id) throw new Error('Unconfirmed CalDAV response');
+      } else {
+        const saved = result?.event;
+        if (!saved?.id || Number(saved.remoteCalendarId) !== target || !Number.isFinite(saved.startAt) || (existing && Number(saved.id) !== id)) throw new Error('Unconfirmed CalDAV response');
+        state.selected = startOfDay(new Date(saved.startAt));
+        state.anchor = startOfDay(state.selected);
+      }
+      success = true;
+    } catch (error) {
+      const [key, block] = caldavWriteMessage(error);
+      state.caldavWriteBlocked = block;
+      errorElement.textContent = t(key);
+    } finally {
+      controls.forEach((control, i) => { control.disabled = disabled[i]; });
+      state.caldavWriteBusy = false;
+    }
+    if (success) {
+      closeEditor();
+      await loadEvents();
+      App.status(t(action === 'remove' ? 'planner.deleted' : existing ? 'planner.updated' : 'planner.created'), 'success');
+    } else if (state.caldavWriteBlocked) {
+      document.getElementById('btn-planner-save').disabled = true;
+      document.getElementById('btn-planner-delete').disabled = true;
+      document.getElementById('planner-account').disabled = true;
+      // Keep the form and its contents. No automatic replay or conversion to a local event.
+    }
+  }
   async function saveEvent() {
+    if (state.caldavWriteBusy || state.caldavWriteBlocked) return;
     const errorElement = document.getElementById('planner-form-error');
     errorElement.textContent = '';
+    if (state.editingCalDav || caldavTargetId()) return caldavEditorAction(state.editingCalDav ? 'update' : 'create');
     if (state.editingRemoteEvent && !state.editingRemoteWritable) {
       errorElement.textContent = t('planner.googleReadOnlyEvent');
       return;
@@ -880,23 +1037,26 @@
   }
 
   async function deleteEvent() {
+    if (state.caldavWriteBusy || state.caldavWriteBlocked) return;
     if (state.editingRemoteEvent && !state.editingRemoteWritable) {
-      App.status(t('planner.googleReadOnlyEvent'), 'info');
+      App.status(t(state.editingCalDav ? 'planner.caldavReadOnlyEvent' : 'planner.googleReadOnlyEvent'), 'info');
       return;
     }
     const id = Number(document.getElementById('planner-event-id').value || 0);
     if (!id) return;
+    const openingCalDav = state.editingCalDav;
     const accepted = await plannerConfirm({
       title: t('planner.deleteTitle'),
       message: t('planner.deleteConfirm'),
       confirmLabel: t('planner.delete'),
       icon: 'fa-trash',
       danger: true,
-      note: state.editingRemoteEvent
+      note: state.editingCalDav ? t('planner.caldavDeleteNote') : state.editingRemoteEvent
         ? t('planner.googleDeleteNote')
         : t('planner.deleteNote'),
     });
-    if (!accepted) return;
+    if (!accepted || Number(document.getElementById('planner-event-id').value || 0) !== id || state.editingCalDav !== openingCalDav) return;
+    if (state.editingCalDav) return caldavEditorAction('remove');
     try {
       const result = await App.rpc('calendar.remove', { id });
       if (result?.conflict) {
@@ -1655,13 +1815,15 @@
     if (button) button.disabled = true;
     plannerRefreshStatus(t('planner.externalSyncing'), 'busy', { sticky: true });
     try {
-      const [subscriptionsResult, googleResult] = await Promise.allSettled([
+      const [subscriptionsResult, googleResult, caldavResult] = await Promise.allSettled([
         App.rpc('calendar.subscriptions.syncAll'),
         App.rpc('calendar.google.syncAll'),
+        App.rpc('calendar.caldav.syncAll'),
       ]);
-      await Promise.all([loadSubscriptions(), loadGoogleConnections(), refreshSummary()]);
+      await Promise.all([loadSubscriptions(), loadGoogleConnections(), loadCalDavConnections(), refreshSummary()]);
       if (document.getElementById('planner-modal')?.classList.contains('open')) await loadEvents();
-      let failed = [subscriptionsResult, googleResult].filter(result => result.status === 'rejected').length;
+      let failed = [subscriptionsResult, googleResult, caldavResult].filter(result => result.status === 'rejected').length;
+      if (caldavResult.status === 'fulfilled') failed += (caldavResult.value || []).filter(item => !item || item.error || Number(item.failed) > 0).length;
       if (subscriptionsResult.status === 'fulfilled') {
         failed += (subscriptionsResult.value || []).filter(item => item?.error).length;
       }
@@ -1800,7 +1962,7 @@
     state.anchor = startOfDay(state.selected || new Date());
     document.getElementById('planner-modal')?.classList.add('open');
     closeEditor();
-    await Promise.all([loadCategories(), loadGoogleConnections(), loadEvents()]);
+    await Promise.all([loadCategories(), loadGoogleConnections(), loadCalDavConnections(), loadEvents()]);
   }
 
   function wire() {
@@ -1880,6 +2042,8 @@
       if (document.getElementById('planner-modal')?.classList.contains('open')) loadEvents();
     } else if (event === 'calendar.subscriptions.changed') {
       if (document.getElementById('planner-subscriptions-modal')?.classList.contains('open')) loadSubscriptions();
+    } else if (event === 'calendar.caldav.changed') {
+      if (document.getElementById('planner-modal')?.classList.contains('open')) loadCalDavConnections();
     } else if (event === 'calendar.google.changed') {
       refreshSummary();
       if (document.getElementById('planner-modal')?.classList.contains('open')) loadEvents();

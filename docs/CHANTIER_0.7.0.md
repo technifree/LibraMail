@@ -60,6 +60,13 @@ Document technique de préparation, établi à partir de l'archive transmise sou
 - Après PUT : GET de la représentation effective et de son ETag, validation avant mise à jour ciblée du cache SQLite. Après DELETE confirmé : retrait de cette seule ressource. Si le serveur a pu appliquer l’opération sans confirmation exploitable, signalement `WRITE_UNCERTAIN`, cache conservé sauf écriture locale déjà effectuée, et prochaine lecture de réconciliation. Conflit signalé sans écrasement ni nouvelle écriture automatique.
 - Tests simulés du cycle complet, concurrence, annulation, lecture seule, idempotence du chemin de création, pertes réseau après PUT et réponses GET invalides. Les tests sur serveur réel et le raccordement graphique restent à faire. Les récurrences complexes continuent de limiter les instantanés C4a.
 
+### Phase C5b — Raccordement des écritures au planning
+
+- Le sélecteur de destination distingue Google et CalDAV/iCloud ; seuls les calendriers sélectionnés, actifs et autorisant l’écriture sont proposés pour les nouveaux rendez-vous. Les rendez-vous distants conservent leur calendrier d’origine ; aucune conversion locale implicite.
+- Les commandes C5a sont utilisées directement, avec ETag mémorisé à l’ouverture, confirmation de suppression et UUID v4 conservé durant la saisie. Les champs non transmis (catégorie locale et pièces jointes) ne sont pas proposés pour CalDAV.
+- Erreurs FR/EN explicites, formulaire conservé, aucune répétition automatique. En cas de conflit ou de résultat incertain, fermeture et actualisation manuelles avant toute nouvelle opération. Les protections du moteur sur les événements non représentables restent actives.
+- Le bouton d’actualisation inclut les comptes CalDAV. Test du routage des écritures et du comportement de l’éditeur sur réponses RPC simulées. L’assistant de connexion et la qualification réelle restent à réaliser (C6/C7).
+
 ## 1. Audit de l'existant
 
 - Le moteur IMAP/SMTP possède un socle OAuth2 (`engine/lib/mail_auth.js`) avec jeton d'accès éphémère, mais pas de flux de connexion Microsoft intégré ni de rafraîchissement des jetons pour les comptes de messagerie.
