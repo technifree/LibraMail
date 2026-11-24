@@ -70,12 +70,17 @@ function createCalDavClient({ serverURL, username, password, fetchImpl = globalT
     if (url.origin !== base.origin) throw new CalDavError('CROSS_ORIGIN');
     return url;
   }
-  async function request(method, href, headers, body, accepted) {
+  async function request(method, href, headers, body, accepted, discovery = false) {
     const url = target(href);
     const signal = AbortSignal.timeout(timeoutMs);
     try {
       const response = await fetchImpl(url.href, { method, headers: { ...headers, Authorization: authorization }, body,
         redirect: 'manual', signal });
+      // Discovery may inspect redirects, but never follows them here.
+      if (discovery && [301, 302, 307, 308].includes(response.status)) {
+        try { await response.body?.cancel(); } catch { /* ignore */ }
+        return { status: response.status, location: response.headers.get('location'), text: '' };
+      }
       if (!accepted.includes(response.status)) {
         try { await response.body?.cancel(); } catch { /* ignore */ }
         const code = response.status === 401 ? 'AUTHENTICATION_FAILED' : response.status === 403 ? 'FORBIDDEN' :
@@ -90,8 +95,8 @@ function createCalDavClient({ serverURL, username, password, fetchImpl = globalT
       throw new CalDavError(signal.aborted ? 'TIMEOUT' : 'NETWORK_ERROR');
     }
   }
-  function xml(method, href, depth, body) {
-    return request(method, href, { Depth: String(depth), 'Content-Type': 'application/xml; charset=utf-8' }, body, [207]);
+  function xml(method, href, depth, body, discovery = false) {
+    return request(method, href, { Depth: String(depth), 'Content-Type': 'application/xml; charset=utf-8' }, body, [207], discovery);
   }
   function calendarBody(ics) {
     if (typeof ics !== 'string' || !/^BEGIN:VCALENDAR\r?\n/i.test(ics) || !/\r?\nEND:VCALENDAR(?:\r?\n)?$/i.test(ics) || Buffer.byteLength(ics) > maxBytes)
@@ -99,6 +104,11 @@ function createCalDavClient({ serverURL, username, password, fetchImpl = globalT
     return ics;
   }
   return Object.freeze({
+    // Only the explicit discovery layer can inspect a PROPFIND redirect.
+    discovery: (kind, href) => {
+      if (!['principal', 'home', 'calendars'].includes(kind)) throw new CalDavError('INVALID_OPTIONS');
+      return xml('PROPFIND', href, kind === 'calendars' ? 1 : 0, DISCOVERY[kind], true);
+    },
     principal: (href = base.href) => xml('PROPFIND', href, 0, DISCOVERY.principal),
     home: href => xml('PROPFIND', href, 0, DISCOVERY.home),
     calendars: href => xml('PROPFIND', href, 1, DISCOVERY.calendars),

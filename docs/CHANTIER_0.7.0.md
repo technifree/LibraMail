@@ -17,6 +17,15 @@ Document technique de préparation, établi à partir de l'archive transmise sou
 - Prochaine étape : analyse XML avec namespaces et protection contre les entités externes, découverte des collections, gestion contrôlée des redirections iCloud, coffre de secrets, puis synchronisation et interface. La compatibilité réelle iCloud/Nextcloud n'est pas encore acquise.
 - Références : RFC 4791 (https://www.rfc-editor.org/rfc/rfc4791.html), Apple (https://support.apple.com/fr-fr/102654).
 
+### Phase C2 — Découverte CalDAV (socle isolé)
+
+- Découverte depuis une URL CalDAV explicite ou `/.well-known/caldav` (sans découverte DNS SRV pour ce lot), principal et collections d’agenda. Pour iCloud, point de départ `https://caldav.icloud.com/`.
+- Analyse XML DAV/CalDAV limitée et consciente des namespaces, refus des DTD et entités non prédéfinies, prise en compte uniquement des propriétés renvoyées avec un statut 2xx. Les calendriers exclusivement VTODO sont ignorés.
+- Redirections de découverte uniquement, même origine pour CalDAV générique ; pour le mode iCloud explicite, seuls les hôtes `caldav.icloud.com` et `pNN-caldav.icloud.com` (HTTPS, port standard) sont acceptés. Nombre de requêtes et redirections borné. Les méthodes d’écriture conservent la politique C1.
+- Les privilèges de collection sont indicatifs : droits inconnus traités en lecture seule ; la modification effective reste soumise aux droits du serveur et aux ETags. Aucune modification distante pendant la découverte.
+- Tests simulés ; aucun mot de passe persisté, aucun appel RPC, aucun assistant graphique. Le parseur XML est volontairement limité aux formes DAV usuelles ; la qualification sur de vrais serveurs iCloud et Nextcloud reste indispensable.
+- Références : RFC 6764 (https://www.rfc-editor.org/rfc/rfc6764.html), RFC 3744 (https://www.rfc-editor.org/rfc/rfc3744.html).
+
 ## 1. Audit de l'existant
 
 - Le moteur IMAP/SMTP possède un socle OAuth2 (`engine/lib/mail_auth.js`) avec jeton d'accès éphémère, mais pas de flux de connexion Microsoft intégré ni de rafraîchissement des jetons pour les comptes de messagerie.
