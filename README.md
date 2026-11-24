@@ -14,7 +14,7 @@ accounts without requiring Node.js to be installed on the target computer.
 ![LibraMail main window](docs/screenshots/libramail-main.png)
 
 <!-- LIBRAMAIL:RELEASE-EN:START -->
-## Latest version — 0.6.4 (2026-11-10)
+## Latest version : 0.6.4 (2026-11-10)
 
 - Adding one or more attachments to a new message now uses LibraMail's actual writable data directory, including Debian installations.
 - Sending, saving a draft and scheduling a message wait until attachment preparation has completed.
@@ -141,7 +141,7 @@ sans exiger l'installation de Node.js sur l'ordinateur cible.
 ![Fenêtre principale de LibraMail](docs/screenshots/libramail-main.png)
 
 <!-- LIBRAMAIL:RELEASE-FR:START -->
-## Dernière version — 0.6.4 (2026-11-10)
+## Dernière version : 0.6.4 (2026-11-10)
 
 - L'ajout d'une ou plusieurs pièces jointes à un nouveau message utilise désormais le répertoire de données réel de LibraMail, y compris avec une installation Debian.
 - L'envoi, l'enregistrement d'un brouillon et la programmation d'un envoi différé attendent la préparation des fichiers joints.
