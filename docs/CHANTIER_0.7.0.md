@@ -2,6 +2,21 @@
 
 Document technique de préparation, établi à partir de l'archive transmise sous le nom `v0.6.4.7z` le 24 novembre 2026. **Ce n'est pas une version 0.7.0 publiable.**
 
+## Périmètre révisé — après validation de la phase B
+
+- La messagerie Outlook.com, Hotmail, Live et Microsoft 365 est retirée du périmètre 0.7.0 : aucun enregistrement Entra, abonnement Azure ni identifiant OAuth tiers. La détection et le refus explicite restent présents ; les comptes existants ne sont pas supprimés.
+- Microsoft Graph Calendar est également reporté, car il dépend de la même inscription. Les calendriers Outlook publiés en ICS restent consultables en lecture seule.
+- Le socle Microsoft isolé et ses tests restent dans l'historique technique ; il n'est pas activé. Les sections antérieures ci-dessous décrivent l'ancien périmètre, pas des engagements de livraison.
+- Priorités : CalDAV/iCloud bidirectionnel, qualification réelle de Google Calendar, configuration Gmail et non-régression.
+
+### Phase C1 — Socle CalDAV
+
+- Client de transport indépendant, HTTPS, authentification Basic, PROPFIND/REPORT, lecture GET, création PUT avec If-None-Match, modification PUT et suppression DELETE avec ETag fort (If-Match).
+- Aucune redirection automatique ni transmission des identifiants vers une autre origine ; délai et volume de réponse limités ; erreurs sans contenu brut ni secret.
+- Tests simulés, aucun compte réel nécessaire. Aucun stockage de mots de passe, aucun raccordement à la base ni à l'interface à ce stade.
+- Prochaine étape : analyse XML avec namespaces et protection contre les entités externes, découverte des collections, gestion contrôlée des redirections iCloud, coffre de secrets, puis synchronisation et interface. La compatibilité réelle iCloud/Nextcloud n'est pas encore acquise.
+- Références : RFC 4791 (https://www.rfc-editor.org/rfc/rfc4791.html), Apple (https://support.apple.com/fr-fr/102654).
+
 ## 1. Audit de l'existant
 
 - Le moteur IMAP/SMTP possède un socle OAuth2 (`engine/lib/mail_auth.js`) avec jeton d'accès éphémère, mais pas de flux de connexion Microsoft intégré ni de rafraîchissement des jetons pour les comptes de messagerie.

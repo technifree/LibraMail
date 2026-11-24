@@ -3181,10 +3181,10 @@ const methods = {
   'accounts.add': async input => {
     validateAccountInput(input);
     // Un mot de passe classique n'authentifie plus Outlook.com. Tant que le
-    // flux Microsoft OAuth2 n'est pas raccordé, refuser ce compte au lieu de
-    // conserver une configuration vouée à échouer lors de la relève.
+    // support Microsoft OAuth2 est hors périmètre 0.7.0, refuser ce compte
+    // au lieu de conserver une configuration vouée à échouer lors de la relève.
     if (providerKeyForAccount(input) === 'outlook') {
-      throw new Error('Microsoft Outlook/Hotmail nécessite OAuth2. La connexion Microsoft sera disponible après intégration du flux OAuth2 dans LibraMail.');
+      throw new Error('Les comptes Outlook/Hotmail/Microsoft 365 nécessitent OAuth2 et ne sont pas pris en charge par LibraMail 0.7.0.');
     }
     const receiveProtocol = String(input.receiveProtocol || 'imap').toLowerCase() === 'pop3' ? 'pop3' : 'imap';
     const incomingInput = receiveProtocol === 'pop3' ? input.pop3 : input.imap;
