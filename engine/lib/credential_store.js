@@ -9,6 +9,8 @@ const OAUTH_REFRESH_KIND = 'oauth2-refresh'; // LibraMail 0.5.1 — jeton OAuth2
 // dédiée afin de rester couverts par la migration du mot de passe principal.
 const CALENDAR_OAUTH_SERVICE_SECRET = 'calendar-oauth-refresh-tokens';
 const CALENDAR_OAUTH_CLIENT_SECRET_SERVICE_SECRET = 'calendar-oauth-client-secrets';
+// LibraMail 0.7.0 — CalDAV credentials remain in the system keyring.
+const CALENDAR_CALDAV_SERVICE_SECRET = 'calendar-caldav-passwords';
 
 // LibraMail 0.4.8 — secrets du trousseau protégés par le coffre principal.
 // Les entrées restent dans le keyring de l'OS mais, lorsque la protection est
@@ -464,6 +466,7 @@ module.exports = {
   readOAuthRefreshToken, writeOAuthRefreshToken, removeOAuthRefreshToken, OAUTH_REFRESH_KIND,
   readServiceSecret, writeServiceSecret, removeServiceSecret,
   CALENDAR_OAUTH_SERVICE_SECRET, CALENDAR_OAUTH_CLIENT_SECRET_SERVICE_SECRET,
+  CALENDAR_CALDAV_SERVICE_SECRET,
   readCalendarOAuthRefreshToken, writeCalendarOAuthRefreshToken, removeCalendarOAuthRefreshToken,
   readCalendarOAuthClientSecret, writeCalendarOAuthClientSecret, removeCalendarOAuthClientSecret,
   parseCalendarOAuthRefreshBundle, serializeCalendarOAuthRefreshBundle,

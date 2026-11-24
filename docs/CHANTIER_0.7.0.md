@@ -26,6 +26,15 @@ Document technique de préparation, établi à partir de l'archive transmise sou
 - Tests simulés ; aucun mot de passe persisté, aucun appel RPC, aucun assistant graphique. Le parseur XML est volontairement limité aux formes DAV usuelles ; la qualification sur de vrais serveurs iCloud et Nextcloud reste indispensable.
 - Références : RFC 6764 (https://www.rfc-editor.org/rfc/rfc6764.html), RFC 3744 (https://www.rfc-editor.org/rfc/rfc3744.html).
 
+### Phase C3 — Coffre des identifiants CalDAV (socle isolé)
+
+- Réutilisation du trousseau système (`credential_store.js`), sans fichier de mots de passe ni nouveau mécanisme de chiffrement. Si le mot de passe principal est activé, le secret de service CalDAV bénéficie du même enveloppement AES-GCM `vault1:` et des migrations activation/désactivation/déverrouillage que les autres secrets.
+- Plusieurs connexions identifiées par UUID v4 ; liaison du secret au fournisseur, à l’URL HTTPS initiale canonique et à l’identifiant utilisateur (empreinte SHA-256). Une modification de cette identité exige une saisie explicite du mot de passe. Les URL des collections découvertes ne doivent pas servir à changer cette liaison.
+- Accès refusé lorsque LibraMail est verrouillé. Échec du trousseau ou contenu corrompu : refus sans repli sur disque, sans message natif contenant potentiellement un secret. Écriture vérifiée et tentative de retour arrière si échec.
+- Limite conservatrice provisoire de 850 octets UTF-8 pour l’ensemble des entrées JSON, afin de garder une marge avec l’enveloppe AES-GCM et les limites des trousseaux Windows ; refus explicite si la capacité est dépassée. Le dernier retrait laisse une entrée vide vérifiée (`{}`). La capacité pourra être revue avant livraison si nécessaire.
+- Les identifiants ne font pas partie des sauvegardes ZIP (trousseau externe au dossier de données). La restauration sur un autre poste nécessitera une nouvelle saisie. Le stockage des métadonnées, les opérations de connexion RPC, la sélection des collections et la synchronisation restent à intégrer ; aucune utilisation réelle depuis l’interface dans ce lot.
+- Tests avec trousseau simulé et véritable module de mot de passe principal, y compris migrations, changement de mot de passe principal, verrouillage, rotation, retrait, liaison à l’identité et défaut d’écriture. Qualification du trousseau natif sur Linux, Windows et macOS à effectuer.
+
 ## 1. Audit de l'existant
 
 - Le moteur IMAP/SMTP possède un socle OAuth2 (`engine/lib/mail_auth.js`) avec jeton d'accès éphémère, mais pas de flux de connexion Microsoft intégré ni de rafraîchissement des jetons pour les comptes de messagerie.

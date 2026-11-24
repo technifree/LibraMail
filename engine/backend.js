@@ -400,6 +400,7 @@ const SECURITY_SERVICE_SECRETS = [
   mailStore.MASTER_SECRET,
   credentialStore.CALENDAR_OAUTH_SERVICE_SECRET,
   credentialStore.CALENDAR_OAUTH_CLIENT_SECRET_SERVICE_SECRET,
+  credentialStore.CALENDAR_CALDAV_SERVICE_SECRET,
 ];
 
 function securityAccountIds({ fromDisk = false } = {}) {
