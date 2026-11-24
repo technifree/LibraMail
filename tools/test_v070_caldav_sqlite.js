@@ -13,7 +13,7 @@ const row=(title,etag)=>`<d:response><d:href>${resource}</d:href><d:propstat><d:
 (async()=>{
   try {
     db.init(temp);
-    const connection=db.saveCalendarConnection({provider:'caldav',credentialKey:key,email:'demo',displayName:'DAV'});
+    const connection=db.saveCalendarConnection({provider:'caldav',credentialKey:key,email:'demo',displayName:'DAV',caldavServerURL:base,caldavRefreshMinutes:5});
     const calendar=db.saveCalendarRemoteCalendar({connectionId:connection.id,remoteId:collection,name:'DAV one',selected:true,accessRole:'reader'});
     const other=db.saveCalendarRemoteCalendar({connectionId:connection.id,remoteId:base+'two/',name:'DAV two',selected:true});
     const google=db.saveCalendarConnection({provider:'google',credentialKey:'test-google',email:'demo@example.test'});
@@ -31,6 +31,11 @@ const row=(title,etag)=>`<d:response><d:href>${resource}</d:href><d:propstat><d:
     body=xml(row('Changed','2'));assert.equal((await sync()).updated,1);
     assert.equal(db.getCalendarEventByRemote(calendar.id,resource).id,first.id);
     db.close();db.init(temp);
+    assert.equal(db.getCalendarConnection(connection.id).caldavServerURL,base);
+    assert.equal(db.getCalendarConnection(connection.id).caldavRefreshMinutes,5);
+    assert.equal(db.getCalendarConnection(google.id).caldavServerURL,undefined);
+    db.saveCalendarConnection({...db.getCalendarConnection(connection.id),caldavRefreshMinutes:30},connection.id);
+    assert.equal(db.getCalendarConnection(connection.id).caldavRefreshMinutes,30);
     assert.equal(db.getCalendarEventByRemote(calendar.id,resource).title,'Changed');
     body=xml('<d:error><d:number-of-matches-within-limits/></d:error>');
     await assert.rejects(sync());assert.equal(db.getCalendarEventByRemote(calendar.id,resource).title,'Changed');

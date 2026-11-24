@@ -30,6 +30,8 @@ const calendarGoogleSync = require('./lib/calendar_google_sync');
 const calendarGoogleOAuth = require('./lib/calendar_google_oauth');
 const calendarGoogleMock = require('./lib/calendar_google_mock');
 const calendarGoogleWrite = require('./lib/calendar_google_write');
+const { createCalDavRuntime, isCalDav } = require('./lib/calendar_caldav_runtime');
+const caldavCredentials = require('./lib/calendar_caldav_credentials');
 const credentialStore = require('./lib/credential_store');
 const mailStore = require('./lib/mail_store');
 const masterPassword = require('./lib/master_password');
@@ -415,7 +417,7 @@ function securityAccountIds({ fromDisk = false } = {}) {
 function assertSecurityMigrationReady() {
   if (!runtimeInitialized) throw new Error('Données LibraMail non initialisées');
   if (activeSyncs.size || activeCleanups.size || folderMaintenanceOperation
-      || scheduledSendBusy || calendarSubscriptionSyncBusy) {
+      || scheduledSendBusy || calendarSubscriptionSyncBusy || caldavRuntime.busy()) {
     throw new Error('Une opération est en cours. Réessayez dans quelques instants.');
   }
   const legacy = accounts.filter(account => account?.id && account.credentials?.store !== 'system');
@@ -460,6 +462,24 @@ let calendarSubscriptionSyncBusy = false;
 let shuttingDown = false;
 let maintenanceOperation = null;
 let folderMaintenanceOperation = null;
+let caldavTimer = null;
+let caldavInitialTimer = null;
+const caldavRuntime = createCalDavRuntime({
+  db, credentials: caldavCredentials,
+  available: () => runtimeInitialized && !masterPassword.isLocked() && !maintenanceOperation && !shuttingDown,
+  onChange: data => {
+    if (data.removed || data.action === 'caldav-removed' || data.action === 'caldav-selection') cleanupOrphanCalendarAttachmentFiles();
+    broadcast('calendar.changed', data);
+    broadcast('calendar.caldav.changed', data);
+  },
+});
+function isCalDavCalendar(id) {
+  const calendar = db.getCalendarRemoteCalendar(id);
+  return Boolean(calendar && isCalDav(db.getCalendarConnection(calendar.connectionId)));
+}
+function assertCalDavReadOnly(id) {
+  if (id && isCalDavCalendar(id)) throw new Error('CalDAV: READ_ONLY_UNTIL_WRITE_PHASE');
+}
 let startupSyncTriggered = false;
 let serverReady = false;
 let resolveStartupMigration;
@@ -2200,6 +2220,10 @@ async function syncAllCalendarSubscriptions({ announce = false, dueOnly = false 
 
 
 function stopAccountRuntime() {
+  if (caldavTimer) clearInterval(caldavTimer);
+  if (caldavInitialTimer) clearTimeout(caldavInitialTimer);
+  caldavTimer = caldavInitialTimer = null;
+  caldavRuntime.stop();
   cancelActiveSyncs();
   for (const timer of syncTimers.values()) clearInterval(timer);
   syncTimers.clear();
@@ -2213,6 +2237,13 @@ function stopAccountRuntime() {
 }
 
 function startAccountRuntime({ resolveFolders = false } = {}) {
+  if (caldavTimer) clearInterval(caldavTimer);
+  if (caldavInitialTimer) clearTimeout(caldavInitialTimer);
+  const syncCalDavDue = () => caldavRuntime.syncAll({ dueOnly: true }).catch(() => {});
+  caldavTimer = setInterval(syncCalDavDue, 60000);
+  caldavTimer.unref?.();
+  caldavInitialTimer = setTimeout(syncCalDavDue, 5000);
+  caldavInitialTimer.unref?.();
   for (const account of accounts) {
     if (resolveFolders) initializeAccount(account).catch(() => {});
     else {
@@ -2249,6 +2280,7 @@ function backupTimestamp(date = new Date()) {
 }
 
 function ensureMaintenanceAvailable() {
+  if (caldavRuntime.busy()) throw new Error('CalDAV: SYNC_BUSY');
   if (maintenanceOperation) throw new Error('Une opération de sauvegarde ou de restauration est déjà en cours');
   if (folderMaintenanceOperation) throw new Error('Une opération de maintenance des dossiers est en cours');
   if (activeSyncs.size) {
@@ -3049,6 +3081,7 @@ const methods = {
   'security.changePassword': async ({ currentPassword = '', newPassword = '' } = {}) => {
     if (!masterPassword.isEnabled()) throw new Error('Le mot de passe principal n’est pas activé');
     if (masterPassword.isLocked()) throw new Error('LibraMail est verrouillé');
+    caldavRuntime.stop();
     stopGoogleCalendarSensitiveRuntime('Modification du mot de passe principal');
     masterPassword.changePassword(currentPassword, newPassword);
     const state = { ...masterPassword.status(), runtimeReady: runtimeInitialized };
@@ -3897,12 +3930,14 @@ const methods = {
   'calendar.save': async ({ id = null, event } = {}) => {
     const numericId = Number(id) || null;
     const requestedRemoteCalendarId = Number(event?.remoteCalendarId) || null;
+    assertCalDavReadOnly(requestedRemoteCalendarId);
     const writeEngine = googleCalendarWriteEngine();
 
     if (numericId) {
       const existing = db.getCalendarEvent(numericId);
       if (!existing) throw new Error('Rendez-vous introuvable');
       if (existing.remoteCalendarId) {
+        assertCalDavReadOnly(existing.remoteCalendarId);
         const result = await writeEngine.updateEvent(numericId, event || {});
         if (result.conflict) {
           broadcast('calendar.changed', { action: 'google-write-conflict', id: numericId });
@@ -3935,6 +3970,7 @@ const methods = {
     const numericId = Number(id);
     const existing = db.getCalendarEvent(numericId);
     if (existing?.remoteCalendarId) {
+      assertCalDavReadOnly(existing.remoteCalendarId);
       const result = await googleCalendarWriteEngine().deleteEvent(numericId);
       if (result.conflict) {
         broadcast('calendar.changed', { action: 'google-delete-conflict', id: numericId });
@@ -3959,6 +3995,7 @@ const methods = {
   'calendar.remoteCalendars.list': async ({ connectionId = null, selectedOnly = false } = {}) =>
     db.listCalendarRemoteCalendars({ connectionId, selectedOnly }),
   'calendar.remoteCalendars.select': async ({ id, selected = true } = {}) => {
+    if (isCalDavCalendar(id)) return caldavRuntime.select(id, selected);
     const result = db.setCalendarRemoteCalendarSelected(id, Boolean(selected));
     if (result.removedEvents) cleanupOrphanCalendarAttachmentFiles();
     broadcast('calendar.changed', {
@@ -3975,6 +4012,14 @@ const methods = {
     });
     return result;
   },
+
+  // C4b: local authenticated RPC, deliberately no remote event writes.
+  'calendar.caldav.preview': async params => caldavRuntime.preview(params),
+  'calendar.caldav.add': async params => caldavRuntime.add(params),
+  'calendar.caldav.configure': async params => caldavRuntime.configure(params),
+  'calendar.caldav.replacePassword': async params => caldavRuntime.replacePassword(params),
+  'calendar.caldav.sync': async ({ id } = {}) => caldavRuntime.sync(id),
+  'calendar.caldav.syncAll': async () => caldavRuntime.syncAll(),
 
   'calendar.google.mock.status': async () => {
     const connection = GOOGLE_CALENDAR_MOCK_ENABLED ? googleCalendarMockConnection() : null;
@@ -4074,6 +4119,7 @@ const methods = {
   'calendar.connections.remove': async ({ id } = {}) => {
     const connection = db.getCalendarConnection(id);
     if (!connection) return { removed: false, credentialRemoved: true };
+    if (isCalDav(connection)) return caldavRuntime.remove(id);
     clearGoogleCalendarTokenCache(connection.id);
     const result = db.removeCalendarConnection(connection.id);
     let credentialRemoved = true;

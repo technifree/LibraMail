@@ -519,6 +519,8 @@ function init(dataDir) {
     provider TEXT NOT NULL,
     credential_key TEXT NOT NULL UNIQUE,
     oauth_client_id TEXT NOT NULL DEFAULT '',
+    caldav_server_url TEXT NOT NULL DEFAULT '',
+    caldav_refresh_minutes INTEGER NOT NULL DEFAULT 15,
     email TEXT NOT NULL DEFAULT '',
     display_name TEXT NOT NULL DEFAULT '',
     enabled INTEGER NOT NULL DEFAULT 1,
@@ -613,6 +615,8 @@ function init(dataDir) {
   ensureColumn('calendar_events', 'import_key', 'TEXT');
   ensureColumn('calendar_subscriptions', 'refresh_minutes', 'INTEGER NOT NULL DEFAULT 30');
   ensureColumn('calendar_connections', 'oauth_client_id', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn('calendar_connections', 'caldav_server_url', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn('calendar_connections', 'caldav_refresh_minutes', 'INTEGER NOT NULL DEFAULT 15');
   ensureColumn('calendar_events', 'subscription_id', 'INTEGER');
   ensureColumn('calendar_events', 'category_id', 'INTEGER REFERENCES calendar_categories(id) ON DELETE SET NULL');
   ensureColumn('calendar_events', 'remote_calendar_id', 'INTEGER REFERENCES calendar_remote_calendars(id) ON DELETE CASCADE');
@@ -2756,6 +2760,10 @@ function calendarConnectionRow(row) {
     provider: String(row.provider || ''),
     credentialKey: String(row.credential_key || ''),
     oauthClientId: String(row.oauth_client_id || ''),
+    ...( ['caldav', 'icloud'].includes(row.provider) ? {
+      caldavServerURL: String(row.caldav_server_url || ''),
+      caldavRefreshMinutes: Number(row.caldav_refresh_minutes) || 15,
+    } : {}),
     email: String(row.email || ''),
     displayName: String(row.display_name || ''),
     enabled: Boolean(row.enabled),
@@ -2780,6 +2788,8 @@ function normalizeCalendarConnection(input = {}) {
     provider,
     credentialKey,
     oauthClientId,
+    caldavServerURL: ['caldav', 'icloud'].includes(provider) ? String(input.caldavServerURL || '') : '',
+    caldavRefreshMinutes: ['caldav', 'icloud'].includes(provider) ? (Number(input.caldavRefreshMinutes) || 15) : 15,
     email: String(input.email || '').trim().slice(0, 320),
     displayName: String(input.displayName || '').trim().slice(0, 240),
     enabled: input.enabled === false ? 0 : 1,
@@ -2802,16 +2812,16 @@ function saveCalendarConnection(input = {}, id = null) {
   const numericId = Number(id || input.id || 0);
   if (numericId > 0) {
     const result = db.prepare(`UPDATE calendar_connections
-      SET provider=?,credential_key=?,oauth_client_id=?,email=?,display_name=?,enabled=?,updated_at=? WHERE id=?`).run(
-      item.provider, item.credentialKey, item.oauthClientId, item.email, item.displayName, item.enabled, now, numericId,
+      SET provider=?,credential_key=?,oauth_client_id=?,caldav_server_url=?,caldav_refresh_minutes=?,email=?,display_name=?,enabled=?,updated_at=? WHERE id=?`).run(
+      item.provider, item.credentialKey, item.oauthClientId, item.caldavServerURL, item.caldavRefreshMinutes, item.email, item.displayName, item.enabled, now, numericId,
     );
     if (!result.changes) throw new Error('Connexion calendrier introuvable');
     return getCalendarConnection(numericId);
   }
   const result = db.prepare(`INSERT INTO calendar_connections
-    (provider,credential_key,oauth_client_id,email,display_name,enabled,last_sync_at,last_status,last_error,created_at,updated_at)
-    VALUES (?,?,?,?,?,?,0,'','',?,?)`).run(
-    item.provider, item.credentialKey, item.oauthClientId, item.email, item.displayName, item.enabled, now, now,
+    (provider,credential_key,oauth_client_id,caldav_server_url,caldav_refresh_minutes,email,display_name,enabled,last_sync_at,last_status,last_error,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,0,'','',?,?)`).run(
+    item.provider, item.credentialKey, item.oauthClientId, item.caldavServerURL, item.caldavRefreshMinutes, item.email, item.displayName, item.enabled, now, now,
   );
   return getCalendarConnection(result.lastInsertRowid);
 }

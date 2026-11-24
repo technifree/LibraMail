@@ -43,6 +43,14 @@ Document technique de préparation, établi à partir de l'archive transmise sou
 - Liaison au coffre C3 et contrôle de l’identité de connexion avant et après le REPORT ; politique d’origine C2 pour les collections, aucun suivi de redirection pour les événements. Protection contre les synchronisations concurrentes d’une même collection. Diagnostics limités aux codes d’erreur ; dernière réussite conservée en cas d’échec.
 - Tests simulés du moteur et test d’intégration SQLite avec base temporaire. Le stockage des métadonnées de connexion, les RPC, la synchronisation périodique et la qualification de vrais serveurs restent à intégrer en C4b et suivants ; aucun démarrage automatique ni nouvelle interface.
 
+### Phase C4b — Raccordement au moteur (lecture seule)
+
+- Métadonnées CalDAV dans SQLite (URL canonique et intervalle), migration additive des connexions existantes. Le mot de passe reste dans le coffre C3 et doit être ressaisi après restauration sur un autre poste.
+- RPC authentifiées locales de découverte, ajout avec sélection explicite, configuration, renouvellement du mot de passe, synchronisation manuelle et retrait. Pas encore de formulaire graphique. La sélection est vérifiée par une nouvelle découverte avant enregistrement ; aucune écriture distante.
+- Synchronisation au démarrage (après 5 s) puis contrôle toutes les minutes ; intervalle par compte de 5 à 1440 minutes, 15 par défaut. Les tentatives sont espacées, même après erreur, pour éviter le martèlement. Une seule opération CalDAV à la fois ; arrêt et annulation au verrouillage, à l'arrêt et lors des opérations de maintenance. Le cache est préservé après erreur, les statuts ne contiennent pas les messages bruts du serveur.
+- Les écritures CalDAV sont explicitement bloquées dans les RPC de rendez-vous jusqu'à C5. Les rôles sont distincts des rôles Google. Les récurrences complexes restent une limite de C4a ; aucune qualification sur un serveur réel pour ce lot.
+- Tests de cycle de vie simulé, annulation, isolation Google, validation et rollback ; test SQLite étendu pour les nouvelles métadonnées. Qualification du moteur complet et des trousseaux natifs à réaliser sur les installations cibles.
+
 ## 1. Audit de l'existant
 
 - Le moteur IMAP/SMTP possède un socle OAuth2 (`engine/lib/mail_auth.js`) avec jeton d'accès éphémère, mais pas de flux de connexion Microsoft intégré ni de rafraîchissement des jetons pour les comptes de messagerie.
