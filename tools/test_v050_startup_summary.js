@@ -26,13 +26,11 @@ assert(app.includes("config.startupSummaryEnabled !== false"));
 assert(app.includes("applySetting('startupSummaryEnabled', event.target.value === '1')"));
 assert(app.includes("event === 'mail.new'"));
 assert(app.includes('attachmentCount'));
-assert(css.includes('LibraMail 0.5.0 - resume du jour au demarrage'));
 assert(css.includes('.startup-summary-modal-box'));
 assert(css.includes('.startup-summary-sync-list'));
 assert(!html.includes('id="startup-summary-title"'));
 assert(html.includes('id="startup-summary-heading-title"'));
 assert(html.includes('class="startup-summary-windowbar"'));
-assert(css.includes('LibraMail 0.5.0 - resume du jour style bureau'));
 
 for (const locale of [fr, en]) {
   for (const key of [
@@ -42,14 +40,20 @@ for (const locale of [fr, en]) {
   ]) assert(locale[key], `traduction absente: ${key}`);
 }
 
-assert(css.includes('LibraMail 0.5.0 - resume du jour style moderne equilibre'));
 
-assert(css.includes('LibraMail 0.5.0 - resume du jour style macos'));
 
-assert(css.includes('LibraMail 0.5.0 - resume du jour pastilles couleur'));
 
 assert(app.includes('startup-summary-event-pin'));
 assert(app.includes('fa-thumbtack'));
-assert(css.includes('LibraMail 0.5.0 - resume du jour punaises sans hover'));
+
+// Verify the current desktop style rather than obsolete revision comments.
+const summaryStart = css.indexOf('/* LibraMail 0.7.0 - Résumé du jour');
+assert(summaryStart >= 0);
+const summaryCss = css.slice(summaryStart, css.indexOf('/* LibraMail 0.6.1 — Migration IMAP', summaryStart));
+assert(!/linear-gradient|color-mix|backdrop-filter|border-left|box-shadow:\s*inset|translateY/.test(summaryCss));
+assert(summaryCss.includes('background: var(--bg-panel)'));
+assert(summaryCss.includes('color: var(--fg-muted)'));
+assert(summaryCss.includes('grid-template-columns: 1fr'));
+assert(summaryCss.includes('.startup-summary-event-pin'));
 
 console.log('[LibraMail] Test Résumé du jour au démarrage 0.5.0 : OK');
