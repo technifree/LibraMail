@@ -1165,9 +1165,16 @@
       }
       state.googleCalendars = calendars;
       const clientId = document.getElementById('planner-google-client-id');
-      if (clientId && !clientId.value && state.googleConnections[0]?.oauthClientId) {
+      const managed = await App.rpc('calendar.google.oauth.config').catch(() => ({ clientId: '' }));
+      const managedId = String(managed?.clientId || '').trim();
+      if (managedId && clientId) clientId.value = managedId;
+      else if (clientId && !clientId.value && state.googleConnections[0]?.oauthClientId) {
         clientId.value = state.googleConnections[0].oauthClientId;
       }
+      document.querySelector('.planner-google-client-id')?.classList.toggle('hidden', Boolean(managedId));
+      document.querySelector('.planner-google-client-secret')?.classList.toggle('hidden', Boolean(managedId));
+      document.getElementById('planner-google-managed-help')?.classList.toggle('hidden', !managedId);
+      document.querySelector('.planner-google-help')?.classList.toggle('hidden', Boolean(managedId));
       renderGoogleConnections();
       populateAccountSelects();
     } catch (error) {
@@ -1349,11 +1356,7 @@
       document.getElementById('planner-google-client-id')?.focus();
       return;
     }
-    if (!clientSecret) {
-      googleStatus(t('planner.googleClientSecretRequired'), 'error');
-      document.getElementById('planner-google-client-secret')?.focus();
-      return;
-    }
+    // Le secret n'est pas requis pour un client natif public avec PKCE.
     setGoogleOAuthBusy(true);
     googleStatus(t('planner.googleConnecting'), 'info');
     try {

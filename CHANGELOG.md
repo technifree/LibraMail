@@ -1,3 +1,55 @@
+# LibraMail 0.7.0 - 2026-11-24
+
+## Français
+
+### Version en développement
+
+- Cette version est en cours de développement et n'est pas encore publiée.
+
+### Configuration des comptes
+
+- Détection automatique des comptes Gmail, Outlook, Hotmail et Live.
+- Préconfiguration des serveurs IMAP et SMTP.
+- Aide à la création d'un mot de passe d'application Gmail.
+- Information sur l'authentification OAuth2 obligatoire pour les comptes Microsoft.
+
+### Agendas
+
+- Identification explicite des abonnements ICS en lecture seule.
+- Préparation de la simplification des connexions Google Calendar.
+
+### Socle technique
+
+- Ajout des premières briques OAuth2 Microsoft.
+- La connexion Microsoft et les synchronisations Outlook et CalDAV restent à intégrer.
+- Ajout de tests automatisés de non-régression.
+
+## English
+
+### Development version
+
+- This version is under development and has not been released.
+
+### Account setup
+
+- Automatic detection of Gmail, Outlook, Hotmail and Live accounts.
+- Automatic IMAP and SMTP server configuration.
+- Guidance for creating a Gmail application password.
+- Information about mandatory Microsoft OAuth2 authentication.
+
+### Calendars
+
+- Explicit identification of read-only ICS subscriptions.
+- Initial work on simplifying Google Calendar connections.
+
+### Technical foundations
+
+- Initial Microsoft OAuth2 components.
+- Microsoft account connections and Outlook and CalDAV synchronization remain to be integrated.
+- Additional automated regression tests.
+
+---
+
 # LibraMail 0.6.4 - 2026-11-10
 
 ## Français

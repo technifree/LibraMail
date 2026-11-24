@@ -40,7 +40,7 @@ const atomicFile = require('./lib/atomic_file');
 const composeAttachments = require('./lib/compose_attachments');
 
 const PORT = 47800;
-const APP_VERSION = '0.6.4';
+const APP_VERSION = '0.7.0';
 const ROOT = path.resolve(__dirname, '..');
 
 // LibraMail 0.4.8 — séparation programme / données utilisateur.
@@ -3180,6 +3180,12 @@ const methods = {
 
   'accounts.add': async input => {
     validateAccountInput(input);
+    // Un mot de passe classique n'authentifie plus Outlook.com. Tant que le
+    // flux Microsoft OAuth2 n'est pas raccordé, refuser ce compte au lieu de
+    // conserver une configuration vouée à échouer lors de la relève.
+    if (providerKeyForAccount(input) === 'outlook') {
+      throw new Error('Microsoft Outlook/Hotmail nécessite OAuth2. La connexion Microsoft sera disponible après intégration du flux OAuth2 dans LibraMail.');
+    }
     const receiveProtocol = String(input.receiveProtocol || 'imap').toLowerCase() === 'pop3' ? 'pop3' : 'imap';
     const incomingInput = receiveProtocol === 'pop3' ? input.pop3 : input.imap;
     const incomingPassword = String(incomingInput?.pass || '');
@@ -4014,8 +4020,14 @@ const methods = {
     return result;
   },
 
+  'calendar.google.oauth.config': async () => ({
+    // Identifiant public du client OAuth2, configuré par le responsable du
+    // projet. Aucun secret n'est transmis par cette méthode RPC.
+    clientId: String(process.env.LIBRAMAIL_GOOGLE_CALENDAR_CLIENT_ID || '').trim(),
+  }),
   'calendar.google.oauth.begin': async ({ clientId = '', clientSecret = '', loginHint = '' } = {}) => {
-    const flow = await googleCalendarOAuthManager.begin({ clientId, clientSecret, loginHint });
+    const publicClientId = String(process.env.LIBRAMAIL_GOOGLE_CALENDAR_CLIENT_ID || '').trim();
+    const flow = await googleCalendarOAuthManager.begin({ clientId: publicClientId || clientId, clientSecret: publicClientId ? '' : clientSecret, loginHint });
     try {
       await openExternalWithSystem(flow.authUrl);
     } catch (error) {

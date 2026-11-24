@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LibraMail 0.6.4</title>
+  <title>LibraMail 0.7.0</title>
   <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
   <link rel="stylesheet" href="themes/dark.css">
   <link rel="stylesheet" href="themes/light.css">
@@ -112,13 +112,13 @@
 <div id="app" data-layout="vertical">
 
   <div id="topbar">
-    <button id="brand" class="brand-button" type="button" title="LibraMail 0.6.4" data-i18n-title="about.open">
+    <button id="brand" class="brand-button" type="button" title="LibraMail 0.7.0" data-i18n-title="about.open">
       <span class="brand-logo-box" aria-hidden="true">
         <img class="brand-logo brand-logo-light" src="assets/logo-light.png" alt="">
         <img class="brand-logo brand-logo-dark" src="assets/logo-dark.png" alt="">
       </span>
       <span class="brand-name">LibraMail</span>
-      <span class="version-badge" id="app-version">v0.6.4</span>
+      <span class="version-badge" id="app-version">v0.7.0</span>
     </button>
     <button id="update-notice" class="update-notice hidden" type="button" aria-label="" title="">
       <i class="fa-solid fa-circle-up" aria-hidden="true"></i>
@@ -625,6 +625,16 @@
       <div class="grid2">
         <div class="field"><label data-i18n="account.name"></label><input id="acc-name" autocomplete="name"></div>
         <div class="field"><label data-i18n="account.email"></label><input id="acc-email" type="email" autocomplete="email"></div>
+        <div class="field field-span-2"><label for="acc-provider" data-i18n="account.providerSelection"></label>
+          <select id="acc-provider">
+            <option value="auto" data-i18n="account.providerAuto"></option>
+            <option value="gmail" data-i18n="account.providerGmail"></option>
+            <option value="microsoft" data-i18n="account.providerMicrosoft"></option>
+            <option value="other" data-i18n="account.providerOther"></option>
+          </select>
+          <div class="account-provider-advice" id="acc-provider-advice" role="status" aria-live="polite"></div>
+          <a class="account-provider-link hidden" id="acc-gmail-password-link" href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer" data-i18n="account.gmailOpenAppPasswords"></a>
+        </div>
         <div class="field field-span-2"><label data-i18n="account.receiveProtocol"></label>
           <select id="acc-receive-protocol"><option value="imap" data-i18n="account.protocol.imap"></option><option value="pop3" data-i18n="account.protocol.pop3"></option></select>
           <small class="field-hint" data-i18n="account.protocolHint"></small>
@@ -1684,6 +1694,8 @@
             <button class="btn primary" id="btn-planner-google-connect" type="button"><i class="fa-brands fa-google"></i><span data-i18n="planner.googleConnect"></span></button>
           </div>
           <div class="planner-google-help"><i class="fa-solid fa-circle-info"></i><span data-i18n="planner.googleClientIdHelp"></span></div>
+          <div class="planner-google-help hidden" id="planner-google-managed-help"><i class="fa-solid fa-shield-halved"></i><span data-i18n="planner.googleManagedClient"></span></div>
+          <div class="planner-google-help"><i class="fa-solid fa-arrows-rotate"></i><span data-i18n="planner.googleWriteHelp"></span></div>
         </div>
         <div id="planner-google-mock" class="planner-google-mock hidden">
           <div class="planner-google-mock-copy"><i class="fa-solid fa-flask"></i><div><strong data-i18n="planner.googleMockTitle"></strong><small data-i18n="planner.googleMockHelp"></small></div></div>
@@ -1749,6 +1761,7 @@
 <script src="js/i18n.js"></script>
 <script src="js/maillist.js"></script>
 <script src="js/viewer.js"></script>
+<script src="js/mail_provider_setup.js"></script>
 <script src="js/app.js"></script>
 <script src="js/outbox.js"></script>
 <script src="js/planner.js"></script>

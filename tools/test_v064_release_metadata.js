@@ -1,35 +1,82 @@
 #!/usr/bin/env node
 'use strict';
+
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
+
 const root = path.resolve(__dirname, '..');
-const read = (name) => fs.readFileSync(path.join(root, name), 'utf8');
+const read = name =>
+  fs.readFileSync(path.join(root, name), 'utf8');
+
 const version = read('VERSION').trim();
-assert.equal(version, '0.6.4', 'La version publique doit être 0.6.4');
 const changelog = read('CHANGELOG.md');
-assert.match(changelog, /^# LibraMail 0\.6\.4 - \d{4}-\d{2}-\d{2}/);
-assert.equal((changelog.match(/^# LibraMail 0\.6\.4 - /gm) || []).length, 1);
-assert.match(changelog, /^# LibraMail 0\.6\.3 - /m, 'Historique 0.6.3 conservé');
-const currentSection = changelog.split(/^# LibraMail 0\.6\.3 - /m)[0];
-for (const required of ['## Français', '## English', 'SMTP', 'MIME', 'brouillon', 'draft', 'attachments']) {
-  assert(currentSection.includes(required), `Note de version incomplète : ${required}`);
+
+assert.match(version, /^\d+\.\d+\.\d+$/);
+
+// Contrôle de la version courante
+const headers = [...changelog.matchAll(
+  /^# LibraMail (\d+\.\d+\.\d+) - \d{4}-\d{2}-\d{2}/gm
+)];
+
+assert(headers.length > 0);
+assert.equal(headers[0][1], version);
+assert.equal(
+  headers.filter(h => h[1] === version).length, 1
+);
+
+// Conservation de l'historique 0.6.4
+assert.equal(
+  headers.filter(h => h[1] === '0.6.4').length, 1
+);
+
+assert.match(
+  changelog,
+  /^# LibraMail 0\.6\.3 - /m
+);
+
+const historical = changelog
+  .split(/^# LibraMail 0\.6\.4 - /m)[1]
+  .split(/^# LibraMail /m)[0];
+
+const archived = read('NOTES_0.6.4.md');
+
+for (const required of [
+  '## Français', '## English', 'SMTP',
+  'MIME', 'brouillon', 'draft', 'attachments'
+]) {
+  assert(historical.includes(required), required);
+  assert(archived.includes(required), required);
 }
+
+assert(archived.startsWith('# LibraMail 0.6.4'));
+assert(archived.includes('macOS Intel x86_64'));
+
+// Documentation de la version courante
 const readme = read('README.md');
-assert(readme.includes('version-0.6.4-'));
-assert(readme.includes('## Latest version — 0.6.4'));
-assert(readme.includes('## Dernière version — 0.6.4'));
-assert(readme.includes('/releases/tag/v0.6.4'));
-assert(readme.includes('./github.sh notes 0.6.4'));
-assert(readme.includes('./github.sh release 0.6.4'));
+
+for (const required of [
+  `version-${version}-`,
+  `## Latest version — ${version}`,
+  `## Dernière version — ${version}`,
+  `/releases/tag/v${version}`,
+  './github.sh notes',
+  './github.sh release'
+]) {
+  assert(readme.includes(required), required);
+}
+
 const note = read('.github/release-notes.md');
-assert(note.startsWith('# LibraMail 0.6.4'));
+
+assert(note.startsWith(`# LibraMail ${version} —`));
 assert(note.includes('macOS Intel x86_64'));
-assert(note.includes('## Français') && note.includes('## English'));
-assert.equal(read('NOTES_0.6.4.md'), note);
+assert(note.includes('## Français'));
+assert(note.includes('## English'));
+
 const publishing = read('docs/PUBLISHING.md');
-assert(publishing.includes('Validation avant publication de la 0.6.4'));
 assert(publishing.includes('unsigned and unnotarized'));
-assert(publishing.includes('dev-0.6.4'));
-assert(read('release.sh').includes('./release.sh 0.6.4'));
-console.log('[OK] LibraMail 0.6.4 : métadonnées, notes FR/EN et publication contrôlées');
+assert(read('release.sh').includes('./release.sh'));
+
+console.log(
+  `[OK] LibraMail ${version} : métadonnées courantes et historique 0.6.4`
+);

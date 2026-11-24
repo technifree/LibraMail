@@ -6627,3 +6627,8 @@ button.planner-attachment-open:hover strong {
   margin-bottom: 4px;
   scroll-margin-bottom: 36px;
 }
+
+/* Assistant fournisseurs de messagerie - développement 0.7.0 */
+.account-provider-advice { margin-top: 8px; font-size: .87rem; line-height: 1.45; color: var(--muted); }
+.account-provider-advice.alert { color: var(--danger); }
+.account-provider-link { display: inline-block; margin-top: 6px; font-size: .86rem; text-decoration: underline; text-underline-offset: 3px; }

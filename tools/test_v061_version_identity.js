@@ -18,7 +18,7 @@ const backend = read('engine/backend.js');
 const html = read('resources/index.html');
 const app = read('resources/js/app.js');
 
-assert(/^0\.6\.[0-9]+$/.test(version), `VERSION=${version}`);
+assert(/^\d+\.\d+\.\d+$/.test(version), `VERSION=${version}`);
 assert(neutralino.version === version, `neutralino.version=${neutralino.version}`);
 assert(
   neutralino.modes &&

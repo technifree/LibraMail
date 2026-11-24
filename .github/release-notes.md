@@ -1,22 +1,28 @@
-# LibraMail 0.6.4 — 2026-11-10
+# LibraMail 0.7.0 — 2026-11-24
 
 ## Français
 
-### Correction des pièces jointes
+### Version en développement
 
-- L'ajout d'une ou plusieurs pièces jointes à un nouveau message utilise désormais le répertoire de données réel de LibraMail, y compris avec une installation Debian.
-- Le transfert d'un message reprend automatiquement ses pièces jointes depuis le contenu MIME d'origine, sans imposer de les ajouter à nouveau.
-- Il est possible de retirer une pièce jointe depuis la fenêtre de rédaction avant l'envoi.
+- Cette version est en cours de développement et n'est pas encore publiée.
 
-### Sécurisation des envois
+### Configuration des comptes
 
-- L'envoi, l'enregistrement d'un brouillon et la programmation d'un envoi différé attendent la préparation des fichiers joints.
-- Lorsqu'une pièce jointe est manquante ou inaccessible, l'envoi SMTP est bloqué au lieu d'expédier silencieusement un message incomplet.
-- Les copies temporaires gérées par LibraMail sont nettoyées lorsqu'elles ne sont plus nécessaires.
+- Détection automatique des comptes Gmail, Outlook, Hotmail et Live.
+- Préconfiguration des serveurs IMAP et SMTP.
+- Aide à la création d'un mot de passe d'application Gmail.
+- Information sur l'authentification OAuth2 obligatoire pour les comptes Microsoft.
 
-### Vérifications
+### Agendas
 
-- Tests de non-régression couvrant plusieurs pièces jointes, le transfert MIME et l'intégrité binaire d'un PDF et d'une image.
+- Identification explicite des abonnements ICS en lecture seule.
+- Préparation de la simplification des connexions Google Calendar.
+
+### Socle technique
+
+- Ajout des premières briques OAuth2 Microsoft.
+- La connexion Microsoft et les synchronisations Outlook et CalDAV restent à intégrer.
+- Ajout de tests automatisés de non-régression.
 
 ### Téléchargements
 
@@ -29,21 +35,27 @@ Les paquets publics ne contiennent aucun compte, mot de passe ou message.
 
 ## English
 
-### Attachment fixes
+### Development version
 
-- Adding one or more attachments to a new message now uses LibraMail's actual writable data directory, including Debian installations.
-- Forwarding a message automatically carries over its attachments from the original MIME message; recipients no longer receive a forward without the original files.
-- Attachments can now be removed from the compose window before sending.
+- This version is under development and has not been released.
 
-### Safer sending
+### Account setup
 
-- Sending, saving a draft and scheduling a message wait until attachment preparation has completed.
-- If an attachment is missing or unreadable, SMTP sending is blocked instead of silently delivering an incomplete message.
-- Temporary copies managed by LibraMail are cleaned up when no longer needed.
+- Automatic detection of Gmail, Outlook, Hotmail and Live accounts.
+- Automatic IMAP and SMTP server configuration.
+- Guidance for creating a Gmail application password.
+- Information about mandatory Microsoft OAuth2 authentication.
 
-### Verification
+### Calendars
 
-- Regression tests cover multiple attachments, MIME forwarding and byte-for-byte integrity of PDF and image files.
+- Explicit identification of read-only ICS subscriptions.
+- Initial work on simplifying Google Calendar connections.
+
+### Technical foundations
+
+- Initial Microsoft OAuth2 components.
+- Microsoft account connections and Outlook and CalDAV synchronization remain to be integrated.
+- Additional automated regression tests.
 
 ### Downloads
 

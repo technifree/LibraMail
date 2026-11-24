@@ -1697,7 +1697,7 @@ const App = (() => {
   };
 
   function applyAppVersion() {
-    const rawVersion = String(window.NL_APPVERSION || '0.6.4').replace(/^v/i, '');
+    const rawVersion = String(window.NL_APPVERSION || '0.7.0').replace(/^v/i, '');
     const badge = document.getElementById('app-version');
     if (badge) {
       badge.textContent = `v${rawVersion}`;
@@ -8058,8 +8058,58 @@ const App = (() => {
     accountField('acc-pop3-delete-days-field')?.classList.toggle('hidden', protocol !== 'pop3' || deletePolicy !== 'after_days');
   }
 
+  // LibraMail 0.7.0 (préparation) : assistant déterministe, sans secret ni
+  // modification silencieuse de la configuration manuelle d'un compte existant.
+  let lastSuggestedMailUser = '';
+  function selectedAccountProvider() {
+    const helper = window.LibraMailProviderSetup;
+    if (!helper) return '';
+    return helper.resolvedProvider(
+      accountField('acc-email')?.value || '',
+      accountField('acc-provider')?.value || 'auto'
+    );
+  }
+
+  function updateAccountProviderAdvice({ autoFill = true } = {}) {
+    const helper = window.LibraMailProviderSetup;
+    if (!helper) return;
+    const provider = selectedAccountProvider();
+    const profile = helper.profileFor(provider, accountField('acc-email')?.value || '');
+    const advice = accountField('acc-provider-advice');
+    const link = accountField('acc-gmail-password-link');
+    link?.classList.toggle('hidden', provider !== 'gmail');
+    if (advice) {
+      advice.textContent = provider === 'gmail' ? t('account.gmailAppPasswordGuide')
+        : provider === 'microsoft' ? t('account.microsoftOAuthNotReady')
+          : provider === 'other' ? t('account.otherProviderHelp') : '';
+      advice.classList.toggle('alert', provider === 'microsoft');
+    }
+    if (!profile || editingAccountId || !autoFill) return;
+    for (const protocol of ['imap', 'smtp']) {
+      const target = profile[protocol];
+      const host = accountField(`acc-${protocol}-host`);
+      const port = accountField(`acc-${protocol}-port`);
+      const security = accountField(`acc-${protocol}-secure`);
+      const user = accountField(`acc-${protocol}-user`);
+      if (host && helper.mayReplace('host', host.value)) {
+        host.value = target.host;
+        if (port && helper.mayReplace('port', port.value)) {
+          port.value = target.port;
+          if (security) security.value = target.secure ? '1' : '0';
+        }
+      }
+      if (user && (!user.value.trim() || user.value.trim() === lastSuggestedMailUser)) {
+        user.value = target.user;
+      }
+    }
+    lastSuggestedMailUser = String(profile.imap.user || '');
+    // Ne pas toucher au protocole POP3 choisi explicitement par l'utilisateur.
+  }
+
   function resetAccountForm() {
     editingAccountId = null;
+    lastSuggestedMailUser = '';
+    accountField('acc-provider').value = 'auto';
     accountField('acc-id').value = '';
     accountField('account-modal-title').textContent = t('account.add');
     accountField('btn-delete-account').classList.add('hidden');
@@ -8090,6 +8140,7 @@ const App = (() => {
     accountField('acc-spam-retention').value = '30';
     accountField('account-password-hint').textContent = t('account.passwordRequired');
     updateIncomingProtocolForm();
+    updateAccountProviderAdvice();
     setAccountStatus();
   }
 
@@ -8137,6 +8188,7 @@ const App = (() => {
       accountField('acc-sync-interval').value = Number(details.syncIntervalMinutes) || 0;
       accountField('acc-spam-retention').value = Number(details.spamRetentionDays) || 0;
       updateIncomingProtocolForm();
+      updateAccountProviderAdvice({ autoFill: false });
       setAccountStatus();
       accountField('acc-name').focus();
     } catch (error) {
@@ -8186,6 +8238,9 @@ const App = (() => {
     setAccountStatus(t('account.testing'));
     saveButton.disabled = true;
     try {
+      if (selectedAccountProvider() === 'microsoft') {
+        throw new Error(t('account.microsoftOAuthRequiredSave'));
+      }
       const payload = accountPayload();
       const method = editingAccountId ? 'accounts.update' : 'accounts.add';
       const account = await rpc(method, payload);
@@ -8452,7 +8507,7 @@ const App = (() => {
 
   // ---------- Mise à jour et À propos ----------
   function appVersion() {
-    return String(window.NL_APPVERSION || '0.6.4').replace(/^v/i, '');
+    return String(window.NL_APPVERSION || '0.7.0').replace(/^v/i, '');
   }
 
   function compareVersions(a, b) {
@@ -10988,6 +11043,8 @@ const App = (() => {
       if (event.key === 'Escape' && editingLabelId !== null) resetLabelEditor({ focus: true });
     };
     document.getElementById('btn-save-account').onclick = saveAccount;
+    document.getElementById('acc-provider')?.addEventListener('change', () => updateAccountProviderAdvice());
+    document.getElementById('acc-email')?.addEventListener('input', () => updateAccountProviderAdvice());
     document.getElementById('acc-receive-protocol')?.addEventListener('change', updateIncomingProtocolForm);
     document.getElementById('acc-pop3-delete-policy')?.addEventListener('change', updateIncomingProtocolForm);
     document.getElementById('btn-delete-account').onclick = deleteEditedAccount;
