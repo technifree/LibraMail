@@ -4013,13 +4013,17 @@ const methods = {
     return result;
   },
 
-  // C4b: local authenticated RPC, deliberately no remote event writes.
+  // CalDAV authenticated local RPC. C5a uses dedicated conditional writes;
+  // the legacy calendar.save/remove path remains guarded until the UI is ready.
   'calendar.caldav.preview': async params => caldavRuntime.preview(params),
   'calendar.caldav.add': async params => caldavRuntime.add(params),
   'calendar.caldav.configure': async params => caldavRuntime.configure(params),
   'calendar.caldav.replacePassword': async params => caldavRuntime.replacePassword(params),
   'calendar.caldav.sync': async ({ id } = {}) => caldavRuntime.sync(id),
   'calendar.caldav.syncAll': async () => caldavRuntime.syncAll(),
+  'calendar.caldav.event.create': async params => caldavRuntime.write('create', params),
+  'calendar.caldav.event.update': async params => caldavRuntime.write('update', params),
+  'calendar.caldav.event.remove': async params => caldavRuntime.write('remove', params),
 
   'calendar.google.mock.status': async () => {
     const connection = GOOGLE_CALENDAR_MOCK_ENABLED ? googleCalendarMockConnection() : null;

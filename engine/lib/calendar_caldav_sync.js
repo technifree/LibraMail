@@ -24,6 +24,12 @@ function collectionURL(identity, value) {
   if (!collection.pathname.endsWith('/')) fail('INVALID_COLLECTION');
   return collection;
 }
+function resourceURL(collection, value) {
+  const href = url(value, collection.href);
+  if(href.origin!==collection.origin || !href.pathname.startsWith(collection.pathname) || href.pathname===collection.pathname ||
+     href.pathname.slice(collection.pathname.length).includes('/') || /%2f|%5c/i.test(href.pathname)) fail('INVALID_RESOURCE');
+  return href;
+}
 function scalar(node) {
   if (!node || node.children.length) fail('INCOMPLETE_SNAPSHOT');
   return node.text;
@@ -130,9 +136,7 @@ function parseSnapshot(text, collection) {
   const items=[], resources=new Set(), ids=new Set(), uids=new Set();
   for (const row of parseMultiStatus(text,{completeSnapshot:true})) {
     if(row.status!==null && (row.status<200||row.status>=300)) fail('INCOMPLETE_SNAPSHOT');
-    const href=url(row.href,collection.href);
-    if(href.origin!==collection.origin || !href.pathname.startsWith(collection.pathname) || href.pathname===collection.pathname ||
-       href.pathname.slice(collection.pathname.length).includes('/') || /%2f|%5c/i.test(href.pathname)) fail('INVALID_RESOURCE');
+    const href=resourceURL(collection,row.href);
     if(resources.has(href.href)) fail('INCOMPLETE_SNAPSHOT');
     resources.add(href.href);
     const etag=scalar(row.properties.get(DAV+'\0getetag')).trim();
@@ -193,4 +197,4 @@ function createCalDavSyncEngine({db, readPassword, isLocked, fetchImpl, now=Date
   }
   return Object.freeze({syncRemoteCalendar});
 }
-module.exports={createCalDavSyncEngine};
+module.exports={createCalDavSyncEngine,collectionURL,resourceURL,project};

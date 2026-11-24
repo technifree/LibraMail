@@ -51,6 +51,15 @@ Document technique de préparation, établi à partir de l'archive transmise sou
 - Les écritures CalDAV sont explicitement bloquées dans les RPC de rendez-vous jusqu'à C5. Les rôles sont distincts des rôles Google. Les récurrences complexes restent une limite de C4a ; aucune qualification sur un serveur réel pour ce lot.
 - Tests de cycle de vie simulé, annulation, isolation Google, validation et rollback ; test SQLite étendu pour les nouvelles métadonnées. Qualification du moteur complet et des trousseaux natifs à réaliser sur les installations cibles.
 
+### Phase C5a — Écritures conditionnelles CalDAV (moteur)
+
+- RPC locales dédiées `calendar.caldav.event.create/update/remove`, protégées par le verrou d’opération C4b. Les RPC historiques `calendar.save/remove` restent bloquées pour CalDAV jusqu’au raccordement UI. Aucun changement de schéma ni dépendance supplémentaire.
+- Création avec UUID v4 stable fourni par l’appelant, UID iCalendar dérivé et PUT `If-None-Match: *`. En cas de réponse incertaine, ne pas renouveler cet UUID : resynchroniser avant une nouvelle tentative. Pas de file d’attente hors ligne ni de répétition automatique des mutations.
+- Édition et suppression : ETag fort attendu par l’appelant, comparaison au cache puis GET de la ressource, PUT/DELETE avec `If-Match`. Suppression avec confirmation explicite. Contrôle du fournisseur, des droits, de la collection et de l’origine. Les séries et invitations, pièces jointes et autres ressources non représentables ne sont pas mutables dans ce lot.
+- Réécriture des champs titre, dates, lieu et notes avec échappement iCalendar et pliage UTF-8. Conservation des UID, métadonnées non modifiées, fuseaux et alarmes existantes ; validation de l’aller-retour via le parseur avant envoi. Les événements à heure ambiguë qui ne peuvent être représentés sans perte sont refusés.
+- Après PUT : GET de la représentation effective et de son ETag, validation avant mise à jour ciblée du cache SQLite. Après DELETE confirmé : retrait de cette seule ressource. Si le serveur a pu appliquer l’opération sans confirmation exploitable, signalement `WRITE_UNCERTAIN`, cache conservé sauf écriture locale déjà effectuée, et prochaine lecture de réconciliation. Conflit signalé sans écrasement ni nouvelle écriture automatique.
+- Tests simulés du cycle complet, concurrence, annulation, lecture seule, idempotence du chemin de création, pertes réseau après PUT et réponses GET invalides. Les tests sur serveur réel et le raccordement graphique restent à faire. Les récurrences complexes continuent de limiter les instantanés C4a.
+
 ## 1. Audit de l'existant
 
 - Le moteur IMAP/SMTP possède un socle OAuth2 (`engine/lib/mail_auth.js`) avec jeton d'accès éphémère, mais pas de flux de connexion Microsoft intégré ni de rafraîchissement des jetons pour les comptes de messagerie.

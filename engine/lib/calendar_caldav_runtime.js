@@ -3,6 +3,7 @@ const { randomUUID } = require('node:crypto');
 const { CalDavError } = require('./calendar_caldav');
 const { discoverCalDav } = require('./calendar_caldav_discovery');
 const { createCalDavSyncEngine } = require('./calendar_caldav_sync');
+const { writeCalDavEvent } = require('./calendar_caldav_write');
 const providers = new Set(['caldav', 'icloud']);
 const fail = code => { throw new CalDavError(code); };
 const safeCode = e => e instanceof CalDavError && /^[A-Z_]{1,80}$/.test(e.code) ? e.code : 'OPERATION_FAILED';
@@ -149,7 +150,35 @@ function createCalDavRuntime({ db, credentials, available, fetchImpl = globalThi
       return {updated:true};
     });
   }
+  function write(action, input = {}) {
+    return run(async ctx => {
+      if (!input || typeof input !== 'object' || Array.isArray(input)) fail('INVALID_OPTIONS');
+      const id = Number(input.remoteCalendarId);
+      if (!Number.isSafeInteger(id) || id <= 0) fail('INVALID_SELECTION');
+      const calendar = db.getCalendarRemoteCalendar(id);
+      const c = row(calendar?.connectionId);
+      if (!c.enabled || !calendar.selected) fail('INVALID_CONNECTION');
+      if (calendar.accessRole !== 'caldav-readWrite') fail('READ_ONLY');
+      const config = fromRow(c);
+      const secret = credentials.readPassword(c.credentialKey, config);
+      if (!secret) fail('CREDENTIALS_REQUIRED');
+      try {
+        const result = await writeCalDavEvent({db, calendar, connection:c, identity:config, password:secret, check:ctx.check, fetchImpl:ctx.fetch, now}, action, input);
+        notify({action:'caldav-event-'+action, connectionId:c.id, remoteCalendarId:id, id:result.event?.id || result.id, removed:Boolean(result.removed)});
+        return result;
+      } catch (e) {
+        // A failed or conflicting write may have reached the server. Never
+        // repeat the mutation automatically; allow the next pull to reconcile.
+        if (!ctx.cancelled() && ['CONFLICT','WRITE_UNCERTAIN'].includes(e.code)) {
+          attempted.delete(c.credentialKey);
+          try { db.updateCalendarRemoteCalendarSync(id,{lastStatus:'error',lastError:e.code}); } catch {}
+          notify({action:'caldav-write-error',connectionId:c.id,remoteCalendarId:id,error:e.code});
+        }
+        throw e;
+      }
+    });
+  }
   function stop() { active?.abort(); attempted.clear(); }
-  return Object.freeze({busy, stop, preview, add, sync, syncAll, configure, select, remove, replacePassword});
+  return Object.freeze({busy, stop, preview, add, sync, syncAll, configure, select, remove, replacePassword, write});
 }
 module.exports = { createCalDavRuntime, isCalDav };
