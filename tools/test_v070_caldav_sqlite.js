@@ -1,0 +1,44 @@
+'use strict';
+const assert=require('node:assert/strict');
+const fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+const db=require('../engine/lib/db');
+const {createCalDavSyncEngine}=require('../engine/lib/calendar_caldav_sync');
+const temp=fs.mkdtempSync(path.join(os.tmpdir(),'libramail-caldav-cache-'));
+const base='https://example.test/dav/', collection=base+'one/';
+const identity={provider:'caldav',serverURL:base,username:'demo'};
+const key='12345678-1234-4234-8234-123456789abc';
+const xml=body=>`<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">${body}</d:multistatus>`;
+const resource=collection+'a.ics';
+const row=(title,etag)=>`<d:response><d:href>${resource}</d:href><d:propstat><d:prop><d:getetag>"${etag}"</d:getetag><c:calendar-data>BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nUID:one\nDTSTART:20261124T100000Z\nDTEND:20261124T110000Z\nSUMMARY:${title}\nEND:VEVENT\nEND:VCALENDAR\n</c:calendar-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>`;
+(async()=>{
+  try {
+    db.init(temp);
+    const connection=db.saveCalendarConnection({provider:'caldav',credentialKey:key,email:'demo',displayName:'DAV'});
+    const calendar=db.saveCalendarRemoteCalendar({connectionId:connection.id,remoteId:collection,name:'DAV one',selected:true,accessRole:'reader'});
+    const other=db.saveCalendarRemoteCalendar({connectionId:connection.id,remoteId:base+'two/',name:'DAV two',selected:true});
+    const google=db.saveCalendarConnection({provider:'google',credentialKey:'test-google',email:'demo@example.test'});
+    const gcal=db.saveCalendarRemoteCalendar({connectionId:google.id,remoteId:'primary',name:'Google'});
+    const event={title:'Other',startAt:Date.UTC(2026,10,24,8),endAt:Date.UTC(2026,10,24,9)};
+    const local=db.saveCalendarEvent(event);
+    for(const cal of [other,gcal]) db.syncCalendarRemoteEvents(cal.id,[{...event,remoteEventId:'other-event',remoteEtag:'"1"'}],{fullSync:true});
+    let body=xml(row('First','1'));
+    const engine=createCalDavSyncEngine({db,readPassword:()=> 'test-password',isLocked:()=>false,now:()=>12345,fetchImpl:async()=>new Response(body,{status:207})});
+    const sync=()=>engine.syncRemoteCalendar(calendar.id,identity);
+    assert.equal((await sync()).created,1);
+    const first=db.getCalendarEventByRemote(calendar.id,resource);
+    assert(first);assert.equal(first.title,'First');assert.equal(first.remoteEtag,'"1"');
+    assert.equal((await sync()).unchanged,1);
+    body=xml(row('Changed','2'));assert.equal((await sync()).updated,1);
+    assert.equal(db.getCalendarEventByRemote(calendar.id,resource).id,first.id);
+    db.close();db.init(temp);
+    assert.equal(db.getCalendarEventByRemote(calendar.id,resource).title,'Changed');
+    body=xml('<d:error><d:number-of-matches-within-limits/></d:error>');
+    await assert.rejects(sync());assert.equal(db.getCalendarEventByRemote(calendar.id,resource).title,'Changed');
+    assert.equal(db.getCalendarRemoteCalendar(calendar.id).lastSyncAt,12345);
+    body=xml('');assert.equal((await sync()).removed,1);
+    assert.equal(db.getCalendarEventByRemote(calendar.id,resource),null);
+    assert(db.getCalendarEvent(local.id));
+    for(const cal of [other,gcal]) assert(db.getCalendarEventByRemote(cal.id,'other-event'));
+    console.log('[OK] LibraMail 0.7.0 : cache CalDAV SQLite, persistance et cloisonnement');
+  } finally {db.close();fs.rmSync(temp,{recursive:true,force:true});}
+})().catch(e=>{console.error(e);process.exitCode=1;});

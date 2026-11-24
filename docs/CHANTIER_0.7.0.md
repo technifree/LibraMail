@@ -35,6 +35,14 @@ Document technique de préparation, établi à partir de l'archive transmise sou
 - Les identifiants ne font pas partie des sauvegardes ZIP (trousseau externe au dossier de données). La restauration sur un autre poste nécessitera une nouvelle saisie. Le stockage des métadonnées, les opérations de connexion RPC, la sélection des collections et la synchronisation restent à intégrer ; aucune utilisation réelle depuis l’interface dans ce lot.
 - Tests avec trousseau simulé et véritable module de mot de passe principal, y compris migrations, changement de mot de passe principal, verrouillage, rotation, retrait, liaison à l’identité et défaut d’écriture. Qualification du trousseau natif sur Linux, Windows et macOS à effectuer.
 
+### Phase C4a — Lecture CalDAV et cache SQLite (socle isolé)
+
+- Synchronisation explicite d’une collection déjà sélectionnée via REPORT, sans modification distante. Réutilisation de `syncCalendarRemoteEvents` (transaction SQLite par collection, identifiants distants, ETags, création/mise à jour/suppression du cache local). Aucun changement de schéma dans ce lot.
+- Un instantané n’est appliqué qu’après validation complète : statut DAV, propriétés, ETags forts, absence de doublons, ressources directes de la collection, XML et données d’événement valides. Toute réponse partielle, erreur réseau ou événement non pris en charge laisse le cache intact. Une réponse complète vide retire les événements de cette seule collection.
+- Prise en charge initiale des rendez-vous simples, journées entières et séries DAILY/WEEKLY de forme FREQ/COUNT[/INTERVAL] (366 occurrences maximum). Les fuseaux IANA sont projetés via le parseur existant et Intl ; dates non représentables refusées. Les séries complexes, exceptions, durées DURATION et fuseaux personnalisés restent à traiter. Ce lot est volontairement conservateur : un seul événement non supporté bloque l’instantané de sa collection.
+- Liaison au coffre C3 et contrôle de l’identité de connexion avant et après le REPORT ; politique d’origine C2 pour les collections, aucun suivi de redirection pour les événements. Protection contre les synchronisations concurrentes d’une même collection. Diagnostics limités aux codes d’erreur ; dernière réussite conservée en cas d’échec.
+- Tests simulés du moteur et test d’intégration SQLite avec base temporaire. Le stockage des métadonnées de connexion, les RPC, la synchronisation périodique et la qualification de vrais serveurs restent à intégrer en C4b et suivants ; aucun démarrage automatique ni nouvelle interface.
+
 ## 1. Audit de l'existant
 
 - Le moteur IMAP/SMTP possède un socle OAuth2 (`engine/lib/mail_auth.js`) avec jeton d'accès éphémère, mais pas de flux de connexion Microsoft intégré ni de rafraîchissement des jetons pour les comptes de messagerie.

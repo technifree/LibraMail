@@ -133,12 +133,14 @@ function status(n) {
   if (!m) invalid();
   return Number(m[1]);
 }
-function parseMultiStatus(source) {
+function parseMultiStatus(source, { completeSnapshot = false } = {}) {
   const root = parseXML(source);
   if (root.uri !== DAV || root.local !== 'multistatus') invalid();
+  if (completeSnapshot && root.children.some(n => n.uri !== DAV || !['response', 'responsedescription'].includes(n.local))) invalid();
   const responses = children(root, DAV, 'response');
   if (responses.length > 1000) fail('DISCOVERY_LIMIT');
   return responses.map(response => {
+    if (completeSnapshot && response.children.some(n => n.uri !== DAV || !['href', 'status', 'propstat', 'responsedescription'].includes(n.local))) invalid();
     const href = scalar(one(response, DAV, 'href'));
     if (!href || href.length > 4096) invalid();
     const result = { href, properties: new Map(), status: null };
@@ -148,6 +150,7 @@ function parseMultiStatus(source) {
       const code = status(one(ps, DAV, 'status'));
       const prop = one(ps, DAV, 'prop');
       if (!prop) invalid();
+      if (completeSnapshot && (code < 200 || code >= 300)) invalid();
       if (code < 200 || code >= 300 || (result.status !== null && (result.status < 200 || result.status >= 300))) continue;
       for (const p of prop.children) {
         const key = `${p.uri}\0${p.local}`;
