@@ -1085,6 +1085,28 @@ function syncDiagnosticCategory(error) {
   return 'server';
 }
 
+// Ne jamais transmettre le texte brut d'une erreur d'authentification Gmail
+// au client RPC : les bibliothèques peuvent y inclure une réponse serveur.
+function accountConnectionError(protocol, account, error) {
+  const kind = String(protocol).toLowerCase();
+  const host = String(account?.[kind]?.host || '').trim().toLowerCase();
+  if (!['imap', 'pop3', 'smtp'].includes(kind) || host !== `${kind}.gmail.com`) {
+    return new Error(`${protocol} : ${error.message}`);
+  }
+  const detail = [error?.code, error?.responseCode, error?.responseStatus,
+    error?.serverResponseCode, error?.responseText, error?.response, error?.message]
+    .filter(value => typeof value === 'string' || typeof value === 'number').join(' ').toLowerCase();
+  let reason = 'SERVER';
+  if (/5\.7\.9|application[- ]specific password|app password required/.test(detail)) reason = 'APP_PASSWORD';
+  else if (/certificate|certificat|self[- ]signed|\btls\b|\bssl\b|err_tls|unable_to_verify|cert_/.test(detail)) reason = 'TLS';
+  else if (/etimedout|esockettimedout|timed?\s*out|timeout/.test(detail)) reason = 'TIMEOUT';
+  else if (/enotfound|eai_again|edns|\bdns\b/.test(detail)) reason = 'DNS';
+  else if (/econnrefused|econnreset|ehostunreach|enetunreach|epipe|connection refused|connection closed|socket hang up/.test(detail)) reason = 'NETWORK';
+  else if (error?.authenticationFailed === true || /eauth|authenticationfailed|authentication failed|invalid credentials|invalid login|badcredentials|5\.7\.8|\b535\b|\b534\b/.test(detail)) reason = 'AUTH';
+  else if (/4\.7\.|\b421\b|rate.limit|too many|temporar/.test(detail)) reason = 'TEMPORARY';
+  return new Error(`GMAIL_SETUP_${kind.toUpperCase()}_${reason}`);
+}
+
 async function syncRole(account, folder, role, source, signal = null) {
   if (!folder) return { folder: '', role, added: 0, skipped: true };
   if (account?.receiveProtocol === 'pop3') return { folder, role, added: 0, skipped: true, local: true };
@@ -3258,13 +3280,13 @@ const methods = {
       syncIntervalMinutes: input.syncIntervalMinutes ?? 5,
       spamRetentionDays: input.spamRetentionDays ?? 30,
     });
-    await smtp.verify(account).catch(error => { throw new Error('SMTP : ' + error.message); });
+    await smtp.verify(account).catch(error => { throw accountConnectionError('SMTP', account, error); });
     if (receiveProtocol === 'pop3') {
-      await pop3.verify(account).catch(error => { throw new Error('POP3 : ' + error.message); });
+      await pop3.verify(account).catch(error => { throw accountConnectionError('POP3', account, error); });
       account.folderMap = { inbox: 'INBOX', sent: 'Local/Sent', trash: 'Local/Trash', junk: 'Local/Junk' };
     } else {
       account.folderMap = await imap.resolveFolderMap(account)
-        .catch(error => { throw new Error('IMAP : ' + error.message); });
+        .catch(error => { throw accountConnectionError('IMAP', account, error); });
     }
 
     try {
@@ -3334,13 +3356,13 @@ const methods = {
       spamRetentionDays: input.spamRetentionDays ?? current.spamRetentionDays,
     });
 
-    await smtp.verify(candidate).catch(error => { throw new Error('SMTP : ' + error.message); });
+    await smtp.verify(candidate).catch(error => { throw accountConnectionError('SMTP', candidate, error); });
     if (receiveProtocol === 'pop3') {
-      await pop3.verify(candidate).catch(error => { throw new Error('POP3 : ' + error.message); });
+      await pop3.verify(candidate).catch(error => { throw accountConnectionError('POP3', candidate, error); });
       candidate.folderMap = { inbox: 'INBOX', sent: 'Local/Sent', trash: 'Local/Trash', junk: 'Local/Junk' };
     } else {
       candidate.folderMap = await imap.resolveFolderMap(candidate)
-        .catch(error => { throw new Error('IMAP : ' + error.message); });
+        .catch(error => { throw accountConnectionError('IMAP', candidate, error); });
     }
 
     try {

@@ -8371,6 +8371,9 @@ const App = (() => {
       if (!editingAccountId && guidedPasswordIdentity) {
         // Google displays the app password in groups of four characters.
         payload.imap.pass = payload.imap.pass.replace(/\s+/g, '');
+        if (!window.LibraMailProviderSetup.validAppPassword(payload.imap.pass)) {
+          throw new Error(t('account.gmailPasswordFormat'));
+        }
       }
       const method = editingAccountId ? 'accounts.update' : 'accounts.add';
       const account = await rpc(method, payload);
@@ -8389,7 +8392,9 @@ const App = (() => {
       editingAccountId = null;
       if (wasNew) rpc('sync.start', { accountId: account.id }).catch(error => status(error.message, 'error'));
     } catch (error) {
-      setAccountStatus('✗ ' + error.message, 'error');
+      const diagnosis = window.LibraMailProviderSetup?.gmailSetupError(error.message);
+      const message = diagnosis ? t(diagnosis.key, { protocol: diagnosis.protocol }) : error.message;
+      setAccountStatus('✗ ' + message, 'error');
     } finally {
       accountSaving = false;
       saveButton.disabled = accountEditorLoading || (!editingAccountId && selectedAccountProvider() === 'microsoft');

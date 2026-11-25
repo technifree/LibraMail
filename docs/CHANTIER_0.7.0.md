@@ -96,6 +96,14 @@ Document technique de préparation, établi à partir de l'archive transmise sou
 - Les exceptions sans maître, RANGE=THISANDFUTURE, RDATE de type PERIOD, règles/durées non prises en charge et identités ambiguës ne sont pas interprétées approximativement : erreur ou synchronisation partielle sans suppression du cache. Les exceptions non annulées doivent fournir leurs dates et rester du même type (journée entière ou horaire). Les séries et leurs exceptions restent non modifiables depuis LibraMail.
 - Tests de projection, de réconciliation, de refus des écritures et de persistance SQLite ; qualification réelle avec iCloud et vérification du moteur natif sur les plateformes cibles encore nécessaires.
 
+### Phase D1 — Consolidation de l’assistant Gmail
+
+- Réutilisation du test SMTP et de la résolution des dossiers IMAP avant l’enregistrement. Aucun changement de configuration automatique des comptes existants, aucune modification du moteur de synchronisation ou du coffre.
+- Contrôle local des 16 caractères du mot de passe d’application en mode guidé uniquement ; les configurations avancées restent libres. Aide FR/EN actualisée (IMAP déjà actif pour les comptes Gmail personnels, restrictions possibles des mots de passe d’application).
+- Diagnostics de connexion Gmail par protocole et catégorie, sans renvoyer le texte brut des erreurs du serveur Google au client. Pas de nouvelle tentative automatique, pas de relâchement TLS.
+- Tests simulés ; qualification réelle de l’ajout, envoi/réception et vérification des libellés/dossiers Gmail à réaliser. OAuth2 Gmail hors de ce lot ; Google recommande OAuth2 lorsque disponible.
+- Références : https://support.google.com/accounts/answer/185833 et https://support.google.com/mail/answer/7126229.
+
 ### Phase F — Filtrage rapide par expéditeur (à développer)
 
 - Action directe sur l'expéditeur depuis la liste des messages ou la lecture ; conserver une action contextuelle et permettre l'extension explicite à tous les comptes.

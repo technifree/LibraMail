@@ -66,7 +66,14 @@
         String(actual.user || '').trim() === expected.user;
     });
   }
-  const api = Object.freeze({ recognizedProvider, resolvedProvider, profileFor, mayReplace, isStandardGmail });
+  function validAppPassword(value) {
+    return /^[!-~]{16}$/.test(String(value || '').replace(/\s+/g, ''));
+  }
+  function gmailSetupError(message) {
+    const match = /^GMAIL_SETUP_(SMTP|IMAP|POP3)_(APP_PASSWORD|AUTH|TLS|TIMEOUT|DNS|NETWORK|TEMPORARY|SERVER)$/.exec(String(message || ''));
+    return match ? { protocol: match[1], key: `account.gmailError.${match[2]}` } : null;
+  }
+  const api = Object.freeze({ recognizedProvider, resolvedProvider, profileFor, mayReplace, isStandardGmail, validAppPassword, gmailSetupError });
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.LibraMailProviderSetup = api;
 })(typeof globalThis !== 'undefined' ? globalThis : null);
