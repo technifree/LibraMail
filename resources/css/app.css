@@ -5822,3 +5822,22 @@ button.planner-attachment-open:hover strong {
 .account-provider-summary { margin-top: 8px; color: var(--fg-muted); font-size: .88rem; font-weight: 600; }
 .account-provider-advice { color: var(--fg-muted); }
 .account-microsoft-pending .account-password-field { display: none; }
+
+/* LibraMail 0.7.0 — CalDAV account settings, flat native-style form. */
+.planner-calendar-provider-field { margin-bottom:16px; }
+.planner-caldav-form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px 16px; }
+.planner-caldav-form .field { min-width:0; }
+.planner-caldav-form .field input { width:100%; box-sizing:border-box; }
+#planner-caldav-server-field,.planner-caldav-help,.planner-caldav-discovery,.planner-caldav-actions { grid-column:1/-1; }
+.planner-caldav-help,.planner-caldav-meta { color:var(--fg-muted); font-size:11px; line-height:1.5; overflow-wrap:anywhere; }
+.planner-caldav-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:7px; }
+.planner-caldav-account { border-top:1px solid var(--border); padding:12px 0; }
+.planner-caldav-account-head,.planner-caldav-calendar-row { display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
+.planner-caldav-account-head { justify-content:space-between; margin-bottom:6px; }
+.planner-caldav-account-head strong,.planner-caldav-calendar-row label { min-width:0; overflow-wrap:anywhere; }
+.planner-caldav-calendar-row { padding:7px 0; border-bottom:1px solid var(--border); }
+.planner-caldav-calendar-row label { display:flex; align-items:center; gap:8px; flex:1; }
+.planner-caldav-calendar-row input[type=color] { width:34px; height:26px; padding:2px; }
+.planner-caldav-settings { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:8px 0; }
+.planner-caldav-settings input[type=number] { width:76px; }
+@media(max-width:600px) { .planner-caldav-form { grid-template-columns:1fr; } .planner-caldav-actions { justify-content:flex-start; } }

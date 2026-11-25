@@ -6,7 +6,12 @@ const CAL = 'urn:ietf:params:xml:ns:caldav';
 const XML = 'http://www.w3.org/XML/1998/namespace';
 const XMLNS = 'http://www.w3.org/2000/xmlns/';
 const fail = code => { throw new CalDavError(code); };
-const invalid = () => fail('INVALID_DAV_XML');
+// Fixed diagnostic labels only: never expose XML, paths or event content.
+function invalid(reason = 'STRUCTURE') {
+  const error = new CalDavError('INVALID_DAV_XML');
+  error.xmlReason = reason;
+  throw error;
+}
 const namePattern = '[A-Za-z_][A-Za-z0-9_.-]*(?::[A-Za-z_][A-Za-z0-9_.-]*)?';
 const nameRE = new RegExp(namePattern, 'y');
 const attrRE = new RegExp(`\\s+(${namePattern})\\s*=\\s*(?:"([^"<]*)"|'([^'<]*)')`, 'y');
@@ -19,9 +24,9 @@ function decode(text) {
   return text.replace(/&(?:([^&;\s<]*);)?/g, (_, entity) => {
     const predefined = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
     if (Object.hasOwn(predefined, entity)) return predefined[entity];
-    if (typeof entity !== 'string' || !/^#(?:[0-9]+|x[0-9a-fA-F]+)$/.test(entity)) invalid();
+    if (typeof entity !== 'string' || !/^#(?:[0-9]+|x[0-9a-fA-F]+)$/.test(entity)) invalid('ENTITY');
     const code = entity[1] === 'x' ? parseInt(entity.slice(2), 16) : Number(entity.slice(1));
-    if (!validChar(code)) invalid();
+    if (!validChar(code)) invalid('ENTITY');
     return String.fromCodePoint(code);
   });
 }
@@ -30,20 +35,20 @@ function decode(text) {
 // entities, arbitrary processing instructions or external resource resolution.
 // Unknown element namespaces are retained, never interpreted as DAV/CALDAV.
 function parseXML(source) {
-  if (typeof source !== 'string' || Buffer.byteLength(source) > 8 * 1024 * 1024) invalid();
-  for (const ch of source) if (!validChar(ch.codePointAt(0))) invalid();
+  if (typeof source !== 'string' || Buffer.byteLength(source) > 8 * 1024 * 1024) invalid('SIZE');
+  for (const ch of source) if (!validChar(ch.codePointAt(0))) invalid('CHARACTER');
   source = source.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
   let i = 0, count = 0, root = null;
   const stack = [];
   const nsRoot = new Map([['xml', XML], ['', '']]);
   const addText = (text, raw = false) => {
-    if (!stack.length) { if (!whitespace.test(text)) invalid(); return; }
-    if (!raw && text.includes(']]>')) invalid();
+    if (!stack.length) { if (!whitespace.test(text)) invalid('OUTSIDE_ROOT'); return; }
+    if (!raw && text.includes(']]>')) invalid('TEXT');
     stack.at(-1).node.text += raw ? text : decode(text);
   };
   if (source.startsWith('<?xml ')) {
     const end = source.indexOf('?>');
-    if (end < 0 || !/^<\?xml\s+version\s*=\s*(['"])1\.0\1(?:\s+encoding\s*=\s*(['"])UTF-8\2)?(?:\s+standalone\s*=\s*(['"])(?:yes|no)\3)?\s*\?>$/i.test(source.slice(0, end + 2))) invalid();
+    if (end < 0 || !/^<\?xml\s+version\s*=\s*(['"])1\.0\1(?:\s+encoding\s*=\s*(['"])UTF-8\2)?(?:\s+standalone\s*=\s*(['"])(?:yes|no)\3)?\s*\?>$/i.test(source.slice(0, end + 2))) invalid('DECLARATION');
     i = end + 2;
   }
   while (i < source.length) {
@@ -54,51 +59,53 @@ function parseXML(source) {
     }
     if (source.startsWith('<!--', i)) {
       const end = source.indexOf('-->', i + 4);
-      if (end < 0 || source.slice(i + 4, end).includes('--')) invalid();
+      if (end < 0 || source.slice(i + 4, end).includes('--')) invalid('COMMENT');
       i = end + 3; continue;
     }
     if (source.startsWith('<![CDATA[', i)) {
       const end = source.indexOf(']]>', i + 9);
-      if (end < 0 || !stack.length) invalid();
+      if (end < 0 || !stack.length) invalid('CDATA');
       addText(source.slice(i + 9, end), true); i = end + 3; continue;
     }
-    if (source.startsWith('<!', i) || source.startsWith('<?', i)) invalid();
+    if (source.startsWith('<!', i) || source.startsWith('<?', i)) invalid('MARKUP');
     if (source.startsWith('</', i)) {
       nameRE.lastIndex = i + 2;
       const m = nameRE.exec(source);
-      if (!m || !stack.length || m[0] !== stack.at(-1).qname) invalid();
+      if (!m || !stack.length || m[0] !== stack.at(-1).qname) invalid('CLOSING_TAG');
       i = nameRE.lastIndex;
       while (/[\t\n ]/.test(source[i] || '>')) i++;
-      if (source[i++] !== '>') invalid();
+      if (source[i++] !== '>') invalid('CLOSING_TAG');
       stack.pop(); continue;
     }
     nameRE.lastIndex = i + 1;
     const m = nameRE.exec(source);
-    if (!m || ++count > 40000 || stack.length >= 48 || (!stack.length && root)) invalid();
+    if (!m) invalid('TAG_NAME');
+    if (++count > 40000 || stack.length >= 48) invalid('LIMIT');
+    if (!stack.length && root) invalid('MULTIPLE_ROOTS');
     const qname = m[0], attrs = new Map();
     i = nameRE.lastIndex;
     while (true) {
       attrRE.lastIndex = i;
       const a = attrRE.exec(source);
       if (!a) break;
-      if (attrs.size >= 64 || attrs.has(a[1])) invalid();
+      if (attrs.size >= 64 || attrs.has(a[1])) invalid('ATTRIBUTE');
       attrs.set(a[1], decode(a[2] ?? a[3])); i = attrRE.lastIndex;
     }
     while (/[\t\n ]/.test(source[i] || '>')) i++;
     const closed = source.startsWith('/>', i);
-    if (!closed && source[i] !== '>') invalid();
+    if (!closed && source[i] !== '>') invalid('ATTRIBUTE');
     i += closed ? 2 : 1;
     const ns = new Map(stack.at(-1)?.ns || nsRoot);
     for (const [key, value] of attrs) {
       if (key !== 'xmlns' && !key.startsWith('xmlns:')) continue;
       const prefix = key === 'xmlns' ? '' : key.slice(6);
-      if (prefix === 'xmlns' || value === XMLNS || (prefix === 'xml') !== (value === XML) || (prefix && !value)) invalid();
+      if (prefix === 'xmlns' || value === XMLNS || (prefix === 'xml') !== (value === XML) || (prefix && !value)) invalid('NAMESPACE');
       ns.set(prefix, value);
     }
     const resolve = (key, attribute = false) => {
       const parts = key.split(':');
       const prefix = parts.length === 2 ? parts[0] : '';
-      if (!ns.has(prefix) || prefix === 'xmlns') invalid();
+      if (!ns.has(prefix) || prefix === 'xmlns') invalid('NAMESPACE');
       return [attribute && !prefix ? '' : ns.get(prefix), parts.at(-1)];
     };
     const [uri, local] = resolve(qname);
@@ -108,53 +115,71 @@ function parseXML(source) {
       if (key === 'xmlns' || key.startsWith('xmlns:')) continue;
       const [au, al] = resolve(key, true);
       const id = `${au}\0${al}`;
-      if (expanded.has(id)) invalid();
+      if (expanded.has(id)) invalid('ATTRIBUTE');
       expanded.add(id);
       if (!au) node.attrs[al] = value;
     }
     if (stack.length) stack.at(-1).node.children.push(node); else root = node;
     if (!closed) stack.push({ node, qname, ns });
   }
-  if (stack.length || !root) invalid();
+  if (stack.length || !root) invalid('TRUNCATED');
   return root;
 }
 const children = (n, uri, local) => n.children.filter(x => x.uri === uri && x.local === local);
 function one(n, uri, local) {
   const list = children(n, uri, local);
-  if (list.length > 1) invalid();
+  if (list.length > 1) invalid('DUPLICATE');
   return list[0];
 }
 function scalar(n) {
-  if (!n || n.children.length) invalid();
+  if (!n || n.children.length) invalid('SCALAR');
   return n.text.trim();
 }
 function status(n) {
   const m = /^HTTP\/\d+(?:\.\d+)? ([1-5]\d\d)(?:[ \t].*)?$/.exec(scalar(n));
-  if (!m) invalid();
+  if (!m) invalid('STATUS_LINE');
   return Number(m[1]);
 }
 function parseMultiStatus(source, { completeSnapshot = false } = {}) {
   const root = parseXML(source);
-  if (root.uri !== DAV || root.local !== 'multistatus') invalid();
-  if (completeSnapshot && root.children.some(n => n.uri !== DAV || !['response', 'responsedescription'].includes(n.local))) invalid();
+  if (root.uri !== DAV || root.local !== 'multistatus') invalid('ROOT');
+  if (completeSnapshot) {
+    if (!whitespace.test(root.text) || root.children.some(n => n.uri !== DAV || !['response', 'responsedescription', 'sync-token'].includes(n.local))) invalid('ROOT_CHILD');
+    // A sync token is metadata, not an event or proof of completeness.
+    // This engine still requires a complete calendar-query snapshot.
+    const token = one(root, DAV, 'sync-token');
+    if (token && (!scalar(token) || token.text.length > 4096)) invalid('SYNC_TOKEN');
+  }
   const responses = children(root, DAV, 'response');
+  if (completeSnapshot && !responses.length && one(root, DAV, 'sync-token')) invalid('TOKEN_ONLY');
   if (responses.length > 1000) fail('DISCOVERY_LIMIT');
   return responses.map(response => {
-    if (completeSnapshot && response.children.some(n => n.uri !== DAV || !['href', 'status', 'propstat', 'responsedescription'].includes(n.local))) invalid();
+    if (completeSnapshot && (!whitespace.test(response.text) || response.children.some(n => n.uri !== DAV || !['href', 'status', 'propstat', 'responsedescription'].includes(n.local)))) invalid('RESPONSE_CHILD');
     const href = scalar(one(response, DAV, 'href'));
-    if (!href || href.length > 4096) invalid();
-    const result = { href, properties: new Map(), status: null };
+    if (!href || href.length > 4096) invalid('HREF');
+    const result = { href, properties: new Map(), failedProperties: new Map(), status: null };
     const overall = one(response, DAV, 'status');
     if (overall) result.status = status(overall);
     for (const ps of children(response, DAV, 'propstat')) {
       const code = status(one(ps, DAV, 'status'));
       const prop = one(ps, DAV, 'prop');
-      if (!prop) invalid();
-      if (completeSnapshot && (code < 200 || code >= 300)) invalid();
+      if (!prop) invalid('PROPSTAT');
+      if (completeSnapshot && (code < 200 || code >= 300)) {
+        // A property-level 404 is not a resource-level deletion. Record it
+        // explicitly; the snapshot consumer must still verify required data.
+        if (code !== 404 || !prop.children.length || !whitespace.test(prop.text)) {
+          invalid(code === 403 ? 'PROPSTAT_FORBIDDEN' : code === 507 ? 'PROPSTAT_LIMIT' : 'PROPSTAT_FAILED');
+        }
+        for (const p of prop.children) {
+          const key = `${p.uri}\0${p.local}`;
+          if (result.properties.has(key) || result.failedProperties.has(key)) invalid('DUPLICATE_PROPERTY');
+          result.failedProperties.set(key, code);
+        }
+      }
       if (code < 200 || code >= 300 || (result.status !== null && (result.status < 200 || result.status >= 300))) continue;
       for (const p of prop.children) {
         const key = `${p.uri}\0${p.local}`;
-        if (result.properties.has(key)) invalid();
+        if (result.properties.has(key) || result.failedProperties.has(key)) invalid('DUPLICATE_PROPERTY');
         result.properties.set(key, p);
       }
     }

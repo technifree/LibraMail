@@ -45,7 +45,7 @@ const app={accounts:[],accountColor:()=>'',status:(...x)=>statuses.push(x),confi
 }};
 const window={I18N:{locale:'fr'},crypto:webcrypto,addEventListener:()=>{}};
 const ctx=vm.createContext({document,window,App:app,t:key=>key,Date,Uint8Array,console});
-const expose=`\n  render = () => {};\n  window.test = {state,loadCalDavConnections,populateAccountSelects,openNewEvent,openEditor,syncEditorTargetMode,saveEvent,deleteEvent};\n`;
+const expose=`\n  render = () => {};\n  window.test = {state,loadCalDavConnections,populateAccountSelects,openNewEvent,openEditor,syncEditorTargetMode,saveEvent,deleteEvent,renderSelectedDay,paneEventHtml};\n`;
 assert(source.includes('  window.PlannerUI ='));
 vm.runInContext(source.replace('  window.PlannerUI =',expose+'  window.PlannerUI ='),ctx);
 const ui=window.test, method=()=>calls.filter(x=>x.method.startsWith('calendar.caldav.event.')).at(-1), writes=()=>calls.filter(x=>x.method.startsWith('calendar.caldav.event.')).length;
@@ -55,6 +55,27 @@ function choose(){ui.openNewEvent(date);el('planner-account').value='caldav:10';
 (async()=>{
   await ui.loadCalDavConnections();
   assert.deepEqual(el('planner-account').options.map(o=>o.value),['','caldav:10']);
+  // Same title and time can legitimately exist in different sources. Render
+  // all rows, with their true origin instead of incorrectly labeling them local.
+  ui.state.selected=date;
+  const remote={...base,remoteCalendarConnectionId:1};
+  const local={...base,id:43,remoteCalendarId:null,remoteCalendarName:'',remoteCalendarAccessRole:'',remoteCalendarConnectionId:null};
+  const ics={...local,id:44,subscriptionId:7,subscriptionName:'Flux Apple'};
+  const google={...remote,id:45,remoteCalendarId:30,remoteCalendarName:'Agenda Google',remoteCalendarAccessRole:'writer',remoteCalendarConnectionId:3};
+  ui.state.events=[remote,local,ics,google];
+  ui.renderSelectedDay();
+  const dayHtml=el('planner-day-events').innerHTML;
+  assert.equal((dayHtml.match(/data-planner-day-event=/g)||[]).length,4);
+  assert(dayHtml.includes('Personnel · planner.caldavApple'));
+  assert(dayHtml.includes('planner.localCalendar'));
+  assert(dayHtml.includes('Flux Apple · ICS'));
+  assert(dayHtml.includes('Agenda Google · planner.googleCalendar'));
+  assert(ui.paneEventHtml(remote).includes('Personnel · planner.caldavApple'));
+  assert(ui.paneEventHtml(ics).includes('Flux Apple · ICS'));
+  assert(ui.paneEventHtml(google).includes('Agenda Google · planner.googleCalendar'));
+  assert(ui.paneEventHtml(local).includes('planner.localCalendar'));
+  assert(ui.paneEventHtml({...google,remoteCalendarName:'Agenda <privé>',categoryName:'Travail',location:'Salle A'}).includes('Travail · Agenda &lt;privé&gt; · planner.googleCalendar · Salle A'));
+  assert(ui.paneEventHtml({...ics,subscriptionName:'Flux <privé>'}).includes('Flux &lt;privé&gt; · ICS'));
   choose();assert(el('planner-category').disabled);assert(el('#planner-editor .planner-attachments-section').classList.contains('hidden'));
   reject='CalDAV: SYNC_BUSY';await ui.saveEvent();assert.equal(el('planner-form-error').textContent,'planner.caldavBusy');assert.equal(method().method,'calendar.caldav.event.create');
   const operationId=method().params.operationId;assert.match(operationId,/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);

@@ -4,7 +4,7 @@ const { createCalDavRuntime } = require('../engine/lib/calendar_caldav_runtime')
 const { CalDavError } = require('../engine/lib/calendar_caldav');
 const base='https://example.test/dav/', first=base+'one/', second=base+'two/';
 const connections = new Map(), calendars = new Map(), secrets = new Map();
-let id=0, allowed=true, time=1000, failDB=false, failRemote=false, wait=null, syncs=0;
+let id=0, allowed=true, time=1000, failDB=false, failRemote=false, partialRemote=false, wait=null, syncs=0;
 const copy = x => x ? {...x} : null;
 const db={
   db:{ transaction: fn=>()=>{const c=new Map(connections),a=new Map(calendars);try{return fn();}catch(e){connections.clear();calendars.clear();for(const pair of c)connections.set(...pair);for(const pair of a)calendars.set(...pair);throw e;}} },
@@ -28,6 +28,7 @@ const runtime=createCalDavRuntime({db,credentials,available:()=>allowed,now:()=>
     if(wait) await wait;
     if(isLocked())throw new CalDavError('CREDENTIALS_LOCKED');
     if(failRemote)throw Error('private-password');
+    if(partialRemote)return {partial:true,error:'UNSUPPORTED_EVENT_RRULE',created:2};
     db.updateCalendarRemoteCalendarSync(i,{lastSyncAt:time,lastStatus:'ok'});return {created:1};
   }})});
 (async()=>{
@@ -36,7 +37,11 @@ const runtime=createCalDavRuntime({db,credentials,available:()=>allowed,now:()=>
   await assert.rejects(runtime.add({...input,selectedURLs:['https://evil.test/']}),/INVALID_SELECTION/);
   await assert.rejects(runtime.add({...input,serverURL:'http://example.test/'}),/INVALID_URL/);
   failDB=true;await assert.rejects(runtime.add(input),/OPERATION_FAILED/);assert.equal(secrets.size,0);assert.equal(connections.size,1);failDB=false;
-  const {connection:c,calendars:rows}=await runtime.add(input);
+  await assert.rejects(runtime.add({...input,calendarColors:[{url:second,color:'#123456'}]}),/INVALID_OPTIONS/);
+  await assert.rejects(runtime.add({...input,calendarColors:[{url:first,color:'bad'}]}),/INVALID_OPTIONS/);
+  assert.equal(secrets.size,0);
+  const {connection:c,calendars:rows}=await runtime.add({...input,calendarColors:[{url:first,color:'#12ab34'}]});
+  assert.equal(rows[0].color,'#12AB34');
   assert.equal(c.caldavServerURL,base);assert.equal(c.caldavRefreshMinutes,5);assert.equal(rows[0].selected,true);assert.equal(rows[1].selected,false);
   assert(!JSON.stringify([c,rows]).includes(input.password));assert.equal(secrets.size,1);
   await assert.rejects(runtime.add(input),/DUPLICATE_CONNECTION/);
@@ -44,6 +49,7 @@ const runtime=createCalDavRuntime({db,credentials,available:()=>allowed,now:()=>
   assert.deepEqual(await runtime.syncAll({dueOnly:true}),[]);
   time+=300001;failRemote=true;const bad=(await runtime.syncAll({dueOnly:true}))[0];assert.equal(bad.failed,1);assert(!JSON.stringify(bad).includes(input.password));assert.equal(db.getCalendarConnection(c.id).lastSyncAt,1000);
   assert.deepEqual(await runtime.syncAll({dueOnly:true}),[]);failRemote=false;
+  partialRemote=true;const partial=await runtime.sync(c.id);assert.equal(partial.failed,1);assert.equal(partial.partial,1);assert.equal(partial.synced,0);assert.equal(partial.created,2);assert.equal(db.getCalendarConnection(c.id).lastSyncAt,1000);partialRemote=false;
   runtime.select(rows[1].id,true);assert.equal((await runtime.sync(c.id)).synced,2);
   runtime.configure({id:c.id,enabled:false});assert.deepEqual(await runtime.syncAll(),[]);runtime.configure({id:c.id,enabled:true});
   assert.throws(()=>runtime.remove(google.id),/INVALID_CONNECTION/);

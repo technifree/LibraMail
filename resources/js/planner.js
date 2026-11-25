@@ -17,6 +17,11 @@
     subscriptions: [],
     editingSubscriptionId: null,
     caldavCalendars: [],
+    caldavConnections: [],
+    caldavDiscovered: [],
+    caldavSetupGeneration: 0,
+    caldavSetupBusy: false,
+    caldavPasswordEdit: null,
     caldavLoadSequence: 0,
     editingCalDav: null,
     caldavOperationId: '',
@@ -127,6 +132,23 @@
     const account = App.accounts.find(item => String(item.id) === String(accountId));
     return account?.displayName || account?.email || t('planner.localCalendar');
   }
+  // A remote event has no mail account_id. Never label it as local.
+  function eventSourceLabel(event) {
+    if (event.remoteCalendarId) {
+      const connection = state.caldavConnections.find(c => Number(c.id) === Number(event.remoteCalendarConnectionId));
+      const type = caldavEvent(event)
+        ? t(connection?.provider === 'icloud' ? 'planner.caldavApple' : 'planner.caldavGeneric')
+        : t('planner.googleCalendar');
+      return [event.remoteCalendarName, type].filter(Boolean).join(' · ');
+    }
+    if (event.subscriptionId || event.subscriptionName) {
+      return [event.subscriptionName, 'ICS'].filter(Boolean).join(' · ');
+    }
+    return accountLabel(event.accountId);
+  }
+  function eventDetailLabel(event) {
+    return [event.categoryName, eventSourceLabel(event), event.location].filter(Boolean).join(' · ');
+  }
   function googleWritableRole(role = '') {
     return ['owner', 'writer', 'writerWithoutPrivateAccess'].includes(String(role || ''));
   }
@@ -169,11 +191,14 @@
         .map(calendar => ({ ...calendar, enabled: connection.enabled === true, connectionLabel: connection.displayName || connection.email || t('planner.caldavCalendar') }))));
       if (sequence !== state.caldavLoadSequence) return;
       state.caldavCalendars = lists.flat();
+      state.caldavConnections = connections;
     } catch (_) {
       if (sequence !== state.caldavLoadSequence) return;
+      state.caldavConnections = [];
       state.caldavCalendars = []; // fail closed; never replace an explicit remote target with local
     }
     populateAccountSelects();
+    renderCalDavConnections();
   }
   function ensureRemoteEditorOption(value, name) {
     const editor = document.getElementById('planner-account');
@@ -507,7 +532,7 @@
     list.innerHTML = events.map(event => `
       <button class="planner-day-event" type="button" data-planner-day-event="${Number(event.id)}" style="--event-color:${esc(eventColor(event))}">
         <span class="planner-day-event-time">${esc(eventLabel(event))}</span>
-        <span class="planner-day-event-main"><strong>${eventCategoryIcon(event)}${eventAttachmentIcon(event)}${esc(event.title)}</strong><small>${esc(event.categoryName || accountLabel(event.accountId))}${event.location ? ` · ${esc(event.location)}` : ''}</small></span>
+        <span class="planner-day-event-main"><strong>${eventCategoryIcon(event)}${eventAttachmentIcon(event)}${esc(event.title)}</strong><small>${esc(eventDetailLabel(event))}</small></span>
         <i class="fa-solid fa-chevron-right"></i>
       </button>`).join('');
     list.querySelectorAll('[data-planner-day-event]').forEach(button => {
@@ -1101,11 +1126,9 @@
   }
 
   function paneEventHtml(event) {
-    const calendarSource = event.remoteCalendarName || event.subscriptionName || accountLabel(event.accountId);
-    const source = event.location ? `${calendarSource} · ${event.location}` : calendarSource;
     return `<button class="planner-main-event" type="button" data-planner-summary-event="${Number(event.id)}" style="--event-color:${esc(eventColor(event))}" title="${esc(event.title)}">
       <span class="planner-main-event-time">${esc(event.allDay ? t('planner.allDayShort') : formatTime(event.startAt))}</span>
-      <span class="planner-main-event-main"><strong>${eventCategoryIcon(event)}${eventAttachmentIcon(event)}${esc(event.title)}</strong><small>${esc(event.categoryName ? `${event.categoryName} · ${source}` : source)}</small></span>
+      <span class="planner-main-event-main"><strong>${eventCategoryIcon(event)}${eventAttachmentIcon(event)}${esc(event.title)}</strong><small>${esc(eventDetailLabel(event))}</small></span>
     </button>`;
   }
 
@@ -1723,17 +1746,231 @@
     url?.focus();
   }
 
+  const cdEl = suffix => document.getElementById('planner-caldav-' + suffix);
+  const cdBtn = suffix => document.getElementById('btn-planner-caldav-' + suffix);
+  const cdProvider = () => document.getElementById('planner-calendar-provider')?.value || 'icloud';
+  function cdStatus(key = '', type = '') {
+    const el = cdEl('status');
+    if (el) { el.textContent = key ? t(key) : ''; el.className = `planner-subscription-status ${type}`.trim(); }
+  }
+  function cdError(error) {
+    const code = /^CalDAV: ([A-Z_]+)/.exec(String(error?.message || ''))?.[1];
+    if (code === 'SYNC_BUSY') return 'planner.caldavBusy';
+    if (['AUTHENTICATION_FAILED','FORBIDDEN','CREDENTIALS_REQUIRED','INVALID_CREDENTIALS'].includes(code)) return 'planner.caldavAuthorization';
+    if (code === 'INVALID_URL' || code === 'CROSS_ORIGIN' || code === 'REDIRECT_BLOCKED') return 'planner.caldavInvalidServer';
+    if (code === 'DUPLICATE_CONNECTION') return 'planner.caldavDuplicate';
+    if (code === 'INVALID_SELECTION') return 'planner.caldavSelectRequired';
+    if (code === 'INVALID_INTERVAL') return 'planner.caldavIntervalHelp';
+    if (['NETWORK_ERROR','TIMEOUT'].includes(code)) return 'planner.caldavNetwork';
+    if (code === 'RUNTIME_UNAVAILABLE') return 'planner.caldavUnavailable';
+    return 'planner.caldavSetupError';
+  }
+  function cdDiagnostic(code) { return /^[A-Z_]{1,80}$/.test(String(code || '')) ? ` (${code})` : ''; }
+  function cdInvalidate() {
+    state.caldavDiscovered = [];
+    const root = cdEl('discovery');
+    if (root) { root.innerHTML = ''; root.classList.add('hidden'); }
+    cdBtn('add')?.classList.add('hidden');
+  }
+  function cdControls() {
+    const busy = state.caldavSetupBusy, edit = Boolean(state.caldavPasswordEdit);
+    const provider = document.getElementById('planner-calendar-provider');
+    if (provider) provider.disabled = busy || edit;
+    for (const id of ['user','server','name','refresh']) if (cdEl(id)) cdEl(id).disabled = busy || edit;
+    if (cdEl('password')) cdEl('password').disabled = busy;
+    const toggle = document.querySelector('[data-password-toggle="planner-caldav-password"]');
+    if (toggle) toggle.disabled = busy;
+    for (const id of ['test','add','cancel']) if (cdBtn(id)) cdBtn(id).disabled = busy;
+    document.querySelectorAll('#planner-caldav-discovery input, #planner-caldav-connections input, #planner-caldav-connections button').forEach(el => { el.disabled = busy || edit; });
+    if (cdBtn('test')) cdBtn('test').textContent = t(edit ? 'planner.caldavReplacePassword' : 'planner.caldavTest');
+    cdBtn('cancel')?.classList.toggle('hidden', !edit);
+  }
+  function cdClearPassword() {
+    const input = cdEl('password');
+    if (input) { input.value = ''; input.type = 'password'; }
+    const toggle = document.querySelector('[data-password-toggle="planner-caldav-password"]');
+    if (toggle) {
+      toggle.title = t('security.showPassword');
+      toggle.setAttribute('aria-label', toggle.title);
+      const icon = toggle.querySelector('i');
+      if (icon) icon.className = 'fa-solid fa-eye';
+    }
+  }
+  function cdReset() {
+    state.caldavSetupGeneration++;
+    state.caldavPasswordEdit = null;
+    for (const id of ['server','user','name']) if (cdEl(id)) cdEl(id).value = '';
+    cdClearPassword();
+    if (cdEl('refresh')) cdEl('refresh').value = '15';
+    cdInvalidate(); cdStatus(); cdControls();
+  }
+  function cdSwitch() {
+    cdReset();
+    const provider = cdProvider(), apple = provider === 'icloud';
+    document.getElementById('planner-provider-google')?.classList.toggle('hidden', provider !== 'google');
+    document.getElementById('planner-provider-ics')?.classList.toggle('hidden', provider !== 'ics');
+    document.getElementById('planner-provider-caldav')?.classList.toggle('hidden', !['icloud','caldav'].includes(provider));
+    cdEl('server-field')?.classList.toggle('hidden', apple);
+    cdEl('apple-help')?.classList.toggle('hidden', !apple);
+    if (cdEl('user-label')) cdEl('user-label').textContent = t(apple ? 'planner.caldavAppleId' : 'planner.caldavUsername');
+    if (cdEl('password-label')) cdEl('password-label').textContent = t(apple ? 'planner.caldavAppPassword' : 'planner.caldavPassword');
+    renderCalDavConnections();
+  }
+  function cdInput() {
+    const provider = cdProvider();
+    if (!['icloud','caldav'].includes(provider)) throw new Error('CalDAV: INVALID_OPTIONS');
+    const username = cdEl('user')?.value.trim() || '';
+    const password = cdEl('password')?.value || '';
+    const serverURL = provider === 'icloud' ? 'https://caldav.icloud.com/' : (cdEl('server')?.value.trim() || '');
+    const refreshMinutes = Number(cdEl('refresh')?.value);
+    if (!username || !password) throw new Error('CalDAV: INVALID_CREDENTIALS');
+    if (!serverURL) throw new Error('CalDAV: INVALID_URL');
+    if (!Number.isInteger(refreshMinutes) || refreshMinutes < 5 || refreshMinutes > 1440) throw new Error('CalDAV: INVALID_INTERVAL');
+    return {provider,username,password,serverURL,refreshMinutes,displayName:cdEl('name')?.value.trim() || ''};
+  }
+  async function cdRun(task) {
+    if (state.caldavSetupBusy) return;
+    const generation = state.caldavSetupGeneration;
+    const current = () => generation === state.caldavSetupGeneration;
+    state.caldavSetupBusy = true; cdControls();
+    try { await task(current); }
+    catch (error) { if (current()) { cdStatus(cdError(error), 'error'); const code = /^CalDAV: ([A-Z_]+)/.exec(String(error?.message || ''))?.[1]; if (code && cdEl('status')) cdEl('status').textContent += cdDiagnostic(code); } }
+    finally { state.caldavSetupBusy = false; cdControls(); }
+  }
+  function cdRenderDiscovery() {
+    const root = cdEl('discovery'); if (!root) return;
+    root.innerHTML = `<strong>${esc(t('planner.caldavChooseCalendars'))}</strong>` + state.caldavDiscovered.map((cal,i) =>
+      `<div class="planner-caldav-calendar-row"><label><input type="checkbox" data-cd-choice="${i}" checked><span>${esc(cal.name)}</span></label><small>${esc(t(cal.readOnly ? 'planner.caldavReadAccess' : 'planner.caldavWriteAccess'))}</small><input type="color" data-cd-color="${i}" value="#4F8BD6" title="${esc(t('planner.color'))}" aria-label="${esc(t('planner.color'))}"></div>`).join('');
+    root.classList.toggle('hidden', !state.caldavDiscovered.length);
+    cdBtn('add')?.classList.toggle('hidden', !state.caldavDiscovered.length);
+    cdControls();
+  }
+  async function cdTest() {
+    return cdRun(async current => {
+      if (state.caldavPasswordEdit) {
+        const id = state.caldavPasswordEdit;
+        const password = cdEl('password')?.value || '';
+        if (!password) throw new Error('CalDAV: INVALID_CREDENTIALS');
+        cdStatus('planner.caldavTesting');
+        try { await App.rpc('calendar.caldav.replacePassword', {id,password}); }
+        finally { if (current()) cdClearPassword(); }
+        if (current()) { cdReset(); cdStatus('planner.caldavPasswordUpdated','success'); }
+        return;
+      }
+      cdInvalidate(); cdStatus('planner.caldavTesting');
+      const calendars = await App.rpc('calendar.caldav.preview', cdInput());
+      if (!current()) return;
+      state.caldavDiscovered = Array.isArray(calendars) ? calendars.filter(c => typeof c.url === 'string' && typeof c.name === 'string') : [];
+      cdRenderDiscovery();
+      cdStatus(state.caldavDiscovered.length ? 'planner.caldavDiscovered' : 'planner.caldavNoCalendars', state.caldavDiscovered.length ? 'success' : 'info');
+    });
+  }
+  async function cdRefreshAfterChange() {
+    await loadCalDavConnections(); await refreshSummary();
+    if (document.getElementById('planner-modal')?.classList.contains('open')) await loadEvents();
+  }
+  async function cdAdd() {
+    return cdRun(async current => {
+      const root = cdEl('discovery');
+      const selected = [...root.querySelectorAll('[data-cd-choice]:checked')].map(el => Number(el.dataset.cdChoice));
+      if (!selected.length || selected.some(i => !state.caldavDiscovered[i])) throw new Error('CalDAV: INVALID_SELECTION');
+      const input = cdInput();
+      const selectedURLs = selected.map(i => state.caldavDiscovered[i].url);
+      const calendarColors = selected.map(i => ({url:state.caldavDiscovered[i].url,color:root.querySelector(`[data-cd-color="${i}"]`)?.value || '#4F8BD6'}));
+      cdStatus('planner.caldavAdding');
+      let result;
+      try { result = await App.rpc('calendar.caldav.add', {...input,selectedURLs,calendarColors}); }
+      catch (error) { if(current()) { cdClearPassword(); cdInvalidate(); await loadCalDavConnections(); } throw error; }
+      if (current()) { cdClearPassword(); cdInvalidate(); }
+      if (!result?.connection?.id) throw new Error('Unconfirmed account');
+      const wasOpen = current();
+      if (wasOpen) { cdReset(); cdStatus('planner.caldavAdded','success'); }
+      const savedGeneration = state.caldavSetupGeneration;
+      await cdRefreshAfterChange();
+      // Do not repeat the add on a failed first pull: the account is already saved.
+      if (!wasOpen || savedGeneration !== state.caldavSetupGeneration) return;
+      let synced = false;
+      try {
+        const sync = await App.rpc('calendar.caldav.sync',{id:result.connection.id});
+        synced = !!sync && !sync.failed && !sync.error && sync.synced > 0;
+      } catch (_) { /* periodic/manual sync will retry */ }
+      await cdRefreshAfterChange();
+      if (savedGeneration === state.caldavSetupGeneration) cdStatus(synced ? 'planner.caldavAddedSynced' : 'planner.caldavAddedPending',synced ? 'success' : 'info');
+    });
+  }
+  function cdBeginPassword(connection) {
+    if (state.caldavSetupBusy) return;
+    cdReset(); state.caldavPasswordEdit = Number(connection.id);
+    cdEl('user').value = connection.email || ''; cdEl('server').value = connection.caldavServerURL || '';
+    cdEl('name').value = connection.displayName || ''; cdEl('refresh').value = String(connection.caldavRefreshMinutes || 15);
+    cdControls(); cdStatus('planner.caldavPasswordEdit'); cdEl('password').focus();
+  }
+  function cdSyncError(code) {
+    return t(/^UNSUPPORTED_EVENT(?:_|$)/.test(String(code || '')) ? 'planner.caldavUnsupportedEvents' : 'planner.caldavSyncFailed') + cdDiagnostic(code);
+  }
+  function renderCalDavConnections() {
+    const root = cdEl('connections'); if (!root) return;
+    const provider = cdProvider();
+    const connections = state.caldavConnections.filter(c => c.provider === provider);
+    root.innerHTML = connections.length ? connections.map(c => {
+      const id = Number(c.id);
+      const rows = state.caldavCalendars.filter(cal => Number(cal.connectionId) === id);
+      const calendars = rows.map(cal => {
+        const status = !cal.selected || !c.enabled ? t('planner.caldavInactive') : cal.lastStatus === 'error'
+          ? cdSyncError(cal.lastError)
+          : t('planner.lastSync',{date:formatLastSync(cal.lastSyncAt)});
+        return `<div class="planner-caldav-calendar-row"><label><input type="checkbox" data-cd-select="${Number(cal.id)}" ${cal.selected?'checked':''}><span>${esc(cal.name)}</span></label><small>${esc(status)}</small><small>${esc(t(cal.accessRole === 'caldav-readWrite' ? 'planner.caldavWriteAccess':'planner.caldavReadAccess'))}</small></div>`;
+      }).join('');
+      const meta = t('planner.lastSync',{date:formatLastSync(c.lastSyncAt)}) + (c.lastStatus === 'error' ? ' · ' + cdSyncError(c.lastError) : '');
+      return `<div class="planner-caldav-account" data-cd-account="${id}"><div class="planner-caldav-account-head"><strong>${esc(c.displayName || c.email)}</strong><div class="planner-caldav-actions"><button type="button" class="btn compact" data-cd-sync="${id}">${esc(t('planner.syncSubscription'))}</button><button type="button" class="btn compact" data-cd-password="${id}">${esc(t('planner.caldavReplacePassword'))}</button><button type="button" class="btn compact" data-cd-remove="${id}">${esc(t('planner.caldavRemoveAccount'))}</button></div></div><div class="planner-caldav-meta">${esc(c.email)} · ${esc(meta)}</div><div class="planner-caldav-settings"><label for="cd-interval-${id}">${esc(t('planner.refreshInterval'))}</label><input id="cd-interval-${id}" type="number" min="5" max="1440" value="${Number(c.caldavRefreshMinutes)||15}"><label><input id="cd-enabled-${id}" type="checkbox" ${c.enabled?'checked':''}> ${esc(t('planner.caldavEnabled'))}</label><button type="button" class="btn compact" data-cd-config="${id}">${esc(t('planner.saveSubscription'))}</button></div>${calendars}</div>`;
+    }).join('') : `<p class="planner-caldav-meta">${esc(t('planner.caldavNoAccounts'))}</p>`;
+    const bind = (key,fn,event='click') => root.querySelectorAll(`[data-cd-${key}]`).forEach(el => el.addEventListener(event,() => fn(el,Number(el.getAttribute('data-cd-'+key)))));
+    bind('password',(_,id)=>{const c=connections.find(c=>Number(c.id)===id);if(c) cdBeginPassword(c);});
+    bind('sync',(_,id)=>cdRun(async current=>{
+      cdStatus('planner.subscriptionSyncing');
+      const r=await App.rpc('calendar.caldav.sync',{id});
+      await cdRefreshAfterChange();
+      const ok = !!r && !r.failed && !r.error;
+      if(current()) cdStatus(ok ? 'planner.caldavSynced' : r?.partial ? 'planner.caldavUnsupportedEvents' : 'planner.caldavSyncFailed',ok?'success':'error');
+    }));
+    bind('config',(_,id)=>cdRun(async current=>{
+      const refreshMinutes=Number(document.getElementById(`cd-interval-${id}`)?.value);
+      const enabled=Boolean(document.getElementById(`cd-enabled-${id}`)?.checked);
+      await App.rpc('calendar.caldav.configure',{id,refreshMinutes,enabled});
+      await cdRefreshAfterChange(); if(current()) cdStatus('planner.caldavSettingsSaved','success');
+    }));
+    bind('select',(el,id)=>cdRun(async current=>{
+      const selected=el.checked;
+      try {
+        if(!selected && !await plannerConfirm({title:t('planner.caldavDeselectTitle'),message:t('planner.caldavDeselectNote'),confirmLabel:t('planner.saveSubscription')})) {el.checked=true;return;}
+        if(!current()) return;
+        await App.rpc('calendar.remoteCalendars.select',{id,selected});
+        await cdRefreshAfterChange();
+        if(current()) cdStatus('planner.caldavSettingsSaved','success');
+      } catch(e) {el.checked=!selected;throw e;}
+    }),'change');
+    bind('remove',(_,id)=>cdRun(async current=>{
+      if(!await plannerConfirm({title:t('planner.caldavRemoveTitle'),message:t('planner.caldavRemoveNote'),confirmLabel:t('planner.caldavRemoveAccount'),danger:true}))return;
+      if(!current())return;
+      await App.rpc('calendar.connections.remove',{id}); await cdRefreshAfterChange();
+      if(current()) cdStatus('planner.caldavRemoved','success');
+    }));
+    cdControls();
+  }
+
   function closeSubscriptions() {
+    cdReset();
     resetSubscriptionEditor();
     document.getElementById('planner-subscriptions-modal')?.classList.remove('open');
   }
 
   async function openSubscriptions() {
     resetSubscriptionEditor();
+    cdSwitch();
     document.getElementById('planner-subscriptions-modal')?.classList.add('open');
     subscriptionStatus('');
     googleStatus('');
-    await Promise.all([loadSubscriptions(), loadGoogleConnections(), loadGoogleMockStatus()]);
+    await Promise.all([loadSubscriptions(), loadGoogleConnections(), loadGoogleMockStatus(), loadCalDavConnections()]);
   }
 
   async function saveSubscription() {
@@ -1974,6 +2211,17 @@
     document.getElementById('btn-planner-pane-new')?.addEventListener('click', async () => { await openPlanner(); openNewEvent(new Date()); });
     document.getElementById('btn-planner-import')?.addEventListener('click', () => document.getElementById('planner-import-file')?.click());
     document.getElementById('btn-planner-subscriptions')?.addEventListener('click', openSubscriptions);
+    document.getElementById('planner-calendar-provider')?.addEventListener('change', cdSwitch);
+    for (const id of ['server','user','password']) cdEl(id)?.addEventListener('input', cdInvalidate);
+    cdBtn('test')?.addEventListener('click', cdTest);
+    cdBtn('add')?.addEventListener('click', cdAdd);
+    cdBtn('cancel')?.addEventListener('click', cdReset);
+    cdBtn('apple')?.addEventListener('click', () => App.openExternal('https://account.apple.com/'));
+    const calendarModal = document.getElementById('planner-subscriptions-modal');
+    if (calendarModal && typeof MutationObserver !== 'undefined') {
+      new MutationObserver(() => { if (!calendarModal.classList.contains('open')) cdReset(); }).observe(calendarModal,{attributes:true,attributeFilter:['class']});
+    }
+
     document.getElementById('btn-planner-refresh')?.addEventListener('click', syncAllExternalCalendars);
     document.getElementById('btn-planner-google-connect')?.addEventListener('click', connectGoogle);
     document.getElementById('btn-planner-google-cancel')?.addEventListener('click', cancelGoogleConnection);
@@ -2033,7 +2281,9 @@
   }
 
   function onEngineEvent(event, data = {}) {
-    if (event === 'calendar.changed') {
+    if (event === 'security.locked') {
+      cdReset();
+    } else if (event === 'calendar.changed') {
       refreshSummary();
       if (document.getElementById('planner-modal')?.classList.contains('open')) loadEvents();
     } else if (event === 'calendar.categories.changed') {
@@ -2043,7 +2293,7 @@
     } else if (event === 'calendar.subscriptions.changed') {
       if (document.getElementById('planner-subscriptions-modal')?.classList.contains('open')) loadSubscriptions();
     } else if (event === 'calendar.caldav.changed') {
-      if (document.getElementById('planner-modal')?.classList.contains('open')) loadCalDavConnections();
+      if (!state.caldavSetupBusy && (document.getElementById('planner-modal')?.classList.contains('open') || document.getElementById('planner-subscriptions-modal')?.classList.contains('open'))) loadCalDavConnections();
     } else if (event === 'calendar.google.changed') {
       refreshSummary();
       if (document.getElementById('planner-modal')?.classList.contains('open')) loadEvents();

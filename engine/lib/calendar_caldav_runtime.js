@@ -64,6 +64,14 @@ function createCalDavRuntime({ db, credentials, available, fetchImpl = globalThi
     if (!Array.isArray(input.selectedURLs) || !input.selectedURLs.length || input.selectedURLs.length > 250 || new Set(input.selectedURLs).size !== input.selectedURLs.length) fail('INVALID_SELECTION');
     const { config, calendars } = await discoverWith(input, ctx);
     if (input.selectedURLs.some(url => !calendars.some(c => c.url === url))) fail('INVALID_SELECTION');
+    const colors = new Map();
+    if (input.calendarColors !== undefined) {
+      if (!Array.isArray(input.calendarColors) || input.calendarColors.length > input.selectedURLs.length) fail('INVALID_OPTIONS');
+      for (const item of input.calendarColors) {
+        if (!item || !input.selectedURLs.includes(item.url) || colors.has(item.url) || typeof item.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(item.color)) fail('INVALID_OPTIONS');
+        colors.set(item.url,item.color.toUpperCase());
+      }
+    }
     if (db.listCalendarConnections().some(c => isCalDav(c) && c.provider === config.provider && c.email === config.username && c.caldavServerURL === config.serverURL)) fail('DUPLICATE_CONNECTION');
     const key = randomUUID();
     credentials.putPassword(key, config, password(input.password));
@@ -71,7 +79,7 @@ function createCalDavRuntime({ db, credentials, available, fetchImpl = globalThi
     try {
       connection = db.db.transaction(() => {
         const c = db.saveCalendarConnection({ provider:config.provider, credentialKey:key, email:config.username, displayName:String(input.displayName || (config.provider === 'icloud' ? 'iCloud' : 'CalDAV')).slice(0,240), caldavServerURL:config.serverURL, caldavRefreshMinutes:interval, enabled:true });
-        for (const calendar of calendars) db.saveCalendarRemoteCalendar({ connectionId:c.id, remoteId:calendar.url, name:calendar.name, selected:input.selectedURLs.includes(calendar.url), accessRole:calendar.readOnly ? 'caldav-readOnly' : 'caldav-readWrite' });
+        for (const calendar of calendars) db.saveCalendarRemoteCalendar({ connectionId:c.id, remoteId:calendar.url, name:calendar.name, color:colors.get(calendar.url) || '', selected:input.selectedURLs.includes(calendar.url), accessRole:calendar.readOnly ? 'caldav-readOnly' : 'caldav-readWrite' });
         return c;
       })();
     } catch (e) {
@@ -98,7 +106,8 @@ function createCalDavRuntime({ db, credentials, available, fetchImpl = globalThi
       try {
         const r = await engine.syncRemoteCalendar(cal.id, config);
         ctx.check();
-        totals.synced++;
+        if(r.partial){ totals.failed++; totals.partial=(totals.partial||0)+1; totals.error=safeCode(new CalDavError(r.error)); }
+        else totals.synced++;
         for (const k of ['created','updated','removed']) totals[k] += Number(r[k]) || 0;
       } catch(e) {
         ctx.check(); totals.failed++; totals.error = safeCode(e);

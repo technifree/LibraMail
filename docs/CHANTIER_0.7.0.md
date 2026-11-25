@@ -7,7 +7,7 @@ Document technique de préparation, établi à partir de l'archive transmise sou
 - La messagerie Outlook.com, Hotmail, Live et Microsoft 365 est retirée du périmètre 0.7.0 : aucun enregistrement Entra, abonnement Azure ni identifiant OAuth tiers. La détection et le refus explicite restent présents ; les comptes existants ne sont pas supprimés.
 - Microsoft Graph Calendar est également reporté, car il dépend de la même inscription. Les calendriers Outlook publiés en ICS restent consultables en lecture seule.
 - Le socle Microsoft isolé et ses tests restent dans l'historique technique ; il n'est pas activé. Les sections antérieures ci-dessous décrivent l'ancien périmètre, pas des engagements de livraison.
-- Priorités : CalDAV/iCloud bidirectionnel, qualification réelle de Google Calendar, configuration Gmail et non-régression.
+- Priorités : CalDAV/iCloud bidirectionnel, qualification réelle de Google Calendar, configuration Gmail et non-régression. Le filtrage rapide par expéditeur est ajouté au périmètre de livraison (phase F).
 
 ### Phase C1 — Socle CalDAV
 
@@ -66,6 +66,28 @@ Document technique de préparation, établi à partir de l'archive transmise sou
 - Les commandes C5a sont utilisées directement, avec ETag mémorisé à l’ouverture, confirmation de suppression et UUID v4 conservé durant la saisie. Les champs non transmis (catégorie locale et pièces jointes) ne sont pas proposés pour CalDAV.
 - Erreurs FR/EN explicites, formulaire conservé, aucune répétition automatique. En cas de conflit ou de résultat incertain, fermeture et actualisation manuelles avant toute nouvelle opération. Les protections du moteur sur les événements non représentables restent actives.
 - Le bouton d’actualisation inclut les comptes CalDAV. Test du routage des écritures et du comportement de l’éditeur sur réponses RPC simulées. L’assistant de connexion et la qualification réelle restent à réaliser (C6/C7).
+
+
+### Phase C6 — Assistant de configuration CalDAV / iCloud
+
+- Sélecteur des quatre types de calendriers dans la fenêtre existante ; formulaires iCloud (serveur imposé) et CalDAV HTTPS, traductions FR/EN.
+- Découverte sans persistance, choix des collections et couleurs initiales, enregistrement revalidé par le moteur ; première synchronisation distincte de la création du compte.
+- Gestion locale des comptes : intervalle, activation, sélection, relève manuelle, remplacement du mot de passe et retrait confirmé (aucune suppression distante).
+- Mot de passe effacé lors de la fermeture, du changement de fournisseur, du verrouillage ou après l’enregistrement ; réponses tardives de découverte ignorées.
+- Pas de modification de schéma ni de dépendance ; changement d’identité/serveur et découverte des nouveaux calendriers après création nécessitent une évolution dédiée. Qualification iCloud et récurrences complexes encore ouvertes.
+
+### Qualification réelle C6/C7 — état intermédiaire
+
+- Authentification iCloud et découverte de quatre calendriers confirmées sur Linux. Correctifs successifs de compatibilité DAV, synchronisation partielle protégée, récurrences usuelles et affichage de la provenance des événements. Les quatre calendriers ont signalé une synchronisation réussie ; création distante depuis LibraMail confirmée par l'utilisateur.
+- Un doublon apparent a été identifié dans SQLite : un événement CalDAV et une copie issue d'un ancien abonnement ICS au même calendrier. Aucun dédoublonnage automatique par titre/date ; prévoir un avertissement non bloquant dans l'assistant. Le retrait d'un abonnement ICS ne doit jamais modifier le serveur distant.
+- Restent à qualifier : modifications et suppressions dans les deux sens, récurrences avec exceptions, reprise après coupure, et finalisation de la gestion des calendriers (couleurs, actualisation individuelle, redécouverte, libellés et diagnostics).
+
+### Phase F — Filtrage rapide par expéditeur (à développer)
+
+- Action directe sur l'expéditeur depuis la liste des messages ou la lecture ; conserver une action contextuelle et permettre l'extension explicite à tous les comptes.
+- Filtrer sur l'adresse électronique réelle, pas sur le nom affiché ; recherche exacte sur les messages indexés, sans modifier les messages ni créer de règle automatique. Afficher le périmètre, le nombre de résultats et un moyen de quitter le filtre.
+- Réutiliser la recherche existante et les opérations groupées avec confirmation ; la sélection globale doit respecter strictement le filtre et le périmètre, y compris les résultats non chargés. Aucun blocage ou suppression automatique.
+- Tester les homonymes, adresses ressemblantes, comptes multiples, pagination, retour à la vue précédente, opérations groupées et traductions FR/EN. Qualification et non-régression avant publication 0.7.0.
 
 ## 1. Audit de l'existant
 

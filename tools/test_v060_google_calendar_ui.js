@@ -33,7 +33,13 @@ assert(planner.includes("App.rpc('calendar.google.sync'"));
 assert(planner.includes("App.rpc('calendar.google.syncAll'"));
 assert(planner.includes("App.rpc('calendar.connections.remove'"));
 assert(planner.includes("App.rpc('calendar.remoteCalendars.select'"));
-assert(planner.includes("event.remoteCalendarName || event.subscriptionName"));
+// The shared source formatter now distinguishes Google, CalDAV and ICS.
+// Actual rendering of both planning views is exercised in test_v070_caldav_planner.js.
+assert(planner.includes('function eventSourceLabel(event)'));
+assert(planner.includes('function eventDetailLabel(event)'));
+assert(planner.includes('event.remoteCalendarName'));
+assert(planner.includes('event.subscriptionName'));
+assert.strictEqual((planner.match(/esc\(eventDetailLabel\(event\)\)/g) || []).length, 2);
 assert(planner.includes('function setRemoteEditorMode(event = null)'));
 assert(planner.includes('googleWritableRole'));
 assert(planner.includes('planner.googleWritableEvent'));

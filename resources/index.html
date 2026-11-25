@@ -1681,7 +1681,16 @@
       <button class="iconbtn" id="btn-close-planner-subscriptions" type="button"><i class="fa-solid fa-xmark"></i></button>
     </header>
     <div class="body planner-subscriptions-body">
-      <section class="planner-google-section">
+      <div class="field planner-calendar-provider-field">
+        <label for="planner-calendar-provider" data-i18n="planner.caldavProviderType"></label>
+        <select id="planner-calendar-provider">
+          <option value="icloud" data-i18n="planner.caldavApple"></option>
+          <option value="caldav" data-i18n="planner.caldavGeneric"></option>
+          <option value="google" data-i18n="planner.googleCalendar"></option>
+          <option value="ics" data-i18n="planner.internetCalendars"></option>
+        </select>
+      </div>
+      <section class="planner-google-section" id="planner-provider-google">
         <div class="planner-google-head">
           <div class="planner-google-heading">
             <span class="planner-google-mark"><i class="fa-brands fa-google"></i></span>
@@ -1721,6 +1730,31 @@
         <div id="planner-google-empty" class="planner-google-empty hidden"><i class="fa-brands fa-google"></i><span data-i18n="planner.googleNoConnections"></span></div>
         <div id="planner-google-status" class="planner-subscription-status" role="status" aria-live="polite"></div>
       </section>
+      <section id="planner-provider-caldav" class="planner-caldav-section hidden">
+        <div id="planner-caldav-form" class="planner-caldav-form">
+          <div class="field hidden" id="planner-caldav-server-field"><label for="planner-caldav-server" data-i18n="planner.caldavServer"></label><input id="planner-caldav-server" type="url" maxlength="2000" autocomplete="off" spellcheck="false" placeholder="https://…"></div>
+          <div class="field"><label for="planner-caldav-user" id="planner-caldav-user-label" data-i18n="planner.caldavAppleId"></label><input id="planner-caldav-user" type="text" maxlength="320" autocomplete="off" spellcheck="false"></div>
+          <div class="field"><label for="planner-caldav-password" id="planner-caldav-password-label" data-i18n="planner.caldavAppPassword"></label>
+            <div class="security-password-input-wrap">
+              <input id="planner-caldav-password" type="password" maxlength="512" autocomplete="new-password" spellcheck="false">
+              <button class="security-password-toggle" type="button" data-password-toggle="planner-caldav-password" data-i18n-title="security.showPassword"><i class="fa-solid fa-eye"></i></button>
+            </div>
+          </div>
+          <div class="planner-caldav-help" id="planner-caldav-apple-help"><span data-i18n="planner.caldavAppleHelp"></span> <button type="button" class="btn compact" id="btn-planner-caldav-apple" data-i18n="planner.caldavAppleLink"></button></div>
+          <div class="field"><label for="planner-caldav-name" data-i18n="planner.subscriptionName"></label><input id="planner-caldav-name" type="text" maxlength="240" autocomplete="off"></div>
+          <div class="field"><label for="planner-caldav-refresh" data-i18n="planner.refreshInterval"></label><input type="number" id="planner-caldav-refresh" min="5" max="1440" step="1" value="15"><small data-i18n="planner.caldavIntervalHelp"></small></div>
+          <div id="planner-caldav-discovery" class="planner-caldav-discovery hidden"></div>
+          <div class="planner-caldav-actions">
+            <button class="btn hidden" id="btn-planner-caldav-cancel" type="button" data-i18n="cancel"></button>
+            <button class="btn" id="btn-planner-caldav-test" type="button" data-i18n="planner.caldavTest"></button>
+            <button class="btn primary hidden" id="btn-planner-caldav-add" type="button" data-i18n="planner.caldavAdd"></button>
+          </div>
+        </div>
+        <div class="planner-subscriptions-list-head"><strong data-i18n="planner.caldavAccounts"></strong></div>
+        <div id="planner-caldav-connections"></div>
+        <div id="planner-caldav-status" class="planner-subscription-status" role="status" aria-live="polite"></div>
+      </section>
+      <div id="planner-provider-ics">
       <div class="planner-external-separator"><span data-i18n="planner.internetCalendars"></span></div>
       <div class="planner-subscription-form">
         <div class="field planner-subscription-url"><label for="planner-subscription-url" data-i18n="planner.subscriptionUrl"></label><input id="planner-subscription-url" type="url" autocomplete="off" placeholder="webcal://… / https://…"></div>
@@ -1751,6 +1785,7 @@
       <div id="planner-subscriptions-list" class="planner-subscriptions-list"></div>
       <div id="planner-subscriptions-empty" class="planner-subscriptions-empty hidden"><i class="fa-solid fa-link-slash"></i><span data-i18n="planner.noSubscriptions"></span></div>
       <div id="planner-subscription-status" class="planner-subscription-status"></div>
+      </div>
     </div>
     <footer><button class="btn primary" id="btn-close-planner-subscriptions-footer" type="button" data-i18n="close"></button></footer>
   </div>

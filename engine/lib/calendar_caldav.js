@@ -11,6 +11,7 @@ const DISCOVERY = Object.freeze({
   principal: propfind('<d:current-user-principal/><c:calendar-home-set/>'),
   home: propfind('<c:calendar-home-set/>'),
   calendars: propfind('<d:displayname/><d:resourcetype/><d:current-user-privilege-set/><c:supported-calendar-component-set/>'),
+  inventory: propfind('<d:resourcetype/>'),
   events: `${XML}<c:calendar-query xmlns:d="${DAV}" xmlns:c="${CALDAV}"><d:prop><d:getetag/><c:calendar-data/></d:prop><c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT"/></c:comp-filter></c:filter></c:calendar-query>`,
 });
 
@@ -113,7 +114,8 @@ function createCalDavClient({ serverURL, username, password, fetchImpl = globalT
     home: href => xml('PROPFIND', href, 0, DISCOVERY.home),
     calendars: href => xml('PROPFIND', href, 1, DISCOVERY.calendars),
     events: href => xml('REPORT', href, 1, DISCOVERY.events),
-    get: href => request('GET', href, { Accept: 'text/calendar' }, undefined, [200]),
+    inventory: href => xml('PROPFIND', href, 1, DISCOVERY.inventory),
+    get: (href, etag) => request('GET', href, { Accept: 'text/calendar', ...(etag === undefined ? {} : { 'If-Match': strongETag(etag) }) }, undefined, [200]),
     create: (href, ics) => request('PUT', href, { 'Content-Type': 'text/calendar; charset=utf-8', 'If-None-Match': '*' }, calendarBody(ics), [201, 204]),
     update: (href, ics, etag) => request('PUT', href, { 'Content-Type': 'text/calendar; charset=utf-8', 'If-Match': strongETag(etag) }, calendarBody(ics), [200, 204]),
     remove: (href, etag) => request('DELETE', href, { 'If-Match': strongETag(etag) }, undefined, [200, 204]),
