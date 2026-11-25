@@ -3992,8 +3992,8 @@ const methods = {
   },
   // ---------- Google Calendar authentifié 0.6.0 ----------
   'calendar.connections.list': async () => db.listCalendarConnections(),
-  'calendar.remoteCalendars.list': async ({ connectionId = null, selectedOnly = false } = {}) =>
-    db.listCalendarRemoteCalendars({ connectionId, selectedOnly }),
+  'calendar.remoteCalendars.list': async ({ connectionId = null, selectedOnly = false, includeCachedCount = false } = {}) =>
+    db.listCalendarRemoteCalendars({ connectionId, selectedOnly, includeCachedCount:includeCachedCount === true && Number(connectionId)>0 }),
   'calendar.remoteCalendars.select': async ({ id, selected = true } = {}) => {
     if (isCalDavCalendar(id)) return caldavRuntime.select(id, selected);
     const result = db.setCalendarRemoteCalendarSelected(id, Boolean(selected));
@@ -4021,6 +4021,9 @@ const methods = {
   'calendar.caldav.replacePassword': async params => caldavRuntime.replacePassword(params),
   'calendar.caldav.sync': async ({ id } = {}) => caldavRuntime.sync(id),
   'calendar.caldav.syncAll': async () => caldavRuntime.syncAll(),
+  'calendar.caldav.syncCalendar': async ({ id } = {}) => caldavRuntime.syncCalendar(id),
+  'calendar.caldav.setColor': async params => caldavRuntime.setColor(params),
+  'calendar.caldav.rediscover': async ({ id } = {}) => caldavRuntime.rediscover(id),
   'calendar.caldav.event.create': async params => caldavRuntime.write('create', params),
   'calendar.caldav.event.update': async params => caldavRuntime.write('update', params),
   'calendar.caldav.event.remove': async params => caldavRuntime.write('remove', params),

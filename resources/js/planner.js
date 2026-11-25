@@ -186,7 +186,7 @@
     const sequence = ++state.caldavLoadSequence;
     try {
       const connections = (await App.rpc('calendar.connections.list') || []).filter(c => ['icloud', 'caldav'].includes(c.provider));
-      const lists = await Promise.all(connections.map(async connection => (await App.rpc('calendar.remoteCalendars.list', { connectionId: connection.id }) || [])
+      const lists = await Promise.all(connections.map(async connection => (await App.rpc('calendar.remoteCalendars.list', { connectionId: connection.id, includeCachedCount:true }) || [])
         .filter(calendar => Number(calendar.connectionId) === Number(connection.id))
         .map(calendar => ({ ...calendar, enabled: connection.enabled === true, connectionLabel: connection.displayName || connection.email || t('planner.caldavCalendar') }))));
       if (sequence !== state.caldavLoadSequence) return;
@@ -1699,6 +1699,7 @@
     try {
       state.subscriptions = await App.rpc('calendar.subscriptions.list') || [];
       renderSubscriptions();
+      cdRenderIcsWarning();
     } catch (error) {
       subscriptionStatus(`${t('error')} : ${error.message}`, 'error');
     }
@@ -1781,7 +1782,7 @@
     const toggle = document.querySelector('[data-password-toggle="planner-caldav-password"]');
     if (toggle) toggle.disabled = busy;
     for (const id of ['test','add','cancel']) if (cdBtn(id)) cdBtn(id).disabled = busy;
-    document.querySelectorAll('#planner-caldav-discovery input, #planner-caldav-connections input, #planner-caldav-connections button').forEach(el => { el.disabled = busy || edit; });
+    document.querySelectorAll('#planner-caldav-discovery input, #planner-caldav-connections input, #planner-caldav-connections button').forEach(el => { el.disabled = busy || edit || el.hasAttribute?.('data-cd-unavailable') === true; });
     if (cdBtn('test')) cdBtn('test').textContent = t(edit ? 'planner.caldavReplacePassword' : 'planner.caldavTest');
     cdBtn('cancel')?.classList.toggle('hidden', !edit);
   }
@@ -1815,6 +1816,19 @@
     if (cdEl('user-label')) cdEl('user-label').textContent = t(apple ? 'planner.caldavAppleId' : 'planner.caldavUsername');
     if (cdEl('password-label')) cdEl('password-label').textContent = t(apple ? 'planner.caldavAppPassword' : 'planner.caldavPassword');
     renderCalDavConnections();
+    cdRenderIcsWarning();
+  }
+  function cdRenderIcsWarning() {
+    const warning = cdEl('ics-warning');
+    if (!warning) return;
+    const appleICS = state.subscriptions.some(sub => {
+      try {
+        const u = new URL(String(sub.url || '').replace(/^webcal:/i, 'https:'));
+        return ['https:','http:'].includes(u.protocol) && /^(?:[a-z0-9-]+\.)*icloud\.com$/i.test(u.hostname);
+      } catch (_) { return false; }
+    });
+    warning.classList.toggle('hidden', cdProvider() !== 'icloud' || !appleICS);
+    warning.textContent = t('planner.caldavIcsWarning');
   }
   function cdInput() {
     const provider = cdProvider();
@@ -1918,11 +1932,18 @@
       const calendars = rows.map(cal => {
         const status = !cal.selected || !c.enabled ? t('planner.caldavInactive') : cal.lastStatus === 'error'
           ? cdSyncError(cal.lastError)
-          : t('planner.lastSync',{date:formatLastSync(cal.lastSyncAt)});
-        return `<div class="planner-caldav-calendar-row"><label><input type="checkbox" data-cd-select="${Number(cal.id)}" ${cal.selected?'checked':''}><span>${esc(cal.name)}</span></label><small>${esc(status)}</small><small>${esc(t(cal.accessRole === 'caldav-readWrite' ? 'planner.caldavWriteAccess':'planner.caldavReadAccess'))}</small></div>`;
+          : cal.lastSyncAt ? t('planner.lastSync',{date:formatLastSync(cal.lastSyncAt)}) : t('planner.caldavNotSynced');
+        const color = /^#[0-9a-f]{6}$/i.test(cal.color || '') ? cal.color : '#4F8BD6';
+        const count = Number.isSafeInteger(cal.cachedEventCount) && cal.cachedEventCount >= 0 ? t('planner.caldavCachedCount',{count:cal.cachedEventCount}) : '';
+        return `<div class="planner-caldav-calendar-row planner-caldav-managed-row">
+          <label><input type="checkbox" data-cd-select="${Number(cal.id)}" ${cal.selected?'checked':''}><span>${esc(cal.name)}</span></label>
+          <input type="color" data-cd-recolor="${Number(cal.id)}" value="${esc(color)}" title="${esc(t('planner.caldavLocalColor'))}" aria-label="${esc(t('planner.caldavLocalColor'))}">
+          <button type="button" class="btn compact" data-cd-calendar-sync="${Number(cal.id)}" ${cal.selected && c.enabled ? '' : 'data-cd-unavailable disabled'} title="${esc(t('planner.caldavRefreshCalendar'))}" aria-label="${esc(t('planner.caldavRefreshCalendar'))}"><i class="fa-solid fa-rotate"></i></button>
+          <div class="planner-caldav-row-meta"><small>${esc(t(cal.accessRole === 'caldav-readWrite' ? 'planner.caldavWriteAccess':'planner.caldavReadAccess'))}</small>${count ? `<small>${esc(count)}</small>` : ''}<small class="${cal.selected && c.enabled && cal.lastStatus === 'error' ? 'planner-caldav-row-error' : ''}">${esc(status)}</small></div>
+        </div>`;
       }).join('');
       const meta = t('planner.lastSync',{date:formatLastSync(c.lastSyncAt)}) + (c.lastStatus === 'error' ? ' · ' + cdSyncError(c.lastError) : '');
-      return `<div class="planner-caldav-account" data-cd-account="${id}"><div class="planner-caldav-account-head"><strong>${esc(c.displayName || c.email)}</strong><div class="planner-caldav-actions"><button type="button" class="btn compact" data-cd-sync="${id}">${esc(t('planner.syncSubscription'))}</button><button type="button" class="btn compact" data-cd-password="${id}">${esc(t('planner.caldavReplacePassword'))}</button><button type="button" class="btn compact" data-cd-remove="${id}">${esc(t('planner.caldavRemoveAccount'))}</button></div></div><div class="planner-caldav-meta">${esc(c.email)} · ${esc(meta)}</div><div class="planner-caldav-settings"><label for="cd-interval-${id}">${esc(t('planner.refreshInterval'))}</label><input id="cd-interval-${id}" type="number" min="5" max="1440" value="${Number(c.caldavRefreshMinutes)||15}"><label><input id="cd-enabled-${id}" type="checkbox" ${c.enabled?'checked':''}> ${esc(t('planner.caldavEnabled'))}</label><button type="button" class="btn compact" data-cd-config="${id}">${esc(t('planner.saveSubscription'))}</button></div>${calendars}</div>`;
+      return `<div class="planner-caldav-account" data-cd-account="${id}"><div class="planner-caldav-account-head"><strong>${esc(c.displayName || c.email)}</strong><div class="planner-caldav-actions"><button type="button" class="btn compact" data-cd-sync="${id}">${esc(t('planner.syncSubscription'))}</button><button type="button" class="btn compact" data-cd-rediscover="${id}">${esc(t('planner.caldavRediscover'))}</button><button type="button" class="btn compact" data-cd-password="${id}">${esc(t('planner.caldavReplacePassword'))}</button><button type="button" class="btn compact" data-cd-remove="${id}">${esc(t('planner.caldavRemoveAccount'))}</button></div></div><div class="planner-caldav-meta">${esc(c.email)} · ${esc(meta)}</div><div class="planner-caldav-settings"><label for="cd-interval-${id}">${esc(t('planner.refreshInterval'))}</label><input id="cd-interval-${id}" type="number" min="5" max="1440" value="${Number(c.caldavRefreshMinutes)||15}"><label><input id="cd-enabled-${id}" type="checkbox" ${c.enabled?'checked':''}> ${esc(t('planner.caldavEnabled'))}</label><button type="button" class="btn compact" data-cd-config="${id}">${esc(t('planner.saveSubscription'))}</button></div>${calendars}</div>`;
     }).join('') : `<p class="planner-caldav-meta">${esc(t('planner.caldavNoAccounts'))}</p>`;
     const bind = (key,fn,event='click') => root.querySelectorAll(`[data-cd-${key}]`).forEach(el => el.addEventListener(event,() => fn(el,Number(el.getAttribute('data-cd-'+key)))));
     bind('password',(_,id)=>{const c=connections.find(c=>Number(c.id)===id);if(c) cdBeginPassword(c);});
@@ -1932,6 +1953,27 @@
       await cdRefreshAfterChange();
       const ok = !!r && !r.failed && !r.error;
       if(current()) cdStatus(ok ? 'planner.caldavSynced' : r?.partial ? 'planner.caldavUnsupportedEvents' : 'planner.caldavSyncFailed',ok?'success':'error');
+    }));
+    bind('calendar-sync',(_,id)=>cdRun(async current=>{
+      cdStatus('planner.subscriptionSyncing');
+      let r;
+      try { r=await App.rpc('calendar.caldav.syncCalendar',{id}); }
+      finally { await cdRefreshAfterChange(); }
+      if(current()) cdStatus(r?.synced && !r.failed ? 'planner.caldavSynced' : r?.partial ? 'planner.caldavUnsupportedEvents' : 'planner.caldavSyncFailed',r?.synced && !r.failed?'success':'error');
+    }));
+    bind('recolor',(el,id)=>cdRun(async current=>{
+      try { await App.rpc('calendar.caldav.setColor',{id,color:el.value}); }
+      finally { await cdRefreshAfterChange(); }
+      if(current()) cdStatus('planner.caldavSettingsSaved','success');
+    }),'change');
+    bind('rediscover',(_,id)=>cdRun(async current=>{
+      cdStatus('planner.caldavTesting');
+      const r=await App.rpc('calendar.caldav.rediscover',{id});
+      await cdRefreshAfterChange();
+      if(current()) {
+        cdStatus('planner.caldavRediscovered','info');
+        cdEl('status').textContent=t('planner.caldavRediscovered',{added:Number(r.added)||0,missing:Number(r.missing)||0});
+      }
     }));
     bind('config',(_,id)=>cdRun(async current=>{
       const refreshMinutes=Number(document.getElementById(`cd-interval-${id}`)?.value);

@@ -2861,6 +2861,7 @@ function calendarRemoteCalendarRow(row) {
     accessRole: String(row.access_role || ''),
     primary: Boolean(row.primary_flag),
     selected: Boolean(row.selected),
+    ...(row.cached_event_count === undefined ? {} : { cachedEventCount: Number(row.cached_event_count) || 0 }),
     syncToken: String(row.sync_token || ''),
     lastSyncAt: Number(row.last_sync_at) || 0,
     lastStatus: String(row.last_status || ''),
@@ -2893,7 +2894,7 @@ function normalizeCalendarRemoteCalendar(input = {}) {
   };
 }
 
-function listCalendarRemoteCalendars({ connectionId = null, selectedOnly = false } = {}) {
+function listCalendarRemoteCalendars({ connectionId = null, selectedOnly = false, includeCachedCount = false } = {}) {
   const clauses = [];
   const params = [];
   if (Number(connectionId) > 0) {
@@ -2902,7 +2903,8 @@ function listCalendarRemoteCalendars({ connectionId = null, selectedOnly = false
   }
   if (selectedOnly) clauses.push('selected=1');
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
-  return db.prepare(`SELECT * FROM calendar_remote_calendars ${where}
+  const count = includeCachedCount ? ', (SELECT COUNT(*) FROM calendar_events e WHERE e.remote_calendar_id=calendar_remote_calendars.id) AS cached_event_count' : '';
+  return db.prepare(`SELECT *${count} FROM calendar_remote_calendars ${where}
     ORDER BY primary_flag DESC, name COLLATE NOCASE, id`).all(...params).map(calendarRemoteCalendarRow);
 }
 
@@ -2934,6 +2936,18 @@ function saveCalendarRemoteCalendar(input = {}, id = null) {
     item.accessRole, item.primary, item.selected, now, now,
   );
   return getCalendarRemoteCalendar(result.lastInsertRowid);
+}
+
+function setCalendarRemoteCalendarColor(id, color) {
+  const current = getCalendarRemoteCalendar(id);
+  if (!current || !['icloud','caldav'].includes(getCalendarConnection(current.connectionId)?.provider) ||
+      typeof color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(color)) throw new Error('Invalid CalDAV calendar color');
+  const normalized = color.toUpperCase(), now = Date.now();
+  return db.transaction(() => {
+    db.prepare('UPDATE calendar_remote_calendars SET color=?,updated_at=? WHERE id=?').run(normalized,now,current.id);
+    db.prepare('UPDATE calendar_events SET color=?,updated_at=? WHERE remote_calendar_id=? AND color<>?').run(normalized,now,current.id,normalized);
+    return getCalendarRemoteCalendar(current.id);
+  })();
 }
 
 function updateCalendarRemoteCalendarSync(id, patch = {}) {
@@ -3528,6 +3542,7 @@ module.exports = {
   getCalendarRemoteCalendar,
   getCalendarRemoteCalendarByRemoteId,
   saveCalendarRemoteCalendar,
+  setCalendarRemoteCalendarColor,
   syncCalendarRemoteCalendars,
   updateCalendarRemoteCalendarSync,
   removeCalendarRemoteCalendar,

@@ -119,6 +119,63 @@ function createCalDavRuntime({ db, credentials, available, fetchImpl = globalThi
     return totals;
   }
   const sync = id => run(ctx => syncOne(id, ctx));
+  // Individual refresh does not mark the entire account as synchronized or
+  // postpone its next scheduled refresh. Use the same lock and cancellation.
+  const syncCalendar = id => run(async ctx => {
+    const cal = db.getCalendarRemoteCalendar(Number(id));
+    const c = row(cal?.connectionId);
+    if (!c.enabled || !cal.selected) fail('INVALID_SELECTION');
+    const engine = createEngine({db, readPassword:credentials.readPassword, isLocked:ctx.cancelled, fetchImpl:ctx.fetch, now});
+    try {
+      const result = await engine.syncRemoteCalendar(cal.id, fromRow(c));
+      ctx.check();
+      const totals = {synced:result.partial ? 0 : 1, failed:result.partial ? 1 : 0, partial:Boolean(result.partial),
+        created:Number(result.created)||0, updated:Number(result.updated)||0, removed:Number(result.removed)||0};
+      notify({action:'caldav-calendar-synced', connectionId:c.id, remoteCalendarId:cal.id, ...totals});
+      return totals;
+    } catch(e) {
+      ctx.check();
+      notify({action:'caldav-calendar-error', connectionId:c.id, remoteCalendarId:cal.id, error:safeCode(e)});
+      throw e;
+    }
+  });
+  function setColor({id,color} = {}) {
+    idle(); const cal = db.getCalendarRemoteCalendar(Number(id)); const c = row(cal?.connectionId);
+    if (typeof color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(color)) fail('INVALID_OPTIONS');
+    const saved = db.setCalendarRemoteCalendarColor(cal.id, color.toUpperCase());
+    notify({action:'caldav-color', connectionId:c.id, remoteCalendarId:cal.id});
+    return saved;
+  }
+  const rediscover = id => run(async ctx => {
+    const c = row(id), config = fromRow(c);
+    const secret = credentials.readPassword(c.credentialKey, config);
+    if (!secret) fail('CREDENTIALS_REQUIRED');
+    const {calendars} = await discoverWith({...config, password:secret}, ctx);
+    ctx.check();
+    // Discovery is additive: never infer deletions from missing collections.
+    // Keep existing selections, colors and cache. New collections are opt-in.
+    const existing = db.listCalendarRemoteCalendars({connectionId:c.id});
+    const byURL = new Map(existing.map(cal => [cal.remoteId, cal]));
+    let added = 0, updated = 0;
+    db.db.transaction(() => {
+      for (const item of calendars) {
+        const previous = byURL.get(item.url);
+        const accessRole = item.readOnly ? 'caldav-readOnly' : 'caldav-readWrite';
+        if (previous) {
+          if (previous.name !== item.name || previous.accessRole !== accessRole) {
+            db.saveCalendarRemoteCalendar({...previous, name:item.name, accessRole}, previous.id); updated++;
+          }
+        } else {
+          const saved = db.saveCalendarRemoteCalendar({connectionId:c.id, remoteId:item.url, name:item.name, selected:false, accessRole});
+          byURL.set(item.url,saved); added++;
+        }
+      }
+    })();
+    const seen = new Set(calendars.map(cal => cal.url));
+    const missing = existing.filter(cal => !seen.has(cal.remoteId)).length;
+    notify({action:'caldav-rediscovered', connectionId:c.id});
+    return {added,updated,missing};
+  });
   const syncAll = ({dueOnly=false} = {}) => run(async ctx => {
     const results = [];
     for (const c of db.listCalendarConnections({enabledOnly:true}).filter(isCalDav)) {
@@ -188,6 +245,6 @@ function createCalDavRuntime({ db, credentials, available, fetchImpl = globalThi
     });
   }
   function stop() { active?.abort(); attempted.clear(); }
-  return Object.freeze({busy, stop, preview, add, sync, syncAll, configure, select, remove, replacePassword, write});
+  return Object.freeze({busy, stop, preview, add, sync, syncCalendar, syncAll, setColor, rediscover, configure, select, remove, replacePassword, write});
 }
 module.exports = { createCalDavRuntime, isCalDav };

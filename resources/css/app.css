@@ -5841,3 +5841,10 @@ button.planner-attachment-open:hover strong {
 .planner-caldav-settings { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:8px 0; }
 .planner-caldav-settings input[type=number] { width:76px; }
 @media(max-width:600px) { .planner-caldav-form { grid-template-columns:1fr; } .planner-caldav-actions { justify-content:flex-start; } }
+
+/* C8a: one compact row per configured calendar, no nested cards. */
+.planner-caldav-managed-row { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:4px 8px; }
+.planner-caldav-managed-row label { min-width:0; }
+.planner-caldav-row-meta { grid-column:1/-1; display:flex; flex-wrap:wrap; gap:4px 12px; color:var(--fg-muted); padding-left:22px; overflow-wrap:anywhere; }
+.planner-caldav-row-error { color:var(--danger); }
+#planner-caldav-ics-warning { margin:0 0 12px; padding:0; color:var(--fg-muted); }

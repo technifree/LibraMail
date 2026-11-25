@@ -82,6 +82,13 @@ Document technique de préparation, établi à partir de l'archive transmise sou
 - Un doublon apparent a été identifié dans SQLite : un événement CalDAV et une copie issue d'un ancien abonnement ICS au même calendrier. Aucun dédoublonnage automatique par titre/date ; prévoir un avertissement non bloquant dans l'assistant. Le retrait d'un abonnement ICS ne doit jamais modifier le serveur distant.
 - Restent à qualifier : modifications et suppressions dans les deux sens, récurrences avec exceptions, reprise après coupure, et finalisation de la gestion des calendriers (couleurs, actualisation individuelle, redécouverte, libellés et diagnostics).
 
+### Phase C8a — Gestion des calendriers distants
+
+- Renommage de la fenêtre et des actions globales, état non synchronisé explicite, compteurs du cache (occurrences projetées, pas un total serveur).
+- Couleurs locales modifiables : mise à jour transactionnelle de la collection et de ses rendez-vous en cache, sans écriture distante. Actualisation individuelle utilisant le verrou et les protections existants ; ne modifie pas le dernier succès ni l'échéance de synchronisation du compte entier.
+- Redécouverte avec le secret enregistré : nouveaux calendriers désactivés par défaut, conservation des sélections/couleurs, actualisation des noms et droits pour une URL identique. Les collections non retrouvées sont signalées et conservées ; aucune suppression ni fusion approximative.
+- Avertissement informatif en cas de flux ICS hébergé sur un domaine Apple iCloud ; pas de suppression automatique ni de preuve d'équivalence des calendriers. Qualification réelle à poursuivre ; exceptions aux récurrences hors de ce lot.
+
 ### Phase F — Filtrage rapide par expéditeur (à développer)
 
 - Action directe sur l'expéditeur depuis la liste des messages ou la lecture ; conserver une action contextuelle et permettre l'extension explicite à tous les comptes.

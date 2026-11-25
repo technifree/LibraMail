@@ -11,7 +11,8 @@ const db={
   saveCalendarConnection:(x,i)=>{i=i||++id; const r={lastSyncAt:0,...x,id:i};connections.set(i,r);return copy(r);},
   getCalendarConnection:i=>copy(connections.get(i)),
   listCalendarConnections:({enabledOnly=false}={})=>[...connections.values()].filter(c=>!enabledOnly||c.enabled).map(copy),
-  saveCalendarRemoteCalendar:x=>{if(failDB)throw Error('secret from db');const r={lastSyncAt:0,...x,id:++id};calendars.set(r.id,r);return copy(r);},
+  saveCalendarRemoteCalendar:(x,i)=>{if(failDB)throw Error('secret from db');const r={lastSyncAt:0,...calendars.get(i),...x,id:i||++id};calendars.set(r.id,r);return copy(r);},
+  setCalendarRemoteCalendarColor:(i,color)=>copy(Object.assign(calendars.get(i),{color})),
   getCalendarRemoteCalendar:i=>copy(calendars.get(i)),
   listCalendarRemoteCalendars:({connectionId,selectedOnly})=>[...calendars.values()].filter(c=>c.connectionId===connectionId&&(!selectedOnly||c.selected)).map(copy),
   updateCalendarConnectionSync:(i,p)=>Object.assign(connections.get(i),p),
@@ -21,8 +22,9 @@ const db={
 };
 const credentials={putPassword:(k,c,p)=>secrets.set(k,p),readPassword:k=>secrets.get(k),removePassword:k=>secrets.delete(k)};
 const input={provider:'caldav',serverURL:base,username:'demo',password:'private-password',selectedURLs:[first],refreshMinutes:5};
+let discovered=[{url:first,name:'One',readOnly:false},{url:second,name:'Two',readOnly:true}];
 const runtime=createCalDavRuntime({db,credentials,available:()=>allowed,now:()=>time,
-  discover:async()=>[{url:first,name:'One',readOnly:false},{url:second,name:'Two',readOnly:true}],
+  discover:async()=>discovered,
   createEngine:({isLocked,readPassword})=>({syncRemoteCalendar:async i=>{
     syncs++; const cal=calendars.get(i);assert(readPassword(connections.get(cal.connectionId).credentialKey));
     if(wait) await wait;
@@ -53,6 +55,25 @@ const runtime=createCalDavRuntime({db,credentials,available:()=>allowed,now:()=>
   runtime.select(rows[1].id,true);assert.equal((await runtime.sync(c.id)).synced,2);
   runtime.configure({id:c.id,enabled:false});assert.deepEqual(await runtime.syncAll(),[]);runtime.configure({id:c.id,enabled:true});
   assert.throws(()=>runtime.remove(google.id),/INVALID_CONNECTION/);
+  const googleCal=db.saveCalendarRemoteCalendar({connectionId:google.id,remoteId:'google',selected:true});
+  assert.throws(()=>runtime.setColor({id:googleCal.id,color:'#ffffff'}),/INVALID_CONNECTION/);
+  await assert.rejects(runtime.syncCalendar(googleCal.id),/INVALID_CONNECTION/);
+  await assert.rejects(runtime.rediscover(google.id),/INVALID_CONNECTION/);
+  assert.throws(()=>runtime.setColor({id:rows[0].id,color:'invalid'}),/INVALID_OPTIONS/);
+  assert.equal(runtime.setColor({id:rows[0].id,color:'#abcdef'}).color,'#ABCDEF');
+  const accountTimestamp=db.getCalendarConnection(c.id).lastSyncAt;
+  time+=1000; const previousSyncs=syncs;
+  assert.equal((await runtime.syncCalendar(rows[0].id)).synced,1);
+  assert.equal(syncs,previousSyncs+1);assert.equal(db.getCalendarConnection(c.id).lastSyncAt,accountTimestamp);
+  partialRemote=true;assert.equal((await runtime.syncCalendar(rows[0].id)).failed,1);partialRemote=false;
+  runtime.select(rows[1].id,false);await assert.rejects(runtime.syncCalendar(rows[1].id),/INVALID_SELECTION/);
+  const third=base+'three/';discovered=[{url:first,name:'Renamed',readOnly:true},{url:third,name:'Three',readOnly:false}];
+  assert.deepEqual(await runtime.rediscover(c.id),{added:1,updated:1,missing:1});
+  assert.equal(db.getCalendarRemoteCalendar(rows[0].id).color,'#ABCDEF');assert.equal(db.getCalendarRemoteCalendar(rows[0].id).selected,true);assert.equal(db.getCalendarRemoteCalendar(rows[0].id).accessRole,'caldav-readOnly');
+  assert(db.getCalendarRemoteCalendar(rows[1].id));assert.equal(db.listCalendarRemoteCalendars({connectionId:c.id}).find(x=>x.remoteId===third).selected,false);
+  assert.deepEqual(await runtime.rediscover(c.id),{added:0,updated:0,missing:1});
+  failDB=true;discovered=[{url:base+'four/',name:'Four'}];await assert.rejects(runtime.rediscover(c.id),/OPERATION_FAILED/);failDB=false;
+  assert.equal(db.listCalendarRemoteCalendars({connectionId:c.id}).length,3);
   let release;wait=new Promise(r=>release=r);const running=runtime.sync(c.id);assert(runtime.busy());assert.throws(()=>runtime.remove(c.id),/SYNC_BUSY/);
   runtime.stop();allowed=false;allowed=true;release();await assert.rejects(running,/RUNTIME_UNAVAILABLE/);assert(!runtime.busy());wait=null;
   await runtime.replacePassword({id:c.id,password:'new-secret'});assert.equal(secrets.get(c.credentialKey),'new-secret');
