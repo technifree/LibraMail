@@ -64,6 +64,10 @@ const remove=(confirmed=true,tag=cache.get(href).remoteEtag)=>runtime.write('rem
   resource=server.get(href);const old=resource.ics;resource.ics=old.replace('END:VEVENT','ATTENDEE:mailto:guest@example.test\r\nEND:VEVENT');
   n=calls;await assert.rejects(remove(),{code:'UNSUPPORTED_EVENT'});assert.equal(calls,n+1);assert.equal(server.size,1);
   resource.ics=old.replace('END:VEVENT','RRULE:FREQ=DAILY;COUNT=2\r\nEND:VEVENT');await assert.rejects(update(event),{code:'UNSUPPORTED_EVENT'});resource.ics=old;
+  // Even a recurrence reduced to a single visible occurrence must not be
+  // mistaken for an editable standalone resource.
+  resource.ics=old.replace('END:VEVENT','RDATE:20261130T110000Z\r\nEXDATE:20261124T110000Z\r\nEND:VEVENT');
+  n=calls;await assert.rejects(remove(),{code:'UNSUPPORTED_EVENT'});assert.equal(calls,n+1);assert.equal(server.size,1);resource.ics=old;
   // Strong ETag check also protects deletions.
   race=true;await assert.rejects(remove(),{code:'CONFLICT'});assert.equal(cache.size,1);server.get(href).tag=cache.get(href).remoteEtag;
   assert((await remove()).removed);assert.equal(cache.size,0);assert.equal(server.size,0);assert.equal(changes.at(-1).removed,true);

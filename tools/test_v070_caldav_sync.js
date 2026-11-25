@@ -135,5 +135,18 @@ function setup(){
   assert.equal((await apple.syncRemoteCalendar(1,appleConfig)).removed,1);
   assert.equal(state.inventoryCalls,2);assert.equal(state.cache.size,0);
   state.calendar.remoteId='https://p42-caldav.icloud.com.evil.test/calendar/';await assert.rejects(apple.syncRemoteCalendar(1,appleConfig),{code:'CROSS_ORIGIN'});
+  // Reconcile a moved occurrence by its original identity; cancelled or
+  // excluded occurrences disappear only in a verified complete snapshot.
+  const fixture=setup(), runSeries=fixture.run, series=collection+'series.ics';
+  const initial=ics('series','Series','RRULE:FREQ=DAILY;COUNT=3\r\n');
+  fixture.state.body=xml(row(series,initial));assert.equal((await runSeries()).created,3);
+  const originalKey=series+'#'+Date.UTC(2026,10,25,10), excludedKey=series+'#'+Date.UTC(2026,10,26,10);
+  const revised=initial.replace('END:VEVENT','EXDATE:20261126T100000Z\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:series\r\nRECURRENCE-ID:20261125T100000Z\r\nDTSTART:20261129T140000Z\r\nDTEND:20261129T150000Z\r\nSUMMARY:Moved\r\nEND:VEVENT');
+  fixture.state.body=xml(row(series,revised,'"2"'));
+  assert.equal((await runSeries()).removed,1);assert.equal(fixture.state.cache.size,2);assert(!fixture.state.cache.has(excludedKey));
+  assert.equal(fixture.state.cache.get(originalKey).startAt,Date.UTC(2026,10,29,14));
+  assert.equal((await runSeries()).created,0);assert.equal(fixture.state.cache.size,2);
+  fixture.state.body=xml(row(series,revised.replace('RECURRENCE-ID:','RECURRENCE-ID;RANGE=THISANDFUTURE:'),'"3"')+row(a,ics('a')));
+  const incomplete=await runSeries();assert(incomplete.partial);assert.equal(incomplete.removed,0);assert.equal(fixture.state.cache.get(originalKey).title,'Moved');
   console.log('[OK] LibraMail 0.7.0 : snapshots CalDAV, cache, refus des réponses partielles et concurrence');
 })().catch(e=>{console.error(e);process.exitCode=1;});

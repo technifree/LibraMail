@@ -89,6 +89,13 @@ Document technique de préparation, établi à partir de l'archive transmise sou
 - Redécouverte avec le secret enregistré : nouveaux calendriers désactivés par défaut, conservation des sélections/couleurs, actualisation des noms et droits pour une URL identique. Les collections non retrouvées sont signalées et conservées ; aucune suppression ni fusion approximative.
 - Avertissement informatif en cas de flux ICS hébergé sur un domaine Apple iCloud ; pas de suppression automatique ni de preuve d'équivalence des calendriers. Qualification réelle à poursuivre ; exceptions aux récurrences hors de ce lot.
 
+### Phase C8b — Exceptions aux récurrences CalDAV (lecture)
+
+- Projection d'un maître VEVENT et de ses exceptions de même UID ; EXDATE/RDATE de type date ou date-heure, listes multiples, déduplication, annulation STATUS:CANCELLED et déplacement individuel RECURRENCE-ID. L'identité de l'occurrence reste son début d'origine (URL + fragment), même si son début effectif change. Un remplacement explicite prévaut sur l'exclusion du même début d'origine.
+- Les occurrences sont bornées à 5 000 par ressource, et les séries sans fin restent limitées à la fenêtre glissante de trois ans passés et dix ans futurs ; les exceptions déplacées dans cette fenêtre depuis une occurrence hors fenêtre sont recherchées dans la règle d'origine, dans les bornes de calcul existantes. Pas de changement de schéma ni de dépendance.
+- Les exceptions sans maître, RANGE=THISANDFUTURE, RDATE de type PERIOD, règles/durées non prises en charge et identités ambiguës ne sont pas interprétées approximativement : erreur ou synchronisation partielle sans suppression du cache. Les exceptions non annulées doivent fournir leurs dates et rester du même type (journée entière ou horaire). Les séries et leurs exceptions restent non modifiables depuis LibraMail.
+- Tests de projection, de réconciliation, de refus des écritures et de persistance SQLite ; qualification réelle avec iCloud et vérification du moteur natif sur les plateformes cibles encore nécessaires.
+
 ### Phase F — Filtrage rapide par expéditeur (à développer)
 
 - Action directe sur l'expéditeur depuis la liste des messages ou la lecture ; conserver une action contextuelle et permettre l'extension explicite à tous les comptes.

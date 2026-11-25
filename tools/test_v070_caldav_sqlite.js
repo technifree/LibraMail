@@ -58,6 +58,22 @@ const row=(title,etag)=>`<d:response><d:href>${resource}</d:href><d:propstat><d:
     assert.equal(count().find(c=>c.id===calendar.id).cachedEventCount,0);
     assert(db.getCalendarEvent(local.id));
     for(const cal of [other,gcal]) assert(db.getCalendarEventByRemote(cal.id,'other-event'));
+    // Stable SQLite identity across a detached occurrence move and restart.
+    const series=row('Series','3').replace('END:VEVENT','RRULE:FREQ=DAILY;COUNT=3\nEND:VEVENT');
+    body=xml(series);assert.equal((await sync()).created,3);
+    const originalKey=resource+'#'+Date.UTC(2026,10,25,10), excludedKey=resource+'#'+Date.UTC(2026,10,26,10);
+    const old=db.getCalendarEventByRemote(calendar.id,originalKey);assert(old);
+    body=xml(series.replace('"3"','"4"').replace('END:VEVENT','EXDATE:20261126T100000Z\nEND:VEVENT\nBEGIN:VEVENT\nUID:one\nRECURRENCE-ID:20261125T100000Z\nDTSTART:20261129T140000Z\nDTEND:20261129T150000Z\nSUMMARY:Moved\nEND:VEVENT'));
+    const reconciled=await sync();assert.equal(reconciled.created,0);assert.equal(reconciled.removed,1);assert.equal(reconciled.updated,2);
+    assert.equal(db.getCalendarEventByRemote(calendar.id,originalKey).id,old.id);
+    assert.equal(db.getCalendarEventByRemote(calendar.id,originalKey).startAt,Date.UTC(2026,10,29,14));
+    assert.equal(db.getCalendarEventByRemote(calendar.id,excludedKey),null);
+    assert.equal((await sync()).unchanged,2);
+    db.close();db.init(temp);
+    assert.equal(db.getCalendarEventByRemote(calendar.id,originalKey).id,old.id);
+    assert.equal(db.getCalendarEventByRemote(calendar.id,originalKey).color,'#A1B2C3');
+    assert.equal(count().find(c=>c.id===calendar.id).cachedEventCount,2);
+    assert(db.getCalendarEvent(local.id));for(const cal of [other,gcal])assert(db.getCalendarEventByRemote(cal.id,'other-event'));
     console.log('[OK] LibraMail 0.7.0 : cache CalDAV SQLite, persistance et cloisonnement');
   } finally {db.close();fs.rmSync(temp,{recursive:true,force:true});}
 })().catch(e=>{console.error(e);process.exitCode=1;});

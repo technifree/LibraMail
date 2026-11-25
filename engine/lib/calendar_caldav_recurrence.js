@@ -4,7 +4,21 @@
 const DAY=86400000;
 const WEEKDAYS=['SU','MO','TU','WE','TH','FR','SA'];
 const MAX_INSTANCES=5000, MAX_PERIODS=100000, MAX_DAYS=200000;
-function expandRule(line, start, baseAt, duration, {dateLine, unsupported, now=Date.now()}={}) {
+function makeEpochResolver(start) {
+  const tz=start.parameter.toUpperCase().startsWith('TZID=')?start.parameter.slice(5).replace(/^"|"$/g,''):start.utc?'UTC':Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const formatter=new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
+  function wallAt(epoch){const p=Object.fromEntries(formatter.formatToParts(epoch).map(x=>[x.type,x.value]));return Date.UTC(+p.year,+p.month-1,+p.day,+p.hour,+p.minute,+p.second);}
+  function epochAt(day,clock=0){
+    const wall=day+clock;
+    if(tz==='UTC')return wall;
+    // Both offsets around a transition; choose first of ambiguous instants.
+    const offsets=new Set([wall-DAY,wall,wall+DAY].map(t=>wallAt(t)-t));
+    const valid=[...offsets].map(offset=>wall-offset).filter(t=>wallAt(t)===wall);
+    return valid.length?Math.min(...valid):null;
+  }
+  return {epochAt,wallAt};
+}
+function expandRule(line, start, baseAt, duration, {dateLine, unsupported, now=Date.now(),includeStarts=[]}={}) {
   const bad=()=>unsupported('RRULE',true);
   if(!/^RRULE:/i.test(line)||line.length>4096) bad();
   const fields=new Map();
@@ -37,17 +51,8 @@ function expandRule(line, start, baseAt, duration, {dateLine, unsupported, now=D
   const baseDay=dateKey(start.date), baseDate=new Date(baseDay), baseMonth=baseDate.getUTCMonth()+1, baseDom=baseDate.getUTCDate();
   const h=+(start.clock||'000000').slice(0,2), m=+(start.clock||'000000').slice(2,4), s=+(start.clock||'000000').slice(4,6);
   const clockMs=(h*3600+m*60+s)*1000;
-  const tz=start.parameter.toUpperCase().startsWith('TZID=')?start.parameter.slice(5).replace(/^"|"$/g,''):start.utc?'UTC':Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const formatter=new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
-  function wallAt(epoch){const p=Object.fromEntries(formatter.formatToParts(epoch).map(x=>[x.type,x.value]));return Date.UTC(+p.year,+p.month-1,+p.day,+p.hour,+p.minute,+p.second);}
-  function epochAt(day,clock=clockMs){
-    const wall=day+clock;
-    if(tz==='UTC')return wall;
-    // Both offsets around a transition; choose first of ambiguous instants.
-    const offsets=new Set([wall-DAY,wall,wall+DAY].map(t=>wallAt(t)-t));
-    const valid=[...offsets].map(offset=>wall-offset).filter(t=>wallAt(t)===wall);
-    return valid.length?Math.min(...valid):null;
-  }
+  const {epochAt:resolveEpoch,wallAt}=makeEpochResolver(start);
+  const epochAt=(day,clock=clockMs)=>resolveEpoch(day,clock);
   if(epochAt(baseDay)!==baseAt)bad();
   let until=null, untilDay=null;
   if(fields.has('UNTIL')){
@@ -63,6 +68,10 @@ function expandRule(line, start, baseAt, duration, {dateLine, unsupported, now=D
   const low=new Date(now),high=new Date(now);
   low.setUTCFullYear(low.getUTCFullYear()-3);high.setUTCFullYear(high.getUTCFullYear()+10);
   const lower=finite?-Infinity:low.getTime(), upper=finite?Infinity:high.getTime();
+  const targets=new Set(includeStarts);
+  if(targets.size>MAX_INSTANCES||[...targets].some(t=>!Number.isSafeInteger(t)))bad();
+  const targetDays=[...new Set([...targets].map(t=>Math.floor(wallAt(t)/DAY)*DAY))].sort((a,b)=>a-b);
+  let targetCursor=0;
   const result=[];let generated=0, work=0, first=true;
   const monthStart=(y,mon)=>Date.UTC(y,mon,1);
   const weekStart=baseDay-((baseDate.getUTCDay()-wkst+7)%7)*DAY;
@@ -90,19 +99,22 @@ function expandRule(line, start, baseAt, duration, {dateLine, unsupported, now=D
     return true;
   }
   // Date-based bound allows stopping even for rules with no candidates.
-  const stopDay=count!==null?Infinity:until!==null?untilDay+2*DAY:upper+2*DAY;
+  const stopDay=count!==null?Infinity:until!==null?untilDay+2*DAY:Math.max(upper,...targets)+2*DAY;
   for(let step=0;step<MAX_PERIODS;step++){
     const [from,to]=period(step);
     if(!Number.isFinite(from)||!Number.isFinite(to)||new Date(from).getUTCFullYear()>9998)bad();
     if(from>stopDay){if(first)bad();return result;}
     const candidates=[];
+    while(targetDays[targetCursor]<from)targetCursor++;
+    const targetPeriod=targetDays[targetCursor]<to;
+    // Evaluate the entire period for BYSETPOS, even for an old target.
+    const projectPeriod=finite||first||targetPeriod||!(to<lower-duration-2*DAY||from>upper+2*DAY);
     for(let t=from;t<to;t+=DAY){
       if(++work>MAX_DAYS)bad();
-      if(!candidate(t))continue;
+      if(!projectPeriod||!candidate(t))continue;
       // Invalid local recurrence times are excluded before COUNT/BYSETPOS.
-      // Avoid projecting past candidates for endless rules unless needed for
-      // the first period (DTSTART validation) or for a long event overlap.
-      if(!finite&&!first&&to<lower-duration-2*DAY)continue;
+      // Out-of-window periods are skipped as a whole, except those needed
+      // for DTSTART validation or detached occurrence membership.
       const at=epochAt(t);if(at!==null)candidates.push({day:t,at});
     }
     const selected=positions.length?[...new Set(positions.map(n=>candidates[n>0?n-1:candidates.length+n]).filter(Boolean))].sort((a,b)=>a.day-b.day):candidates;
@@ -111,10 +123,10 @@ function expandRule(line, start, baseAt, duration, {dateLine, unsupported, now=D
       if(c.at<baseAt)continue;
       if(until!==null&&(start.allDay?c.day>untilDay:c.at>until))return result;
       generated++;
-      if(c.at+duration>=lower&&c.at<=upper){if(result.length>=MAX_INSTANCES)bad();result.push(c);}
+      if((c.at+duration>=lower&&c.at<=upper)||targets.has(c.at)){if(result.length>=MAX_INSTANCES)bad();result.push(c);}
       if(count!==null&&generated===count)return result;
     }
   }
   return bad();
 }
-module.exports={expandRule};
+module.exports={expandRule,makeEpochResolver};
