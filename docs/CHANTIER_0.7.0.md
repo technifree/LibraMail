@@ -112,6 +112,14 @@ Document technique de préparation, établi à partir de l'archive transmise sou
 - Tests simulés des dossiers localisés, libellés trompeurs, absence de corbeille, opérations groupées et copies envoyées. Qualification réelle sur compte de test Gmail encore nécessaire. Pas de gestion nouvelle des libellés, d'archivage Gmail ou de brouillons distants.
 - Références : https://developers.google.com/workspace/gmail/imap/imap-extensions et https://support.google.com/mail/answer/78892?hl=fr.
 
+### Phase E1 — Configuration Google Calendar
+
+- Mode personnel : lien vers Google Cloud, aide FR/EN et import local du JSON OAuth2 de type Application de bureau (`installed`, 64 Kio maximum). Seuls Client ID et secret facultatif sont lus ; les URL du fichier sont ignorées. Aucune sauvegarde ni requête réseau à l'import. Saisie manuelle maintenue.
+- Mode géré : `LIBRAMAIL_GOOGLE_CALENDAR_CLIENT_ID` et, si nécessaire, `LIBRAMAIL_GOOGLE_CALENDAR_CLIENT_SECRET` configurés dans l'environnement du moteur ; aucun secret dans le RPC de configuration. Ne pas publier de vrais identifiants dans le dépôt. La distribution d'un client géré nécessite une inscription Google et, selon les scopes et le mode de publication, une vérification.
+- Les connexions existantes et leurs identifiants dans le coffre ne sont pas modifiés. Le formulaire ne reprend plus automatiquement l'identifiant d'une connexion précédente pour éviter de mélanger les clients. Les consultations OAuth2 ne se chevauchent plus dans l'interface et les réponses obsolètes sont ignorées.
+- L'API Google Calendar, les scopes existants et PKCE sont conservés. Une configuration de test externe peut imposer une reconnexion après sept jours. Qualification réelle et gestion des calendriers distants à poursuivre ; pas de client OAuth2 LibraMail enregistré dans ce lot.
+- Références : https://developers.google.com/identity/protocols/oauth2/native-app et https://developers.google.com/workspace/calendar/api/auth.
+
 ### Phase F — Filtrage rapide par expéditeur (à développer)
 
 - Action directe sur l'expéditeur depuis la liste des messages ou la lecture ; conserver une action contextuelle et permettre l'extension explicite à tous les comptes.

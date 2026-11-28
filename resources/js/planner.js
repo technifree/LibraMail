@@ -30,6 +30,9 @@
     googleConnections: [],
     googleCalendars: {},
     googleOAuthFlowId: '',
+    googleOAuthBusy: false,
+    googleCredentialImporting: false,
+    googleManagedClient: false,
     googleOAuthPollTimer: null,
     googleMock: { enabled: false, connected: false, connectionId: null, mock: null },
     editingRemoteEvent: false,
@@ -1321,6 +1324,7 @@
   }
 
   function setGoogleOAuthBusy(busy) {
+    state.googleOAuthBusy = Boolean(busy);
     const connect = document.getElementById('btn-planner-google-connect');
     const cancel = document.getElementById('btn-planner-google-cancel');
     const clientId = document.getElementById('planner-google-client-id');
@@ -1328,6 +1332,10 @@
     if (connect) connect.disabled = Boolean(busy);
     if (clientId) clientId.disabled = Boolean(busy);
     if (hint) hint.disabled = Boolean(busy);
+    const secret = document.getElementById('planner-google-client-secret');
+    const importButton = document.getElementById('btn-planner-google-import');
+    if (secret) secret.disabled = Boolean(busy);
+    if (importButton) importButton.disabled = Boolean(busy) || state.googleCredentialImporting;
     cancel?.classList.toggle('hidden', !busy);
   }
 
@@ -1350,14 +1358,13 @@
       const clientId = document.getElementById('planner-google-client-id');
       const managed = await App.rpc('calendar.google.oauth.config').catch(() => ({ clientId: '' }));
       const managedId = String(managed?.clientId || '').trim();
+      state.googleManagedClient = Boolean(managedId);
       if (managedId && clientId) clientId.value = managedId;
-      else if (clientId && !clientId.value && state.googleConnections[0]?.oauthClientId) {
-        clientId.value = state.googleConnections[0].oauthClientId;
-      }
+      document.getElementById('planner-google-credential-tools')?.classList.toggle('hidden', Boolean(managedId));
       document.querySelector('.planner-google-client-id')?.classList.toggle('hidden', Boolean(managedId));
       document.querySelector('.planner-google-client-secret')?.classList.toggle('hidden', Boolean(managedId));
       document.getElementById('planner-google-managed-help')?.classList.toggle('hidden', !managedId);
-      document.querySelector('.planner-google-help')?.classList.toggle('hidden', Boolean(managedId));
+      document.getElementById('planner-google-manual-help')?.classList.toggle('hidden', Boolean(managedId));
       renderGoogleConnections();
       populateAccountSelects();
     } catch (error) {
@@ -1478,7 +1485,7 @@
   }
 
   async function handleGoogleOAuthFlow(flow) {
-    if (!flow || String(flow.id || '') !== String(state.googleOAuthFlowId || '')) return;
+    if (!flow || !state.googleOAuthFlowId || String(flow.id || '') !== state.googleOAuthFlowId) return;
     if (flow.status === 'pending') {
       googleStatus(t('planner.googleWaiting'), 'info');
       return;
@@ -1491,6 +1498,8 @@
     state.googleOAuthFlowId = '';
     setGoogleOAuthBusy(false);
     if (flow.status === 'complete') {
+      const secret = document.getElementById('planner-google-client-secret');
+      if (secret) secret.value = '';
       await loadGoogleConnections();
       await refreshSummary();
       if (document.getElementById('planner-modal')?.classList.contains('open')) await loadEvents();
@@ -1516,21 +1525,68 @@
   function startGoogleOAuthPolling(flowId) {
     stopGoogleOAuthPolling();
     state.googleOAuthFlowId = String(flowId || '');
+    const activeId = state.googleOAuthFlowId;
+    let polling = false;
     state.googleOAuthPollTimer = setInterval(async () => {
-      if (!state.googleOAuthFlowId) return stopGoogleOAuthPolling();
+      if (!activeId || activeId !== state.googleOAuthFlowId || polling) return;
+      polling = true;
       try {
-        const flow = await App.rpc('calendar.google.oauth.status', { flowId: state.googleOAuthFlowId });
-        await handleGoogleOAuthFlow(flow);
+        const flow = await App.rpc('calendar.google.oauth.status', { flowId: activeId });
+        if (state.googleOAuthFlowId === activeId) await handleGoogleOAuthFlow(flow);
       } catch (error) {
+        if (state.googleOAuthFlowId !== activeId) return;
         stopGoogleOAuthPolling();
         state.googleOAuthFlowId = '';
         setGoogleOAuthBusy(false);
         googleStatus(t('planner.googleConnectionError', { error: error.message }), 'error');
-      }
+      } finally { polling = false; }
     }, 800);
   }
 
+  // Google Cloud exports a desktop OAuth client under `installed`. Never use
+  // endpoints or redirect URIs supplied by a file; the engine owns those.
+  function parseGoogleDesktopCredentials(text) {
+    if (typeof text !== 'string' || text.length > 65536) throw new Error('invalid_credentials');
+    const data = JSON.parse(text.replace(/^\uFEFF/, ''));
+    if (!data || typeof data !== 'object' || Array.isArray(data) || Object.prototype.hasOwnProperty.call(data, 'web') || !Object.prototype.hasOwnProperty.call(data, 'installed')) throw new Error('invalid_credentials');
+    const entry = data.installed;
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry) || typeof entry.client_id !== 'string') throw new Error('invalid_credentials');
+    const clientId = entry.client_id.trim();
+    const rawSecret = entry.client_secret ?? '';
+    if (typeof rawSecret !== 'string' || /[\x00-\x1f\x7f]/.test(rawSecret) || rawSecret.length > 4000 || clientId.length > 1000 || !/^[A-Za-z0-9._-]+\.apps\.googleusercontent\.com$/.test(clientId)) throw new Error('invalid_credentials');
+    return { clientId, clientSecret: rawSecret.trim() };
+  }
+
+  async function importGoogleDesktopCredentials(input) {
+    const file = input?.files?.[0];
+    if (input) input.value = '';
+    if (!file || state.googleManagedClient || state.googleOAuthBusy || state.googleCredentialImporting) return;
+    const idField = document.getElementById('planner-google-client-id');
+    const secretField = document.getElementById('planner-google-client-secret');
+    const button = document.getElementById('btn-planner-google-import');
+    if (!idField || !secretField) return;
+    const originalId = idField.value;
+    const originalSecret = secretField.value;
+    state.googleCredentialImporting = true;
+    if (button) button.disabled = true;
+    try {
+      if (!Number.isFinite(file.size) || file.size <= 0 || file.size > 65536) throw new Error('invalid_credentials');
+      const credentials = parseGoogleDesktopCredentials(await readFileText(file));
+      if (state.googleManagedClient || state.googleOAuthBusy || idField.value !== originalId || secretField.value !== originalSecret) return;
+      idField.value = credentials.clientId;
+      secretField.value = credentials.clientSecret;
+      googleStatus(t('planner.googleCredentialsImported'), 'success');
+    } catch {
+      // Do not display parser errors or file contents: they may contain secrets.
+      if (!state.googleOAuthBusy) googleStatus(t('planner.googleCredentialsInvalid'), 'error');
+    } finally {
+      state.googleCredentialImporting = false;
+      if (button) button.disabled = state.googleOAuthBusy;
+    }
+  }
+
   async function connectGoogle() {
+    if (state.googleOAuthBusy || state.googleCredentialImporting) return;
     const clientId = document.getElementById('planner-google-client-id')?.value.trim() || '';
     const clientSecret = document.getElementById('planner-google-client-secret')?.value.trim() || '';
     const loginHint = document.getElementById('planner-google-login-hint')?.value.trim() || '';
@@ -1539,7 +1595,7 @@
       document.getElementById('planner-google-client-id')?.focus();
       return;
     }
-    // Le secret n'est pas requis pour un client natif public avec PKCE.
+    // PKCE reste obligatoire ; le secret est transmis si le client Google en possède un.
     setGoogleOAuthBusy(true);
     googleStatus(t('planner.googleConnecting'), 'info');
     try {
@@ -2265,6 +2321,9 @@
     }
 
     document.getElementById('btn-planner-refresh')?.addEventListener('click', syncAllExternalCalendars);
+    document.getElementById('btn-planner-google-import')?.addEventListener('click', () => document.getElementById('planner-google-credentials-file')?.click());
+    document.getElementById('planner-google-credentials-file')?.addEventListener('change', event => importGoogleDesktopCredentials(event.target));
+    document.getElementById('btn-planner-google-console')?.addEventListener('click', () => App.openExternal('https://console.cloud.google.com/auth/clients'));
     document.getElementById('btn-planner-google-connect')?.addEventListener('click', connectGoogle);
     document.getElementById('btn-planner-google-cancel')?.addEventListener('click', cancelGoogleConnection);
     document.getElementById('btn-planner-google-sync-all')?.addEventListener('click', syncAllGoogleConnections);

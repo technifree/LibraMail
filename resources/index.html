@@ -1711,7 +1711,12 @@
             <button class="btn hidden" id="btn-planner-google-cancel" type="button"><i class="fa-solid fa-xmark"></i><span data-i18n="planner.googleCancelConnection"></span></button>
             <button class="btn primary" id="btn-planner-google-connect" type="button"><i class="fa-brands fa-google"></i><span data-i18n="planner.googleConnect"></span></button>
           </div>
-          <div class="planner-google-help"><i class="fa-solid fa-circle-info"></i><span data-i18n="planner.googleClientIdHelp"></span></div>
+          <div class="planner-google-help" id="planner-google-manual-help"><i class="fa-solid fa-circle-info"></i><span data-i18n="planner.googleClientIdHelp"></span></div>
+          <div id="planner-google-credential-tools" class="planner-google-help" style="flex-wrap:wrap;align-items:center">
+            <input id="planner-google-credentials-file" type="file" accept=".json,application/json" class="hidden">
+            <button type="button" class="btn compact" id="btn-planner-google-console"><i class="fa-solid fa-arrow-up-right-from-square"></i><span data-i18n="planner.googleConsoleOpen"></span></button>
+            <button type="button" class="btn compact" id="btn-planner-google-import"><i class="fa-solid fa-file-import"></i><span data-i18n="planner.googleCredentialsImport"></span></button>
+          </div>
           <div class="planner-google-help hidden" id="planner-google-managed-help"><i class="fa-solid fa-shield-halved"></i><span data-i18n="planner.googleManagedClient"></span></div>
           <div class="planner-google-help"><i class="fa-solid fa-arrows-rotate"></i><span data-i18n="planner.googleWriteHelp"></span></div>
         </div>

@@ -4126,7 +4126,8 @@ const methods = {
   }),
   'calendar.google.oauth.begin': async ({ clientId = '', clientSecret = '', loginHint = '' } = {}) => {
     const publicClientId = String(process.env.LIBRAMAIL_GOOGLE_CALENDAR_CLIENT_ID || '').trim();
-    const flow = await googleCalendarOAuthManager.begin({ clientId: publicClientId || clientId, clientSecret: publicClientId ? '' : clientSecret, loginHint });
+    const managedSecret = publicClientId ? String(process.env.LIBRAMAIL_GOOGLE_CALENDAR_CLIENT_SECRET || '').trim() : '';
+    const flow = await googleCalendarOAuthManager.begin({ clientId: publicClientId || clientId, clientSecret: publicClientId ? managedSecret : clientSecret, loginHint });
     try {
       await openExternalWithSystem(flow.authUrl);
     } catch (error) {
