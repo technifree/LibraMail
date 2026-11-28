@@ -13,6 +13,7 @@ const { simpleParser } = require('mailparser');
 
 const db = require('./lib/db');
 const imap = require('./lib/imap');
+const gmailPolicy = require('./lib/mail_gmail_policy');
 const imapMigration = require('./lib/imap_migration');
 const imapMigrationHistory = require('./lib/imap_migration_history');
 const pop3 = require('./lib/pop3');
@@ -1825,6 +1826,7 @@ async function moveMessagesToTrash(messages, { source = 'manual', onProgress = n
   const localDeletedIds = [];
   const affectedAccounts = new Set();
   const errors = [];
+  const gmailMaps = new Map();
 
   // Plusieurs dossiers IMAP peuvent être traités en parallèle, sans ouvrir
   // plus de trois connexions simultanées pour préserver les serveurs.
@@ -1851,7 +1853,13 @@ async function moveMessagesToTrash(messages, { source = 'manual', onProgress = n
             localMovedIds.push(...ids);
           }
         } else {
-          const folders = await ensureFolderMap(account);
+          // Refresh Gmail's authoritative special-use map once per account
+          // and operation, even if a legacy map is already cached.
+          const gmail = gmailPolicy.isGmailImap(account);
+          if (gmail && !gmailMaps.has(account.id)) {
+            gmailMaps.set(account.id, ensureFolderMap(account, { force: true }));
+          }
+          const folders = gmail ? await gmailMaps.get(account.id) : await ensureFolderMap(account);
           if (account.receiveProtocol === 'pop3') {
             const ids = group.map(message => message.id);
             if (first.folder_role === 'trash') localDeletedIds.push(...ids);
@@ -1861,7 +1869,19 @@ async function moveMessagesToTrash(messages, { source = 'manual', onProgress = n
             }
           } else {
             const uids = group.map(message => message.uid);
-            if (first.folder_role === 'trash' || !folders.trash || first.folder === folders.trash) {
+            if (gmail) {
+              const mode = gmailPolicy.deletionMode(folders, first);
+              // All rows share a folder, but stale local roles must not turn a
+              // normal deletion into a permanent deletion.
+              if (!group.every(message => gmailPolicy.deletionMode(folders, message) === mode)) {
+                throw new Error('Dossier Gmail incohérent. Actualisez le compte.');
+              }
+              if (mode === 'delete') await imap.deleteUids(account, first.folder, uids);
+              else {
+                await imap.moveUids(account, first.folder, uids, folders.trash);
+                affectedAccounts.add(account.id);
+              }
+            } else if (first.folder_role === 'trash' || !folders.trash || first.folder === folders.trash) {
               await imap.deleteUids(account, first.folder, uids);
             } else {
               await imap.moveUids(account, first.folder, uids, folders.trash);
@@ -2038,7 +2058,11 @@ async function emptyTrash({ source = 'manual', onProgress = null } = {}) {
     }
 
     let folders;
-    try { folders = await ensureFolderMap(account); }
+    const gmail = gmailPolicy.isGmailImap(account);
+    try {
+      folders = await ensureFolderMap(account, { force: gmail });
+      if (gmail) gmailPolicy.requireTrash(folders);
+    }
     catch (error) {
       errors.push({ accountId: account.id, error: error.message });
       continue;
@@ -2058,7 +2082,7 @@ async function emptyTrash({ source = 'manual', onProgress = null } = {}) {
 
     const candidates = new Set();
     if (folders.trash) candidates.add(folders.trash);
-    for (const group of localByAccountFolder.values()) {
+    for (const group of gmail ? [] : localByAccountFolder.values()) {
       if (group[0]?.account_id === account.id && !isLocalImportedMessage(group[0])) {
         candidates.add(group[0].folder);
       }

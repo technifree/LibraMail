@@ -5,6 +5,7 @@
  */
 'use strict';
 const { ImapFlow } = require('imapflow');
+const gmailPolicy = require('./mail_gmail_policy');
 const mailAuth = require('./mail_auth'); // LibraMail 0.5.1 — socle d'authentification mail
 const { simpleParser } = require('mailparser');
 const db = require('./db');
@@ -1009,7 +1010,8 @@ async function listFolders(account, { signal = null, requireStartTls = false } =
 }
 
 async function resolveFolderMap(account, options = {}) {
-  return buildFolderMap(await listFolders(account, options));
+  const folders = await listFolders(account, options);
+  return gmailPolicy.isGmailImap(account) ? gmailPolicy.folderMap(folders) : buildFolderMap(folders);
 }
 
 async function serverAction(account, folder, uid, action) {
@@ -1138,6 +1140,8 @@ async function appendSentCopy(account, folder, raw, messageId = null) {
       }
     }
     if (exists.length) return { appended: false, reason: 'already-present' };
+    // Google SMTP saves its own copy. A search miss may simply be a delay.
+    if (gmailPolicy.serverStoresSent(account)) return { appended: false, reason: 'server-managed' };
     await client.append(folder, raw, ['\\Seen'], new Date());
     return { appended: true };
   } finally {

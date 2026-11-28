@@ -104,6 +104,14 @@ Document technique de préparation, établi à partir de l'archive transmise sou
 - Tests simulés ; qualification réelle de l’ajout, envoi/réception et vérification des libellés/dossiers Gmail à réaliser. OAuth2 Gmail hors de ce lot ; Google recommande OAuth2 lorsque disponible.
 - Références : https://support.google.com/accounts/answer/185833 et https://support.google.com/mail/answer/7126229.
 
+### Phase D2 — Dossiers spéciaux et protection des opérations Gmail
+
+- Pour IMAP Gmail, privilégier les attributs SPECIAL-USE explicites : pas de déduction d'une corbeille depuis le nom d'un libellé, ni de sélection des dossiers non sélectionnables ou ambigus. La relève reste limitée à INBOX, Sent, Trash et Junk ; All Mail, les autres libellés et les brouillons distants ne sont pas ajoutés dans ce lot.
+- Avant suppression ou vidage de corbeille Gmail, redécouvrir les dossiers ; aucun effacement direct en cas de corbeille absente ou incohérente. Le vidage ne peut pas cibler un ancien dossier simplement marqué corbeille dans le cache. Pas de suppression de doublons historiques.
+- Lorsque les serveurs IMAP/SMTP Gmail et les identifiants de connexion correspondent, laisser Google enregistrer le message envoyé. Ne pas envoyer APPEND même si la recherche Message-ID ne trouve pas encore la copie. Les autres configurations et POP3 conservent leur comportement.
+- Tests simulés des dossiers localisés, libellés trompeurs, absence de corbeille, opérations groupées et copies envoyées. Qualification réelle sur compte de test Gmail encore nécessaire. Pas de gestion nouvelle des libellés, d'archivage Gmail ou de brouillons distants.
+- Références : https://developers.google.com/workspace/gmail/imap/imap-extensions et https://support.google.com/mail/answer/78892?hl=fr.
+
 ### Phase F — Filtrage rapide par expéditeur (à développer)
 
 - Action directe sur l'expéditeur depuis la liste des messages ou la lecture ; conserver une action contextuelle et permettre l'extension explicite à tous les comptes.
